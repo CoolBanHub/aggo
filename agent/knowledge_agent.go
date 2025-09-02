@@ -16,8 +16,9 @@ import (
 )
 
 type KnowledgeAgent struct {
-	name        string
-	description string
+	name         string
+	description  string
+	systemPrompt string
 
 	knowledgeManager *knowledge.KnowledgeManager
 
@@ -63,6 +64,7 @@ func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel, knowl
         - If search results are sparse or contradictory, acknowledge limitations in your response.
         - Synthesize information from multiple sources rather than relying on a single document.`
 	this.description = description
+	this.systemPrompt = description
 
 	reactAgent, err := react.NewAgent(ctx, &react.AgentConfig{
 		ToolCallingModel: cm,
@@ -71,6 +73,7 @@ func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel, knowl
 		},
 		ToolReturnDirectly: map[string]struct{}{},
 		MessageModifier: func(ctx context.Context, input []*schema.Message) []*schema.Message {
+
 			return input
 		},
 	})
@@ -90,6 +93,18 @@ func (this *KnowledgeAgent) Generate(ctx context.Context, input []*schema.Messag
 
 func (this *KnowledgeAgent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
 	return this.agent.Stream(ctx, input)
+}
+
+func (this *KnowledgeAgent) inputMessageModifier(ctx context.Context, input []*schema.Message) ([]*schema.Message, error) {
+	var _input []*schema.Message
+	_input = input
+	_input = append([]*schema.Message{
+		{
+			Role:    schema.System,
+			Content: this.systemPrompt,
+		},
+	}, _input...)
+	return _input, nil
 }
 
 func (this *KnowledgeAgent) NewSpecialist() *host.Specialist {
