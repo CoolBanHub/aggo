@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/cloudwego/eino/schema"
 )
 
 func GetSellTool() []tool.BaseTool {
@@ -80,7 +81,15 @@ func (this *ShellTool) newShellSystemInfoTool() tool.InvokableTool {
 func (this *ShellTool) newShellProcessesTool() tool.InvokableTool {
 	name := "shell_list_processes"
 	desc := "列出系统上运行的进程。以平台特定的格式返回进程信息（Unix系统上使用ps aux，Windows上使用tasklist）。"
-	t, _ := utils.InferTool(name, desc, this.listProcesses)
+
+	t := utils.NewTool(&schema.ToolInfo{
+		Name: name,
+		Desc: desc,
+		ParamsOneOf: schema.NewParamsOneOfByParams(
+			map[string]*schema.ParameterInfo{},
+		),
+	}, this.listProcesses)
+
 	return t
 }
 
