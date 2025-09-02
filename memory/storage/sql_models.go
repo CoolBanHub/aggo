@@ -32,7 +32,7 @@ type SessionSummaryModel struct {
 
 // TableName 指定表名
 func (SessionSummaryModel) TableName() string {
-	return "session_summaries"
+	return "aggo_session_summaries"
 }
 
 // ConversationMessageModel GORM模型 - 对话消息表
