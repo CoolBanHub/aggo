@@ -4,6 +4,7 @@ import (
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/flow/agent/multiagent/host"
 )
 
 type Option func(*Agent)
@@ -59,5 +60,11 @@ func WithSystemPrompt(systemPrompt string) Option {
 func WithKnowledgeQueryConfig(config *KnowledgeQueryConfig) Option {
 	return func(agent *Agent) {
 		agent.knowledgeConfig = config
+	}
+}
+
+func WithSpecialists(specialist []*host.Specialist) Option {
+	return func(agent *Agent) {
+		agent.specialist = specialist
 	}
 }

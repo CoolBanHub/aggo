@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/memory"
@@ -10,6 +11,10 @@ import (
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/xmkuban/utils/utils"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	schemaGrom "gorm.io/gorm/schema"
 )
 
 func main() {
@@ -19,10 +24,12 @@ func main() {
 		log.Fatalf("new chat model fail,err:%s", err)
 		return
 	}
-	s, err := storage.NewSQLStore(&storage.SQLConfig{
-		Dialect: "mysql",
-		DSN:     "root:123456@tcp(localhost:3306)/test_agent?charset=utf8mb4&parseTime=True&loc=Local",
-	})
+	gormSql, err := NewMysqlGrom("mysql://root:123456@localhost:3306/aggo", logger.Silent)
+	if err != nil {
+		log.Fatalf("创建数据库连接失败: %v", err)
+		return
+	}
+	s, err := storage.NewGormStorage(gormSql)
 	if err != nil {
 		log.Fatalf("new sql store fail,err:%s", err)
 		return
@@ -73,4 +80,31 @@ func main() {
 		}
 		log.Printf("AI:%s", out.Content)
 	}
+}
+
+func NewMysqlGrom(source string, logLevel logger.LogLevel) (*gorm.DB, error) {
+	if !strings.Contains(source, "parseTime") {
+		source += "?charset=utf8mb4&parseTime=True&loc=Local"
+	}
+	gdb, err := gorm.Open(mysql.Open(source), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		NamingStrategy: schemaGrom.NamingStrategy{
+			SingularTable: true,
+		},
+	})
+	if err != nil {
+		panic("数据库连接失败: " + err.Error())
+	}
+
+	// 配置GORM日志
+	var gormLogger logger.Interface
+	if logLevel > 0 {
+		gormLogger = logger.Default.LogMode(logLevel)
+	} else {
+		gormLogger = logger.Default.LogMode(logger.Silent)
+	}
+
+	gdb.Logger = gormLogger
+
+	return gdb, nil
 }

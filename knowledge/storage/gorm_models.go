@@ -20,7 +20,7 @@ type DocumentModel struct {
 
 // TableName 指定表名
 func (DocumentModel) TableName() string {
-	return "knowledge_documents"
+	return "aggo_knowledge_documents"
 }
 
 // SetMetadata 设置元数据（从 map 转为 JSON 字符串）

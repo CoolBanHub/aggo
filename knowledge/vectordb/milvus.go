@@ -20,29 +20,16 @@ type MilvusVectorDB struct {
 
 // MilvusConfig Milvus连接配置
 type MilvusConfig struct {
-	Address        string `json:"address"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	DBName         string `json:"dbName"`
+	Client         *milvusclient.Client
 	CollectionName string `json:"collectionName"`
 	EmbeddingDim   int    `json:"embeddingDim"`
 }
 
 // NewMilvusVectorDB 创建Milvus向量数据库实例
 func NewMilvusVectorDB(config MilvusConfig) (*MilvusVectorDB, error) {
-	client, err := milvusclient.New(context.Background(), &milvusclient.ClientConfig{
-		Address:  config.Address,
-		Username: config.Username,
-		Password: config.Password,
-		DBName:   config.DBName,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("连接Milvus失败: %w", err)
-	}
-
 	db := &MilvusVectorDB{
-		client:         client,
-		collectionName: config.CollectionName,
+		client:         config.Client,
+		collectionName: "aggo_" + config.CollectionName,
 		embeddingDim:   config.EmbeddingDim,
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/knowledge"
@@ -11,6 +12,11 @@ import (
 	"github.com/CoolBanHub/aggo/knowledge/vectordb"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	schemaGrom "gorm.io/gorm/schema"
 )
 
 func main() {
@@ -28,11 +34,21 @@ func main() {
 		log.Fatalf("创建嵌入模型失败: %v", err)
 		return
 	}
+
+	gormSql, err := NewMysqlGrom("mysql://root:123456@localhost:3306/aggo", logger.Silent)
+
+	client, err := milvusclient.New(context.Background(), &milvusclient.ClientConfig{
+		Address: "127.0.0.1:19530",
+		DBName:  "",
+	})
+	if err != nil {
+		return
+	}
+
 	// 2. 创建向量数据库（使用 Milvus）
 	vectorDB, err := vectordb.NewMilvusVectorDB(vectordb.MilvusConfig{
-		Address:        "127.0.0.1:19530",
+		Client:         client,
 		EmbeddingDim:   1024,
-		DBName:         "", // 使用默认数据库
 		CollectionName: "aggo",
 	})
 	if err != nil {
@@ -40,7 +56,7 @@ func main() {
 		return
 	}
 
-	_storage, err := storage.NewMySQLStorage("127.0.0.1", 3306, "aggo", "root", "123456")
+	_storage, err := storage.NewGormStorage(gormSql)
 	if err != nil {
 		log.Fatalf("创建存储失败: %v", err)
 		return
@@ -142,4 +158,31 @@ func main() {
 
 		log.Printf("AI助手: %s", response.Content)
 	}
+}
+
+func NewMysqlGrom(source string, logLevel logger.LogLevel) (*gorm.DB, error) {
+	if !strings.Contains(source, "parseTime") {
+		source += "?charset=utf8mb4&parseTime=True&loc=Local"
+	}
+	gdb, err := gorm.Open(mysql.Open(source), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		NamingStrategy: schemaGrom.NamingStrategy{
+			SingularTable: true,
+		},
+	})
+	if err != nil {
+		panic("数据库连接失败: " + err.Error())
+	}
+
+	// 配置GORM日志
+	var gormLogger logger.Interface
+	if logLevel > 0 {
+		gormLogger = logger.Default.LogMode(logLevel)
+	} else {
+		gormLogger = logger.Default.LogMode(logger.Silent)
+	}
+
+	gdb.Logger = gormLogger
+
+	return gdb, nil
 }

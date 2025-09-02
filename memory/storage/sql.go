@@ -7,174 +7,33 @@ import (
 	"time"
 
 	"github.com/CoolBanHub/aggo/memory"
-	"gorm.io/driver/mysql"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
-
-// SQLDialect SQL数据库方言类型
-type SQLDialect string
 
 const (
 	// DialectMySQL MySQL方言
-	DialectMySQL SQLDialect = "mysql"
+	DialectMySQL string = "mysql"
 	// DialectPostgreSQL PostgreSQL方言
-	DialectPostgreSQL SQLDialect = "postgres"
+	DialectPostgreSQL string = "postgres"
 	// DialectSQLite SQLite方言
-	DialectSQLite SQLDialect = "sqlite"
+	DialectSQLite string = "sqlite"
 )
 
 // SQLStore 通用SQL存储实现
 // 支持MySQL、PostgreSQL和SQLite
 type SQLStore struct {
-	db      *gorm.DB
-	config  *SQLConfig
-	dialect SQLDialect
+	db *gorm.DB
 }
 
-// SQLConfig SQL数据库配置选项
-type SQLConfig struct {
-	// 数据库方言 (mysql/postgres/sqlite)
-	Dialect SQLDialect `json:"dialect"`
-	// 连接DSN (Data Source Name)
-	// MySQL: user:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=Local
-	// PostgreSQL: host=localhost user=gorm password=gorm dbname=gorm port=9920 sslmode=disable TimeZone=Asia/Shanghai
-	// SQLite: file:test.db?cache=shared&mode=rwc
-	DSN string `json:"dsn"`
-	// 最大空闲连接数
-	MaxIdleConns int `json:"maxIdleConns"`
-	// 最大打开连接数
-	MaxOpenConns int `json:"maxOpenConns"`
-	// 连接最大生存时间
-	ConnMaxLifetime time.Duration `json:"connMaxLifetime"`
-	// 是否启用日志
-	EnableLog bool `json:"enableLog"`
-	// 日志级别
-	LogLevel logger.LogLevel `json:"logLevel"`
-}
+// NewGormStorage 创建新的SQL存储实例
+func NewGormStorage(db *gorm.DB) (*SQLStore, error) {
 
-// DefaultSQLConfig 默认SQL配置
-func DefaultSQLConfig(dialect SQLDialect) *SQLConfig {
-	config := &SQLConfig{
-		Dialect:         dialect,
-		MaxIdleConns:    10,
-		MaxOpenConns:    100,
-		ConnMaxLifetime: time.Hour,
-		EnableLog:       true,
-		LogLevel:        logger.Info,
-	}
-
-	switch dialect {
-	case DialectMySQL:
-		config.DSN = "user:password@tcp(localhost:3306)/aggo?charset=utf8mb4&parseTime=True&loc=Local"
-	case DialectPostgreSQL:
-		config.DSN = "host=localhost user=aggo password=aggo dbname=aggo port=5432 sslmode=disable TimeZone=Asia/Shanghai"
-	case DialectSQLite:
-		config.DSN = "file:aggo.db?cache=shared&mode=rwc"
-	}
-
-	return config
-}
-
-// NewSQLStore 创建新的SQL存储实例
-func NewSQLStore(config *SQLConfig) (*SQLStore, error) {
-	if config == nil {
-		return nil, errors.New("配置不能为空")
-	}
-	if config.Dialect == "" {
-		return nil, errors.New("数据库方言不能为空")
-	}
-
-	// 配置GORM日志
-	var gormLogger logger.Interface
-	if config.EnableLog {
-		gormLogger = logger.Default.LogMode(config.LogLevel)
-	} else {
-		gormLogger = logger.Default.LogMode(logger.Silent)
-	}
-
-	// 根据方言选择驱动
-	var dialector gorm.Dialector
-	switch config.Dialect {
-	case DialectMySQL:
-		dialector = mysql.Open(config.DSN)
-	case DialectPostgreSQL:
-		dialector = postgres.Open(config.DSN)
-	case DialectSQLite:
-		dialector = sqlite.Open(config.DSN)
-	default:
-		return nil, fmt.Errorf("不支持的数据库方言: %s", config.Dialect)
-	}
-
-	// 连接数据库
-	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger: gormLogger,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("%s连接失败: %v", config.Dialect, err)
-	}
-
-	// 获取底层sql.DB以配置连接池（SQLite不支持连接池）
-	if config.Dialect != DialectSQLite {
-		sqlDB, err := db.DB()
-		if err != nil {
-			return nil, fmt.Errorf("获取SQL数据库实例失败: %v", err)
-		}
-
-		// 设置连接池参数
-		sqlDB.SetMaxIdleConns(config.MaxIdleConns)
-		sqlDB.SetMaxOpenConns(config.MaxOpenConns)
-		sqlDB.SetConnMaxLifetime(config.ConnMaxLifetime)
-
-		// 测试连接
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := sqlDB.PingContext(ctx); err != nil {
-			return nil, fmt.Errorf("%s连接测试失败: %v", config.Dialect, err)
-		}
-	}
-
-	store := &SQLStore{
-		db:      db,
-		config:  config,
-		dialect: config.Dialect,
-	}
-
-	// 自动迁移表结构
-	if err := store.migrate(); err != nil {
-		return nil, fmt.Errorf("数据库迁移失败: %v", err)
-	}
-
-	return store, nil
-}
-
-// NewSQLStoreWithDB 使用现有的 GORM 实例创建SQL存储实例
-// 这允许多个存储实例共享同一个数据库连接
-func NewSQLStoreWithDB(db *gorm.DB, dialect SQLDialect) (*SQLStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database instance cannot be nil")
 	}
 
-	if dialect == "" {
-		return nil, fmt.Errorf("dialect cannot be empty")
-	}
-
-	// 创建默认配置，但不包含连接相关的配置
-	config := &SQLConfig{
-		Dialect:         dialect,
-		MaxIdleConns:    10,
-		MaxOpenConns:    100,
-		ConnMaxLifetime: time.Hour,
-		EnableLog:       true,
-		LogLevel:        logger.Info,
-	}
-
 	store := &SQLStore{
-		db:      db,
-		config:  config,
-		dialect: dialect,
+		db: db,
 	}
 
 	// 自动迁移表结构
@@ -224,7 +83,7 @@ func (s *SQLStore) SaveUserMemory(ctx context.Context, memory *memory.UserMemory
 
 	// 保存到数据库
 	if err := s.db.WithContext(ctx).Create(model).Error; err != nil {
-		return fmt.Errorf("保存记忆到%s失败: %v", s.dialect, err)
+		return fmt.Errorf("保存记忆到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
 	return nil
@@ -297,7 +156,7 @@ func (s *SQLStore) UpdateUserMemory(ctx context.Context, userMemory *memory.User
 
 	// 更新数据库
 	if err := s.db.WithContext(ctx).Save(model).Error; err != nil {
-		return fmt.Errorf("更新记忆到%s失败: %v", s.dialect, err)
+		return fmt.Errorf("更新记忆到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
 	return nil
@@ -365,7 +224,7 @@ func (s *SQLStore) SearchUserMemories(ctx context.Context, userID string, query 
 
 	// 根据数据库类型使用不同的搜索语法
 	dbQuery := s.db.WithContext(ctx).Where("user_id = ?", userID)
-	if s.dialect == DialectPostgreSQL {
+	if s.db.Config.Dialector.Name() == DialectPostgreSQL {
 		// PostgreSQL使用ILIKE进行大小写不敏感的搜索
 		dbQuery = dbQuery.Where("memory ILIKE ? OR input ILIKE ?", searchQuery, searchQuery)
 	} else {
@@ -417,7 +276,7 @@ func (s *SQLStore) SaveSessionSummary(ctx context.Context, summary *memory.Sessi
 
 	// 使用UPSERT语义
 	if err := s.db.WithContext(ctx).Save(model).Error; err != nil {
-		return fmt.Errorf("保存会话摘要到%s失败: %v", s.dialect, err)
+		return fmt.Errorf("保存会话摘要到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
 	return nil
@@ -476,7 +335,7 @@ func (s *SQLStore) UpdateSessionSummary(ctx context.Context, summary *memory.Ses
 
 	// 更新数据库
 	if err := s.db.WithContext(ctx).Save(model).Error; err != nil {
-		return fmt.Errorf("更新会话摘要到%s失败: %v", s.dialect, err)
+		return fmt.Errorf("更新会话摘要到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
 	return nil
@@ -530,7 +389,7 @@ func (s *SQLStore) SaveMessage(ctx context.Context, message *memory.Conversation
 
 	// 保存到数据库
 	if err := s.db.WithContext(ctx).Create(model).Error; err != nil {
-		return fmt.Errorf("保存消息到%s失败: %v", s.dialect, err)
+		return fmt.Errorf("保存消息到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
 	return nil
@@ -586,7 +445,7 @@ func (s *SQLStore) DeleteMessages(ctx context.Context, sessionID string, userID 
 
 // Close 关闭数据库连接
 func (s *SQLStore) Close() error {
-	if s.dialect == DialectSQLite {
+	if s.db.Config.Dialector.Name() == DialectSQLite {
 		// SQLite不需要关闭连接池
 		return nil
 	}
@@ -599,7 +458,7 @@ func (s *SQLStore) Close() error {
 
 // Health 检查数据库健康状态
 func (s *SQLStore) Health(ctx context.Context) error {
-	if s.dialect == DialectSQLite {
+	if s.db.Config.Dialector.Name() == DialectSQLite {
 		// SQLite简单检查
 		var result int
 		return s.db.WithContext(ctx).Raw("SELECT 1").Scan(&result).Error

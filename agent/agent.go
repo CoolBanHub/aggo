@@ -45,6 +45,10 @@ type Agent struct {
 	knowledgeConfig *KnowledgeQueryConfig
 
 	state state
+
+	//多agent的时候 使用
+	multiAgent *host.MultiAgent
+	specialist []*host.Specialist
 }
 
 // KnowledgeQueryConfig 知识库查询配置
@@ -95,25 +99,50 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 		}
 	}
 
-	reactAgent, err := react.NewAgent(ctx, &react.AgentConfig{
-		ToolCallingModel: cm,
-		ToolsConfig: compose.ToolsNodeConfig{
-			Tools: this.tools,
-		},
-		ToolReturnDirectly: map[string]struct{}{},
-		MessageModifier: func(ctx context.Context, input []*schema.Message) []*schema.Message {
-			//这边传递input？
-			if this.knowledgeManager != nil && !this.knowledgeConfig.AlwaysQuery {
-				this.state.Messages = input
-			}
-			return input
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
+	if len(this.specialist) > 0 {
+		tools := make([]*schema.ToolInfo, 0)
+		for _, v := range this.tools {
+			info, _ := v.Info(ctx)
+			tools = append(tools, info)
+		}
+		var err error
+		cm, err = cm.WithTools(tools)
+		if err != nil {
+			return nil, err
+		}
+		h := &host.Host{
+			ToolCallingModel: cm,
+			SystemPrompt:     this.systemPrompt,
+		}
+		multiAgent, err := host.NewMultiAgent(context.Background(), &host.MultiAgentConfig{
+			Host:        *h,
+			Specialists: this.specialist,
+		})
+		if err != nil {
+			return nil, err
+		}
+		this.multiAgent = multiAgent
+	} else {
+		reactAgent, err := react.NewAgent(ctx, &react.AgentConfig{
+			ToolCallingModel: cm,
+			ToolsConfig: compose.ToolsNodeConfig{
+				Tools: this.tools,
+			},
+			ToolReturnDirectly: map[string]struct{}{},
+			MessageModifier: func(ctx context.Context, input []*schema.Message) []*schema.Message {
+				//这边传递input？
+				if this.knowledgeManager != nil && !this.knowledgeConfig.AlwaysQuery {
+					this.state.Messages = input
+				}
+				return input
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
 
-	this.agent = reactAgent
+		this.agent = reactAgent
+	}
 
 	return this, nil
 }
@@ -132,7 +161,12 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message) (*sche
 		return nil, err
 	}
 
-	response, err := this.agent.Generate(ctx, _input, opts)
+	var response *schema.Message
+	if this.multiAgent != nil {
+		response, err = this.multiAgent.Generate(ctx, _input, opts)
+	} else {
+		response, err = this.agent.Generate(ctx, _input, opts)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -161,9 +195,14 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message) (*schema
 		return nil, err
 	}
 
-	// 注意：Stream模式下需要在调用方处理助手消息的存储
-	// 因为流式回复需要等到完整接收后才能存储
-	return this.agent.Stream(ctx, _input, opts)
+	//todo 增加stream的callback
+	var response *schema.StreamReader[*schema.Message]
+	if this.multiAgent != nil {
+		response, err = this.multiAgent.Stream(ctx, _input, opts)
+	} else {
+		response, err = this.agent.Stream(ctx, _input, opts)
+	}
+	return response, err
 }
 
 func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Message) ([]*schema.Message, error) {

@@ -3,11 +3,17 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/knowledge/storage"
 	"github.com/CoolBanHub/aggo/knowledge/vectordb"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	schemaGrom "gorm.io/gorm/schema"
 )
 
 func main() {
@@ -20,9 +26,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("创建嵌入模型失败: %v", err)
 	}
-
+	gormSql, err := NewMysqlGrom("mysql://root:123456@localhost:3306/aggo", logger.Silent)
+	if err != nil {
+		return
+	}
 	// 2. 创建 Storage 层（SQLite）
-	store, err := storage.NewSQLiteStorage("integrated_knowledge.db")
+	store, err := storage.NewGormStorage(gormSql)
 	if err != nil {
 		log.Fatalf("创建存储层失败: %v", err)
 	}
@@ -30,8 +39,16 @@ func main() {
 	log.Println("✓ Storage 层初始化完成")
 
 	// 3. 创建 VectorDB 层（Milvus）
+	client, err := milvusclient.New(context.Background(), &milvusclient.ClientConfig{
+		Address: "127.0.0.1:19530",
+		DBName:  "",
+	})
+	if err != nil {
+		log.Fatalf("创建客户端失败: %v", err)
+		return
+	}
 	vectorDB, err := vectordb.NewMilvusVectorDB(vectordb.MilvusConfig{
-		Address:        "127.0.0.1:19530",
+		Client:         client,
 		CollectionName: "knowledge_vectors",
 		EmbeddingDim:   1024, // 根据嵌入模型维度设置
 	})
@@ -157,4 +174,31 @@ func main() {
 	log.Println("✓ VectorDB 层专门处理向量数据和语义搜索")
 	log.Println("✓ KnowledgeManager 协调两个存储层，提供统一接口")
 	log.Println("✓ 数据职责分离明确，各层可独立扩展和优化")
+}
+
+func NewMysqlGrom(source string, logLevel logger.LogLevel) (*gorm.DB, error) {
+	if !strings.Contains(source, "parseTime") {
+		source += "?charset=utf8mb4&parseTime=True&loc=Local"
+	}
+	gdb, err := gorm.Open(mysql.Open(source), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		NamingStrategy: schemaGrom.NamingStrategy{
+			SingularTable: true,
+		},
+	})
+	if err != nil {
+		panic("数据库连接失败: " + err.Error())
+	}
+
+	// 配置GORM日志
+	var gormLogger logger.Interface
+	if logLevel > 0 {
+		gormLogger = logger.Default.LogMode(logLevel)
+	} else {
+		gormLogger = logger.Default.LogMode(logger.Silent)
+	}
+
+	gdb.Logger = gormLogger
+
+	return gdb, nil
 }

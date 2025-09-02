@@ -6,50 +6,23 @@ import (
 	"strings"
 
 	"github.com/CoolBanHub/aggo/knowledge"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
 // GormStorage GORM 存储实现
 type GormStorage struct {
-	db     *gorm.DB
-	config *Config
+	db *gorm.DB
 }
 
-// NewGormStorage 创建 GORM 存储实例
-func NewGormStorage(config *Config) (*GormStorage, error) {
-	db, err := config.NewGORMDB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create database connection: %w", err)
-	}
-
-	storage := &GormStorage{
-		db:     db,
-		config: config,
-	}
-
-	// 自动迁移数据库表结构
-	if err := storage.AutoMigrate(); err != nil {
-		return nil, fmt.Errorf("failed to auto migrate: %w", err)
-	}
-
-	return storage, nil
-}
-
-// NewGormStorageWithDB 使用现有的 GORM 实例创建存储实例
-// 这允许多个存储实例共享同一个数据库连接
-func NewGormStorageWithDB(db *gorm.DB, config *Config) (*GormStorage, error) {
+// NewGormStorage 使用现有的 GORM 实例创建存储实例
+func NewGormStorage(db *gorm.DB) (*GormStorage, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database instance cannot be nil")
 	}
 
-	// 如果没有提供配置，创建一个默认配置
-	if config == nil {
-		config = DefaultConfig()
-	}
-
 	storage := &GormStorage{
-		db:     db,
-		config: config,
+		db: db,
 	}
 
 	// 自动迁移数据库表结构
@@ -218,14 +191,14 @@ func (gs *GormStorage) SearchDocuments(ctx context.Context, query string, limit 
 	dbQuery := gs.db.WithContext(ctx).Model(&DocumentModel{})
 
 	// 根据数据库类型使用不同的搜索策略
-	switch gs.config.Type {
-	case MySQL:
+	switch gs.db.Config.Dialector.Name() {
+	case mysql.DefaultDriverName:
 		// MySQL 使用 MATCH AGAINST 或 LIKE
 		dbQuery = dbQuery.Where("content LIKE ?", "%"+query+"%")
-	case PostgreSQL:
+	case "postgres":
 		// PostgreSQL 使用 ILIKE 进行大小写不敏感搜索
 		dbQuery = dbQuery.Where("content ILIKE ?", "%"+query+"%")
-	case SQLite:
+	case "sqlite":
 		// SQLite 使用 LIKE
 		dbQuery = dbQuery.Where("content LIKE ?", "%"+strings.ToLower(query)+"%")
 	default:
@@ -267,11 +240,6 @@ func (gs *GormStorage) Close() error {
 // GetDB 获取底层 GORM 数据库实例（用于高级操作）
 func (gs *GormStorage) GetDB() *gorm.DB {
 	return gs.db
-}
-
-// GetConfig 获取数据库配置
-func (gs *GormStorage) GetConfig() *Config {
-	return gs.config
 }
 
 // Count 获取文档总数

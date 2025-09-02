@@ -22,3 +22,27 @@ func WithModel(model string) OptionFunc {
 		option.Model = model
 	}
 }
+
+func WithBaseUrl(baseUrl string) OptionFunc {
+	return func(option *Option) {
+		option.BaseUrl = baseUrl
+	}
+}
+
+func WithAPIKey(apiKey string) OptionFunc {
+	return func(option *Option) {
+		option.APIKey = apiKey
+	}
+}
+
+func WithAPIVersion(apiVersion string) OptionFunc {
+	return func(option *Option) {
+		option.APIVersion = apiVersion
+	}
+}
+
+func WithAzure(byAzure bool) OptionFunc {
+	return func(option *Option) {
+		option.ByAzure = byAzure
+	}
+}

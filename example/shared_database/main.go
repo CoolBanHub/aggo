@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/CoolBanHub/aggo/agent"
@@ -14,10 +15,11 @@ import (
 	memorystorage "github.com/CoolBanHub/aggo/memory/storage"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"gorm.io/driver/mysql"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	schemaGrom "gorm.io/gorm/schema"
 )
 
 func main() {
@@ -39,22 +41,19 @@ func main() {
 // sqliteSharedExample SQLite共享数据库示例
 func sqliteSharedExample(ctx context.Context) error {
 	// 1. 创建共享的GORM数据库实例
-	sharedDB, err := gorm.Open(sqlite.Open("shared_aggo.db"), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
+	gormSql, err := NewMysqlGrom("mysql://root:123456@localhost:3306/aggo", logger.Silent)
 	if err != nil {
 		return err
 	}
-
 	// 2. 使用共享数据库创建knowledge存储
-	knowledgeStorage, err := storage.NewStorageWithSharedDB(sharedDB, nil)
+	knowledgeStorage, err := storage.NewGormStorage(gormSql)
 	if err != nil {
 		return err
 	}
 	defer knowledgeStorage.Close()
 
 	// 3. 使用共享数据库创建memory存储
-	memoryStorage, err := memorystorage.NewSQLStoreWithDB(sharedDB, memorystorage.DialectSQLite)
+	memoryStorage, err := memorystorage.NewGormStorage(gormSql)
 	if err != nil {
 		return err
 	}
@@ -66,42 +65,19 @@ func sqliteSharedExample(ctx context.Context) error {
 
 // mysqlSharedExample MySQL共享数据库示例
 func mysqlSharedExample(ctx context.Context) error {
-	// MySQL连接字符串 - 请根据实际情况修改
-	dsn := "root:123456@tcp(localhost:3306)/aggo_shared?charset=utf8mb4&parseTime=True&loc=Local"
-
-	// 1. 创建共享的GORM数据库实例
-	sharedDB, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
-	if err != nil {
-		log.Printf("MySQL连接失败，跳过MySQL示例: %v", err)
-		return nil // 不返回错误，因为可能没有配置MySQL
-	}
-
-	// 配置连接池
-	sqlDB, err := sharedDB.DB()
+	gormSql, err := NewMysqlGrom("mysql://root:123456@localhost:3306/aggo", logger.Silent)
 	if err != nil {
 		return err
 	}
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(50)
-	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// 2. 使用共享数据库创建knowledge存储
-	knowledgeConfig := &storage.Config{
-		Type:         storage.MySQL,
-		MaxOpenConns: 50,
-		MaxIdleConns: 10,
-		LogLevel:     3, // Warn
-	}
-	knowledgeStorage, err := storage.NewStorageWithSharedDB(sharedDB, knowledgeConfig)
+	knowledgeStorage, err := storage.NewGormStorage(gormSql)
 	if err != nil {
 		return err
 	}
 	defer knowledgeStorage.Close()
 
 	// 3. 使用共享数据库创建memory存储
-	memoryStorage, err := memorystorage.NewSQLStoreWithDB(sharedDB, memorystorage.DialectMySQL)
+	memoryStorage, err := memorystorage.NewGormStorage(gormSql)
 	if err != nil {
 		return err
 	}
@@ -122,11 +98,19 @@ func demonstrateSharedUsage(ctx context.Context, knowledgeStorage knowledge.Know
 	}
 
 	// 2. 创建向量数据库（这里仍然独立，因为是不同的存储类型）
+
+	client, err := milvusclient.New(context.Background(), &milvusclient.ClientConfig{
+		Address: "127.0.0.1:19530",
+		DBName:  "",
+	})
+	if err != nil {
+		return err
+	}
+
 	var vectorDB knowledge.VectorDB
 	milvusVectorDB, err := vectordb.NewMilvusVectorDB(vectordb.MilvusConfig{
-		Address:        "127.0.0.1:19530",
+		Client:         client,
 		EmbeddingDim:   1024,
-		DBName:         "", // 使用默认数据库
 		CollectionName: "shared_example",
 	})
 	if err != nil {
@@ -297,4 +281,31 @@ func demonstrateSharedUsage(ctx context.Context, knowledgeStorage knowledge.Know
 
 	log.Println("共享数据库示例完成！")
 	return nil
+}
+
+func NewMysqlGrom(source string, logLevel logger.LogLevel) (*gorm.DB, error) {
+	if !strings.Contains(source, "parseTime") {
+		source += "?charset=utf8mb4&parseTime=True&loc=Local"
+	}
+	gdb, err := gorm.Open(mysql.Open(source), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		NamingStrategy: schemaGrom.NamingStrategy{
+			SingularTable: true,
+		},
+	})
+	if err != nil {
+		panic("数据库连接失败: " + err.Error())
+	}
+
+	// 配置GORM日志
+	var gormLogger logger.Interface
+	if logLevel > 0 {
+		gormLogger = logger.Default.LogMode(logLevel)
+	} else {
+		gormLogger = logger.Default.LogMode(logger.Silent)
+	}
+
+	gdb.Logger = gormLogger
+
+	return gdb, nil
 }
