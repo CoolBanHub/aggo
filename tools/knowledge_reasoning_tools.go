@@ -2,14 +2,12 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/schema"
-	"github.com/eino-contrib/jsonschema"
+	"github.com/cloudwego/eino/components/tool/utils"
 )
 
 // GetKnowledgeReasoningTools 获取知识推理工具集合
@@ -18,17 +16,6 @@ func GetKnowledgeReasoningTools(manager *knowledge.KnowledgeManager) []tool.Base
 		NewKnowledgeThinkTool(manager),
 		NewKnowledgeSearchTool(manager),
 		NewKnowledgeAnalysisTool(manager),
-	}
-}
-
-func GetKnowledgeReasoningToolInfos(ctx context.Context, manager *knowledge.KnowledgeManager) []*schema.ToolInfo {
-	thinkTool, _ := NewKnowledgeThinkTool(manager).Info(ctx)
-	searchTool, _ := NewKnowledgeSearchTool(manager).Info(ctx)
-	analysisTool, _ := NewKnowledgeAnalysisTool(manager).Info(ctx)
-	return []*schema.ToolInfo{
-		thinkTool,
-		searchTool,
-		analysisTool,
 	}
 }
 
@@ -105,56 +92,35 @@ type AnalysisParams struct {
 
 // NewKnowledgeThinkTool 创建知识思考工具实例
 func NewKnowledgeThinkTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	return &KnowledgeThinkTool{
+	this := &KnowledgeThinkTool{
 		manager: manager,
 	}
+	name := "knowledge_think"
+	desc := "用作思考和推理的工具，帮助规划知识探索策略。在需要分析问题、制定搜索策略或完善方法时使用此工具。思考内容不会暴露给用户，仅用于内部推理。"
+	t, _ := utils.InferTool(name, desc, this.think)
+	return t
 }
 
 // NewKnowledgeSearchTool 创建知识搜索工具实例
 func NewKnowledgeSearchTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	return &KnowledgeSearchTool{
+	this := &KnowledgeSearchTool{
 		manager: manager,
 	}
+	name := "knowledge_search"
+	desc := "搜索知识库获取相关信息。在思考后使用此工具多次搜索相关信息。支持多种搜索策略，如精确短语（使用引号）、OR操作符和聚焦关键词。"
+	t, _ := utils.InferTool(name, desc, this.search)
+	return t
 }
 
 // NewKnowledgeAnalysisTool 创建知识分析工具实例
 func NewKnowledgeAnalysisTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	return &KnowledgeAnalysisTool{
+	this := &KnowledgeAnalysisTool{
 		manager: manager,
 	}
-}
-
-// KnowledgeThinkTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *KnowledgeThinkTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name: "knowledge_think",
-		Desc: "用作思考和推理的工具，帮助规划知识探索策略。在需要分析问题、制定搜索策略或完善方法时使用此工具。思考内容不会暴露给用户，仅用于内部推理。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(
-			jsonschema.Reflect(&ThinkParams{}),
-		),
-	}, nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *KnowledgeThinkTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params ThinkParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
-	}
-
-	result, err := t.think(ctx, params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("序列化结果失败: %w", err)
-	}
-
-	return string(resultJSON), nil
+	name := "knowledge_analysis"
+	desc := "分析和评估搜索结果的质量、相关性和完整性。获得搜索结果后使用此工具分析信息质量。如果结果不足，可以返回使用Think或Search工具优化查询。"
+	t, _ := utils.InferTool(name, desc, this.analyze)
+	return t
 }
 
 // think 执行思考操作
@@ -192,39 +158,6 @@ func (t *KnowledgeThinkTool) think(ctx context.Context, params ThinkParams) (*Th
 		Operation:   "Think",
 		Timestamp:   time.Now().Unix(),
 	}, nil
-}
-
-// KnowledgeSearchTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *KnowledgeSearchTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name: "knowledge_search",
-		Desc: "搜索知识库获取相关信息。在思考后使用此工具多次搜索相关信息。支持多种搜索策略，如精确短语（使用引号）、OR操作符和聚焦关键词。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(
-			jsonschema.Reflect(&KnowledgeSearchParams{}),
-		),
-	}, nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *KnowledgeSearchTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params KnowledgeSearchParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
-	}
-
-	result, err := t.search(ctx, params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("序列化结果失败: %w", err)
-	}
-
-	return string(resultJSON), nil
 }
 
 // search 执行搜索操作
@@ -281,39 +214,6 @@ func (t *KnowledgeSearchTool) search(ctx context.Context, params KnowledgeSearch
 		Operation:     "Search",
 		Timestamp:     time.Now().Unix(),
 	}, nil
-}
-
-// KnowledgeAnalysisTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *KnowledgeAnalysisTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name: "knowledge_analysis",
-		Desc: "分析和评估搜索结果的质量、相关性和完整性。获得搜索结果后使用此工具分析信息质量。如果结果不足，可以返回使用Think或Search工具优化查询。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(
-			jsonschema.Reflect(&AnalysisParams{}),
-		),
-	}, nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *KnowledgeAnalysisTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params AnalysisParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
-	}
-
-	result, err := t.analyze(ctx, params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("序列化结果失败: %w", err)
-	}
-
-	return string(resultJSON), nil
 }
 
 // analyze 执行分析操作

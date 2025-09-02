@@ -11,6 +11,8 @@ import (
 	"github.com/CoolBanHub/aggo/knowledge/readers"
 	"github.com/CoolBanHub/aggo/knowledge/storage"
 	"github.com/CoolBanHub/aggo/knowledge/vectordb"
+	"github.com/CoolBanHub/aggo/memory"
+	storage2 "github.com/CoolBanHub/aggo/memory/storage"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/schema"
@@ -115,28 +117,40 @@ func main() {
 			},
 		},
 	}
+	if false {
+		reader := readers.NewInMemoryReader(docs)
+		documents, err := reader.ReadDocuments(ctx)
+		if err != nil {
+			log.Fatalf("读取文档失败: %v", err)
+		}
 
-	reader := readers.NewInMemoryReader(docs)
-	documents, err := reader.ReadDocuments(ctx)
-	if err != nil {
-		log.Fatalf("读取文档失败: %v", err)
+		err = knowledgeManager.LoadDocuments(ctx, documents, knowledge.LoadOptions{
+			Recreate:       true,
+			Upsert:         false,
+			EnableChunking: true, // 禁用分块以简化测试
+		})
+		if err != nil {
+			log.Fatalf("加载文档到知识库失败: %v", err)
+		}
+
+		log.Println("知识库初始化完成，已加载示例文档")
 	}
-
-	err = knowledgeManager.LoadDocuments(ctx, documents, knowledge.LoadOptions{
-		Recreate:       true,
-		Upsert:         false,
-		EnableChunking: true, // 禁用分块以简化测试
-	})
+	s, err := storage2.NewGormStorage(gormSql)
 	if err != nil {
-		log.Fatalf("加载文档到知识库失败: %v", err)
-	}
-
-	log.Println("知识库初始化完成，已加载示例文档")
-	if true {
+		log.Fatalf("new sql store fail,err:%s", err)
 		return
 	}
+	memoryManager := memory.NewMemoryManager(cm, s, &memory.MemoryConfig{
+		EnableSessionSummary: false,
+		EnableUserMemories:   false,
+		MemoryLimit:          8,
+		Retrieval:            memory.RetrievalLastN,
+		AsyncProcessing:      true,
+	})
+	defer memoryManager.Close()
 	// 5. 创建主 Agent，将 KnowledgeAgent 作为工具
 	mainAgent, err := agent.NewAgent(ctx, cm,
+		agent.WithMemoryManager(memoryManager),
 		agent.WithKnowledgeManager(knowledgeManager),
 		agent.WithKnowledgeQueryConfig(&agent.KnowledgeQueryConfig{
 			MaxResults:  3,
@@ -144,6 +158,7 @@ func main() {
 			AlwaysQuery: false,
 		}),
 		agent.WithSystemPrompt("你是一个技术专家助手。当用户询问技术问题时，你应该使用 knowledge_reason 工具来搜索和分析相关信息，然后提供准确的回答。"))
+
 	if err != nil {
 		log.Fatalf("创建主Agent失败: %v", err)
 	}

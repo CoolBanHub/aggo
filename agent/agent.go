@@ -22,29 +22,24 @@ type state struct {
 }
 
 type Agent struct {
-	name        string
-	description string
-
 	systemPrompt string
+	cm           model.ToolCallingChatModel
 
+	userID    string
 	sessionID string //会话id，记忆需要使用
 
 	knowledgeManager *knowledge.KnowledgeManager
-
-	tools []tool.BaseTool
-
-	cm model.ToolCallingChatModel
-
-	agent *react.Agent
-
-	memoryManager *memory.MemoryManager
-
-	userID string
-
 	// 知识库查询配置
 	knowledgeConfig *KnowledgeQueryConfig
 
-	state state
+	memoryManager *memory.MemoryManager
+
+	//作为子agent的时候必须传
+	name        string
+	description string
+
+	tools []tool.BaseTool //只支持单agent的模式下使用
+	agent *react.Agent
 
 	//多agent的时候 使用
 	multiAgent *host.MultiAgent
@@ -77,8 +72,7 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 	if this.sessionID != "" && this.userID == "" {
 		this.userID = this.sessionID
 	}
-
-	if this.knowledgeManager == nil {
+	if this.knowledgeManager != nil {
 		//配置知识库的分析tool
 		if this.knowledgeConfig == nil {
 			// 默认知识库查询配置
@@ -88,33 +82,25 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 				AlwaysQuery: false,
 			}
 		}
-
-		kagent, err := NewKnowledgeAgent(ctx, this.knowledgeManager, this.state)
+		knowagent, err := NewKnowledgeAgent(ctx, cm, this.knowledgeManager)
 		if err != nil {
 			return nil, err
 		}
 
 		if !this.knowledgeConfig.AlwaysQuery {
-			this.tools = append(this.tools, kagent.createTool())
+			if len(this.specialist) > 0 {
+				this.specialist = append(this.specialist, knowagent.NewSpecialist())
+			} else {
+				this.tools = append(this.tools, knowagent.createTool())
+			}
 		}
 	}
-
 	if len(this.specialist) > 0 {
-		tools := make([]*schema.ToolInfo, 0)
-		for _, v := range this.tools {
-			info, _ := v.Info(ctx)
-			tools = append(tools, info)
-		}
-		var err error
-		cm, err = cm.WithTools(tools)
-		if err != nil {
-			return nil, err
-		}
 		h := &host.Host{
 			ToolCallingModel: cm,
 			SystemPrompt:     this.systemPrompt,
 		}
-		multiAgent, err := host.NewMultiAgent(context.Background(), &host.MultiAgentConfig{
+		multiAgent, err := host.NewMultiAgent(ctx, &host.MultiAgentConfig{
 			Host:        *h,
 			Specialists: this.specialist,
 		})
@@ -130,10 +116,6 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 			},
 			ToolReturnDirectly: map[string]struct{}{},
 			MessageModifier: func(ctx context.Context, input []*schema.Message) []*schema.Message {
-				//这边传递input？
-				if this.knowledgeManager != nil && !this.knowledgeConfig.AlwaysQuery {
-					this.state.Messages = input
-				}
 				return input
 			},
 		})
@@ -148,6 +130,7 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 }
 
 func (this *Agent) Generate(ctx context.Context, input []*schema.Message) (*schema.Message, error) {
+	ctx = context.WithValue(ctx, "messages", input)
 	composeOpts := []compose.Option{}
 	opts := agent.WithComposeOptions(composeOpts...)
 
@@ -182,6 +165,8 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message) (*sche
 
 func (this *Agent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
 	composeOpts := []compose.Option{}
+
+	ctx = context.WithValue(ctx, "messages", input)
 
 	opts := agent.WithComposeOptions(composeOpts...)
 
@@ -284,7 +269,8 @@ func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Mes
 	}
 
 	// 5. 添加系统提示词到最前面
-	if this.systemPrompt != "" {
+	if this.agent != nil && this.systemPrompt != "" {
+		//单agent的时候需要
 		_input = append([]*schema.Message{
 			{
 				Role:    schema.System,

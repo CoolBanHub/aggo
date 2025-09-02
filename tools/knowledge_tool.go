@@ -2,15 +2,13 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/knowledge/readers"
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/schema"
-	"github.com/eino-contrib/jsonschema"
+	"github.com/cloudwego/eino/components/tool/utils"
 )
 
 func GetKnowledgeTools(manager *knowledge.KnowledgeManager) []tool.BaseTool {
@@ -137,242 +135,68 @@ type ListDocumentsParams struct {
 
 // NewLoadDocumentsTool 创建文档加载工具实例
 func NewLoadDocumentsTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	return &LoadDocumentsTool{
+	this := &LoadDocumentsTool{
 		manager: manager,
 	}
+	name := "load_documents"
+	desc := "将文档加载到知识库。支持多种文档来源（文本文件、URL、目录、内存），提供文档分块、重建知识库等功能。"
+	t, _ := utils.InferTool(name, desc, this.loadDocuments)
+	return t
 }
 
 // NewSearchDocumentsTool 创建文档搜索工具实例
 func NewSearchDocumentsTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	return &SearchDocumentsTool{
+	this := &SearchDocumentsTool{
 		manager: manager,
 	}
+	name := "search_documents"
+	desc := "在知识库中搜索文档。使用向量相似度匹配，支持设置搜索限制、相似度阈值和元数据过滤。"
+	t, _ := utils.InferTool(name, desc, this.searchDocuments)
+	return t
 }
 
 // NewGetDocumentTool 创建获取文档工具实例
 func NewGetDocumentTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	return &GetDocumentTool{
+	this := &GetDocumentTool{
 		manager: manager,
 	}
+	name := "get_document"
+	desc := "根据文档ID获取单个文档的详细信息，包括内容和元数据。"
+	t, _ := utils.InferTool(name, desc, this.getDocument)
+	return t
 }
 
 // NewUpdateDocumentTool 创建更新文档工具实例
 func NewUpdateDocumentTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	return &UpdateDocumentTool{
+	this := &UpdateDocumentTool{
 		manager: manager,
 	}
+	name := "update_document"
+	desc := "更新知识库中指定文档的内容和元数据。"
+	t, _ := utils.InferTool(name, desc, this.updateDocument)
+	return t
 }
 
 // NewDeleteDocumentTool 创建删除文档工具实例
 func NewDeleteDocumentTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	return &DeleteDocumentTool{
+	this := &DeleteDocumentTool{
 		manager: manager,
 	}
+	name := "delete_document"
+	desc := "从知识库中删除指定的文档。"
+	t, _ := utils.InferTool(name, desc, this.deleteDocument)
+	return t
 }
 
 // NewListDocumentsTool 创建列出文档工具实例
 func NewListDocumentsTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	return &ListDocumentsTool{
+	this := &ListDocumentsTool{
 		manager: manager,
 	}
-}
-
-// LoadDocumentsTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *LoadDocumentsTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name: "load_documents",
-		Desc: "将文档加载到知识库。支持多种文档来源（文本文件、URL、目录、内存），提供文档分块、重建知识库等功能。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(
-			jsonschema.Reflect(&LoadDocumentsParams{}),
-		),
-	}, nil
-}
-
-// SearchDocumentsTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *SearchDocumentsTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name: "search_documents",
-		Desc: "在知识库中搜索文档。使用向量相似度匹配，支持设置搜索限制、相似度阈值和元数据过滤。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(
-			jsonschema.Reflect(&SearchParams{}),
-		),
-	}, nil
-}
-
-// GetDocumentTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *GetDocumentTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name: "get_document",
-		Desc: "根据文档ID获取单个文档的详细信息，包括内容和元数据。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(
-			jsonschema.Reflect(&GetDocumentParams{}),
-		),
-	}, nil
-}
-
-// UpdateDocumentTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *UpdateDocumentTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name: "update_document",
-		Desc: "更新知识库中指定文档的内容和元数据。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(
-			jsonschema.Reflect(&UpdateDocumentParams{}),
-		),
-	}, nil
-}
-
-// DeleteDocumentTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *DeleteDocumentTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name: "delete_document",
-		Desc: "从知识库中删除指定的文档。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(
-			jsonschema.Reflect(&DeleteDocumentParams{}),
-		),
-	}, nil
-}
-
-// ListDocumentsTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *ListDocumentsTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name: "list_documents",
-		Desc: "列出知识库中的文档，支持分页查询。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(
-			jsonschema.Reflect(&ListDocumentsParams{}),
-		),
-	}, nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *LoadDocumentsTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params LoadDocumentsParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
-	}
-
-	result, err := t.loadDocuments(ctx, params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("序列化结果失败: %w", err)
-	}
-
-	return string(resultJSON), nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *SearchDocumentsTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params SearchParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
-	}
-
-	result, err := t.searchDocuments(ctx, params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("序列化结果失败: %w", err)
-	}
-
-	return string(resultJSON), nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *GetDocumentTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params GetDocumentParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
-	}
-
-	result, err := t.getDocument(ctx, params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("序列化结果失败: %w", err)
-	}
-
-	return string(resultJSON), nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *UpdateDocumentTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params UpdateDocumentParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
-	}
-
-	result, err := t.updateDocument(ctx, params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("序列化结果失败: %w", err)
-	}
-
-	return string(resultJSON), nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *DeleteDocumentTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params DeleteDocumentParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
-	}
-
-	result, err := t.deleteDocument(ctx, params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("序列化结果失败: %w", err)
-	}
-
-	return string(resultJSON), nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *ListDocumentsTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params ListDocumentsParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("解析参数失败: %w", err)
-	}
-
-	result, err := t.listDocuments(ctx, params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("序列化结果失败: %w", err)
-	}
-
-	return string(resultJSON), nil
+	name := "list_documents"
+	desc := "列出知识库中的文档，支持分页查询。"
+	t, _ := utils.InferTool(name, desc, this.listDocuments)
+	return t
 }
 
 // loadDocuments 加载文档到知识库

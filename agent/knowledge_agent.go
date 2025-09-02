@@ -2,13 +2,17 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"github.com/CoolBanHub/aggo/knowledge"
-	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/flow/agent"
+	"github.com/cloudwego/eino/flow/agent/multiagent/host"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 )
@@ -23,16 +27,12 @@ type KnowledgeAgent struct {
 	knowledgeConfig *KnowledgeQueryConfig
 
 	agent *react.Agent
-
-	//获取agent的state ?
-	state state
 }
 
-func NewKnowledgeAgent(ctx context.Context, knowledgeManager *knowledge.KnowledgeManager, _state state) (*KnowledgeAgent, error) {
+func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel, knowledgeManager *knowledge.KnowledgeManager) (*KnowledgeAgent, error) {
 	this := &KnowledgeAgent{
 		knowledgeManager: knowledgeManager,
 		name:             "knowledge_reason",
-		state:            _state,
 	}
 
 	description := `You have access to the Think, Search, and Analyze tools that will help you search your knowledge for relevant information. Use these tools as frequently as needed to find the most relevant information.
@@ -66,8 +66,6 @@ func NewKnowledgeAgent(ctx context.Context, knowledgeManager *knowledge.Knowledg
         - Synthesize information from multiple sources rather than relying on a single document.`
 	this.description = description
 
-	cm, _ := model.NewChatModel()
-
 	reactAgent, err := react.NewAgent(ctx, &react.AgentConfig{
 		ToolCallingModel: cm,
 		ToolsConfig: compose.ToolsNodeConfig{
@@ -96,10 +94,28 @@ func (this *KnowledgeAgent) Stream(ctx context.Context, input []*schema.Message)
 	return this.agent.Stream(ctx, input)
 }
 
-// Run 实现工具调用接口，将消息转换为字符串响应
-func (this *KnowledgeAgent) Run(ctx context.Context, reason string) (string, error) {
+func (this *KnowledgeAgent) NewSpecialist() *host.Specialist {
 
-	r, err := this.Generate(ctx, this.state.Messages)
+	return &host.Specialist{
+		AgentMeta: host.AgentMeta{
+			Name:        this.name,
+			IntendedUse: this.description,
+		},
+		Invokable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.Message, err error) {
+			return this.Generate(ctx, input)
+		},
+		Streamable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.StreamReader[*schema.Message], err error) {
+			return this.Stream(ctx, input)
+		},
+	}
+}
+
+// Run 实现工具调用接口，将消息转换为字符串响应
+func (this *KnowledgeAgent) Run(ctx context.Context, param any) (string, error) {
+	input := ctx.Value("messages").([]*schema.Message)
+	j, _ := json.Marshal(input)
+	fmt.Println("ctxmessage:", string(j))
+	r, err := this.Generate(ctx, input)
 	if err != nil {
 		return "", err
 	}

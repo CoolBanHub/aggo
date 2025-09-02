@@ -12,30 +12,20 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/schema"
-	"github.com/eino-contrib/jsonschema"
+	"github.com/cloudwego/eino/components/tool/utils"
 )
 
 func GetSellTool() []tool.BaseTool {
+	this := &ShellTool{}
 	return []tool.BaseTool{
-		NewShellExecuteTool(),
-		NewShellSystemInfoTool(),
-		NewShellProcessesTool(),
-		NewShellDirectoryTool(),
+		this.newShellExecuteTool(),
+		this.newShellSystemInfoTool(),
+		this.newShellProcessesTool(),
+		this.newShellDirectoryTool(),
 	}
 }
 
-// ShellExecuteTool 提供命令执行功能
-type ShellExecuteTool struct{}
-
-// ShellSystemInfoTool 提供系统信息检索功能
-type ShellSystemInfoTool struct{}
-
-// ShellProcessesTool 提供进程列表功能
-type ShellProcessesTool struct{}
-
-// ShellDirectoryTool 提供目录操作功能
-type ShellDirectoryTool struct{}
+type ShellTool struct{}
 
 // ShellResult 表示命令执行的结果
 type ShellResult struct {
@@ -70,59 +60,40 @@ type DirectoryParams struct {
 	Path      string `json:"path,omitempty" jsonschema:"description=要切换到的目录路径（当operation为change时必需）"`
 }
 
-// NewShellExecuteTool 创建一个新的 ShellExecuteTool 实例
-func NewShellExecuteTool() tool.InvokableTool {
-	return &ShellExecuteTool{}
+// newShellExecuteTool 创建一个新的 ShellExecuteTool 实例
+func (this *ShellTool) newShellExecuteTool() tool.InvokableTool {
+	name := "shell_execute"
+	desc := "执行系统命令，支持超时处理和错误处理。支持直接命令执行和shell环境执行。"
+	t, _ := utils.InferTool(name, desc, this.executeCommand)
+	return t
 }
 
-// NewShellSystemInfoTool 创建一个新的 ShellSystemInfoTool 实例
-func NewShellSystemInfoTool() tool.InvokableTool {
-	return &ShellSystemInfoTool{}
+// newShellSystemInfoTool 创建一个新的 ShellSystemInfoTool 实例
+func (this *ShellTool) newShellSystemInfoTool() tool.InvokableTool {
+	name := "shell_system_info"
+	desc := "获取各种系统信息，包括操作系统详情、环境变量、路径信息、用户详情、磁盘使用情况和内存统计。"
+	t, _ := utils.InferTool(name, desc, this.getSystemInfo)
+	return t
 }
 
-// NewShellProcessesTool 创建一个新的 ShellProcessesTool 实例
-func NewShellProcessesTool() tool.InvokableTool {
-	return &ShellProcessesTool{}
+// newShellProcessesTool 创建一个新的 ShellProcessesTool 实例
+func (this *ShellTool) newShellProcessesTool() tool.InvokableTool {
+	name := "shell_list_processes"
+	desc := "列出系统上运行的进程。以平台特定的格式返回进程信息（Unix系统上使用ps aux，Windows上使用tasklist）。"
+	t, _ := utils.InferTool(name, desc, this.listProcesses)
+	return t
 }
 
-// NewShellDirectoryTool 创建一个新的 ShellDirectoryTool 实例
-func NewShellDirectoryTool() tool.InvokableTool {
-	return &ShellDirectoryTool{}
-}
-
-// ShellExecuteTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *ShellExecuteTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name:        "shell_execute",
-		Desc:        "执行系统命令，支持超时处理和错误处理。支持直接命令执行和shell环境执行。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(jsonschema.Reflect(&ExecuteParams{})),
-	}, nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *ShellExecuteTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params ExecuteParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("failed to parse parameters: %w", err)
-	}
-
-	result, err := t.executeCommand(params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal result: %w", err)
-	}
-
-	return string(resultJSON), nil
+// newShellDirectoryTool 创建一个新的 ShellDirectoryTool 实例
+func (this *ShellTool) newShellDirectoryTool() tool.InvokableTool {
+	name := "shell_directory"
+	desc := "获取当前工作目录或切换到新目录。通过不同的参数集支持两种操作。"
+	t, _ := utils.InferTool(name, desc, this.getDirectory)
+	return t
 }
 
 // executeCommand 在系统shell中运行命令
-func (t *ShellExecuteTool) executeCommand(params ExecuteParams) (interface{}, error) {
+func (t *ShellTool) executeCommand(ctx context.Context, params ExecuteParams) (interface{}, error) {
 	if params.Command == "" {
 		return nil, fmt.Errorf("command is required")
 	}
@@ -220,39 +191,8 @@ func (t *ShellExecuteTool) executeCommand(params ExecuteParams) (interface{}, er
 	return result, nil
 }
 
-// ShellSystemInfoTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *ShellSystemInfoTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name:        "shell_system_info",
-		Desc:        "获取各种系统信息，包括操作系统详情、环境变量、路径信息、用户详情、磁盘使用情况和内存统计。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(jsonschema.Reflect(&SystemInfoParams{})),
-	}, nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *ShellSystemInfoTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params SystemInfoParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("failed to parse parameters: %w", err)
-	}
-
-	result, err := t.GetSystemInfo(params)
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal result: %w", err)
-	}
-
-	return string(resultJSON), nil
-}
-
 // GetSystemInfo 获取各种系统信息
-func (t *ShellSystemInfoTool) GetSystemInfo(params SystemInfoParams) (interface{}, error) {
+func (t *ShellTool) getSystemInfo(ctx context.Context, params SystemInfoParams) (interface{}, error) {
 	if params.InfoType == "" {
 		return nil, fmt.Errorf("info_type is required")
 	}
@@ -353,34 +293,8 @@ func (t *ShellSystemInfoTool) GetSystemInfo(params SystemInfoParams) (interface{
 	}
 }
 
-// ShellProcessesTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *ShellProcessesTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name:        "shell_list_processes",
-		Desc:        "列出系统上运行的进程。以平台特定的格式返回进程信息（Unix系统上使用ps aux，Windows上使用tasklist）。",
-		ParamsOneOf: nil, // 不需要参数
-	}, nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *ShellProcessesTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	result, err := t.ListProcesses()
-	if err != nil {
-		return "", err
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal result: %w", err)
-	}
-
-	return string(resultJSON), nil
-}
-
 // ListProcesses 列出运行中的进程（简化版本）
-func (t *ShellProcessesTool) ListProcesses() (interface{}, error) {
+func (t *ShellTool) listProcesses(ctx context.Context, params any) (interface{}, error) {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
@@ -415,23 +329,7 @@ func (t *ShellProcessesTool) ListProcesses() (interface{}, error) {
 	}, nil
 }
 
-// ShellDirectoryTool 实现
-
-// Info 实现 tool.BaseTool 接口
-func (t *ShellDirectoryTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{
-		Name:        "shell_directory",
-		Desc:        "获取当前工作目录或切换到新目录。通过不同的参数集支持两种操作。",
-		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(jsonschema.Reflect(&DirectoryParams{})),
-	}, nil
-}
-
-// InvokableRun 实现 tool.InvokableTool 接口
-func (t *ShellDirectoryTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	var params DirectoryParams
-	if err := json.Unmarshal([]byte(argumentsInJSON), &params); err != nil {
-		return "", fmt.Errorf("failed to parse parameters: %w", err)
-	}
+func (t *ShellTool) getDirectory(ctx context.Context, params DirectoryParams) (string, error) {
 
 	var result interface{}
 	var err error
@@ -461,7 +359,7 @@ func (t *ShellDirectoryTool) InvokableRun(ctx context.Context, argumentsInJSON s
 }
 
 // GetCurrentDirectory 获取当前工作目录
-func (t *ShellDirectoryTool) GetCurrentDirectory() (interface{}, error) {
+func (t *ShellTool) GetCurrentDirectory() (interface{}, error) {
 	currentDir, err := os.Getwd()
 	if err != nil {
 		return ShellResult{
@@ -479,7 +377,7 @@ func (t *ShellDirectoryTool) GetCurrentDirectory() (interface{}, error) {
 }
 
 // ChangeDirectory 切换当前工作目录
-func (t *ShellDirectoryTool) ChangeDirectory(path string) (interface{}, error) {
+func (t *ShellTool) ChangeDirectory(path string) (interface{}, error) {
 	if path == "" {
 		return nil, fmt.Errorf("path is required")
 	}

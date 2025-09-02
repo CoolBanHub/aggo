@@ -44,3 +44,6 @@ go.work
 go.work.sum
 .claude
 CLAUDE.md
+
+example/knowledge_agent_tool_test/knowledge_agent_tool_test
+example/mem_agent_test/mem_agent_test
