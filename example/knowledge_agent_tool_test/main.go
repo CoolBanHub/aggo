@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/CoolBanHub/aggo/agent"
@@ -11,6 +12,7 @@ import (
 	"github.com/CoolBanHub/aggo/knowledge/storage"
 	"github.com/CoolBanHub/aggo/knowledge/vectordb"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/schema"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"gorm.io/driver/mysql"
@@ -23,19 +25,27 @@ func main() {
 	ctx := context.Background()
 
 	// 1. 创建聊天模型
-	cm, err := model.NewChatModel()
+	cm, err := model.NewChatModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
+		model.WithAPIVersion(os.Getenv("APIVersion")),
+		model.WithAPIKey(os.Getenv("APIKey")),
+		model.WithModel("gpt-5-mini"),
+	)
 	if err != nil {
 		log.Fatalf("创建聊天模型失败: %v", err)
 		return
 	}
 
-	em, err := model.NewEmbModel()
+	em, err := model.NewEmbModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
+		model.WithAPIVersion(os.Getenv("APIVersion")),
+		model.WithAPIKey(os.Getenv("APIKey")),
+		model.WithModel("text-embedding-3-large"),
+	)
 	if err != nil {
 		log.Fatalf("创建嵌入模型失败: %v", err)
 		return
 	}
 
-	gormSql, err := NewMysqlGrom("mysql://root:123456@localhost:3306/aggo", logger.Silent)
+	gormSql, err := NewMysqlGrom("root:123456@tcp(127.0.0.1:3306)/aggo", logger.Silent)
 
 	client, err := milvusclient.New(context.Background(), &milvusclient.ClientConfig{
 		Address: "127.0.0.1:19530",
@@ -78,7 +88,7 @@ func main() {
 	// 4. 加载示例文档到知识库（模拟一些技术文档）
 	docs := []knowledge.Document{
 		{
-			ID:      "doc1",
+			ID:      utils.GetUUIDNoDash(),
 			Content: "Go语言是由Google开发的开源编程语言，以其简洁性和高效性著称。它特别适用于系统编程、网络服务和云计算应用。",
 			Metadata: map[string]interface{}{
 				"title":  "Go语言介绍",
@@ -87,7 +97,7 @@ func main() {
 			},
 		},
 		{
-			ID:      "doc2",
+			ID:      utils.GetUUIDNoDash(),
 			Content: "微服务架构是一种将单一应用程序开发为一套小服务的方法，每个服务运行在自己的进程中，服务间通过HTTP API进行通信。",
 			Metadata: map[string]interface{}{
 				"title":  "微服务架构",
@@ -96,7 +106,7 @@ func main() {
 			},
 		},
 		{
-			ID:      "doc3",
+			ID:      utils.GetUUIDNoDash(),
 			Content: "Docker是一个开源的应用容器引擎，让开发者可以打包他们的应用以及依赖包到一个可移植的镜像中，然后发布到任何Linux或Windows机器上。",
 			Metadata: map[string]interface{}{
 				"title":  "Docker容器技术",
@@ -114,15 +124,17 @@ func main() {
 
 	err = knowledgeManager.LoadDocuments(ctx, documents, knowledge.LoadOptions{
 		Recreate:       true,
-		Upsert:         true,
-		EnableChunking: false, // 禁用分块以简化测试
+		Upsert:         false,
+		EnableChunking: true, // 禁用分块以简化测试
 	})
 	if err != nil {
 		log.Fatalf("加载文档到知识库失败: %v", err)
 	}
 
 	log.Println("知识库初始化完成，已加载示例文档")
-
+	if true {
+		return
+	}
 	// 5. 创建主 Agent，将 KnowledgeAgent 作为工具
 	mainAgent, err := agent.NewAgent(ctx, cm,
 		agent.WithKnowledgeManager(knowledgeManager),

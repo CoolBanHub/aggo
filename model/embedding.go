@@ -19,6 +19,9 @@ func NewEmbModel(opts ...OptionFunc) (embedding.Embedder, error) {
 func getEmbeddingByOpenai(o *Option) (embedding.Embedder, error) {
 	_model := o.Model
 	dimensions := 1024
+	if o.Dimensions > 0 {
+		dimensions = o.Dimensions
+	}
 	cmb, err := embopenai.NewEmbedder(context.Background(), &embopenai.EmbeddingConfig{
 		BaseURL:    o.BaseUrl,
 		Model:      _model,   // 使用的模型版本
@@ -28,22 +31,4 @@ func getEmbeddingByOpenai(o *Option) (embedding.Embedder, error) {
 		Dimensions: &dimensions, // 设置向量维度为1024
 	})
 	return cmb, err
-}
-
-func GetEmbByText(ctx context.Context, text string, opts ...OptionFunc) ([]float64, error) {
-	cmb, err := NewEmbModel(opts...)
-	if err != nil {
-		return nil, err
-	}
-	embRes, err := cmb.EmbedStrings(ctx, []string{text})
-	if err != nil {
-		return nil, err
-	}
-	if len(embRes) == 0 {
-		return nil, nil
-	}
-	if len(embRes[0]) == 0 {
-		return nil, nil
-	}
-	return embRes[0], nil
 }

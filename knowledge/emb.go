@@ -3,7 +3,6 @@ package knowledge
 import (
 	"context"
 
-	"github.com/CoolBanHub/aggo/model"
 	"github.com/cloudwego/eino/components/embedding"
 )
 
@@ -14,11 +13,14 @@ type embeddingAdapter struct {
 
 // Embed 生成单个文本的嵌入
 func (ea *embeddingAdapter) Embed(ctx context.Context, text string) ([]float32, error) {
-	vectors, err := model.GetEmbByText(ctx, text)
+	vectorsList, err := ea.embedder.EmbedStrings(ctx, []string{text})
 	if err != nil {
 		return nil, err
 	}
-
+	var vectors []float64
+	if len(vectorsList) > 0 {
+		vectors = vectorsList[0]
+	}
 	// 转换float64到float32
 	result := make([]float32, len(vectors))
 	for i, v := range vectors {

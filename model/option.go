@@ -7,6 +7,7 @@ type Option struct {
 	APIKey     string `json:"apiKey"`
 	APIVersion string `json:"apiVersion"`
 	ByAzure    bool
+	Dimensions int
 }
 
 type OptionFunc func(option *Option)
@@ -44,5 +45,11 @@ func WithAPIVersion(apiVersion string) OptionFunc {
 func WithAzure(byAzure bool) OptionFunc {
 	return func(option *Option) {
 		option.ByAzure = byAzure
+	}
+}
+
+func WithDimensions(dimensions int) OptionFunc {
+	return func(option *Option) {
+		option.Dimensions = dimensions
 	}
 }

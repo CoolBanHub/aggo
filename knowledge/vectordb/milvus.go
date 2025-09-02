@@ -2,6 +2,7 @@ package vectordb
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/CoolBanHub/aggo/knowledge"
@@ -115,8 +116,13 @@ func (m *MilvusVectorDB) Insert(ctx context.Context, docs []knowledge.Document) 
 		createdAts[i] = doc.CreatedAt.Unix()
 		updatedAts[i] = doc.UpdatedAt.Unix()
 		vectors[i] = doc.Vector
+		j, _ := json.Marshal(doc)
+		fmt.Println("json:", string(j))
 	}
 
+	fmt.Println("ve:", vectors)
+	fmt.Println("len:", len(vectors[0]))
+	fmt.Println("dim:", m.embeddingDim)
 	// 执行插入
 	_, err := m.client.Insert(ctx, milvusclient.NewColumnBasedInsertOption(m.collectionName).
 		WithVarcharColumn("id", ids).
