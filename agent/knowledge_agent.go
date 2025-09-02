@@ -87,12 +87,19 @@ func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel, knowl
 }
 
 func (this *KnowledgeAgent) Generate(ctx context.Context, input []*schema.Message) (*schema.Message, error) {
-	// 直接使用传入的 input 调用内部 agent
-	return this.agent.Generate(ctx, input)
+	_input, err := this.inputMessageModifier(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return this.agent.Generate(ctx, _input)
 }
 
 func (this *KnowledgeAgent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
-	return this.agent.Stream(ctx, input)
+	_input, err := this.inputMessageModifier(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return this.agent.Stream(ctx, _input)
 }
 
 func (this *KnowledgeAgent) inputMessageModifier(ctx context.Context, input []*schema.Message) ([]*schema.Message, error) {
