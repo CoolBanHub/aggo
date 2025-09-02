@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/tools"
@@ -113,8 +111,6 @@ func (this *KnowledgeAgent) NewSpecialist() *host.Specialist {
 // Run 实现工具调用接口，将消息转换为字符串响应
 func (this *KnowledgeAgent) Run(ctx context.Context, param any) (string, error) {
 	input := ctx.Value("messages").([]*schema.Message)
-	j, _ := json.Marshal(input)
-	fmt.Println("ctxmessage:", string(j))
 	r, err := this.Generate(ctx, input)
 	if err != nil {
 		return "", err
