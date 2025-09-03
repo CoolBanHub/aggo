@@ -26,6 +26,20 @@ func GetSellTool() []tool.BaseTool {
 	}
 }
 
+func GetSysInfoTool() []tool.BaseTool {
+	this := &ShellTool{}
+	return []tool.BaseTool{
+		this.newShellSystemInfoTool(),
+	}
+}
+
+func GetExecuteTool() []tool.BaseTool {
+	this := &ShellTool{}
+	return []tool.BaseTool{
+		this.newShellExecuteTool(),
+	}
+}
+
 type ShellTool struct{}
 
 // ShellResult 表示命令执行的结果
