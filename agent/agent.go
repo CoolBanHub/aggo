@@ -129,8 +129,8 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 	return this, nil
 }
 
-func (this *Agent) Generate(ctx context.Context, input []*schema.Message) (*schema.Message, error) {
-	composeOpts := []compose.Option{}
+func (this *Agent) Generate(ctx context.Context, input []*schema.Message, composeOpts ...compose.Option) (*schema.Message, error) {
+
 	opts := agent.WithComposeOptions(composeOpts...)
 
 	_input, err := this.inputMessageModifier(ctx, input)
@@ -166,8 +166,7 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message) (*sche
 	return response, nil
 }
 
-func (this *Agent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
-	composeOpts := []compose.Option{}
+func (this *Agent) Stream(ctx context.Context, input []*schema.Message, composeOpts ...compose.Option) (*schema.StreamReader[*schema.Message], error) {
 
 	opts := agent.WithComposeOptions(composeOpts...)
 
