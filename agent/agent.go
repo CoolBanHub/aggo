@@ -7,6 +7,7 @@ import (
 
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/memory"
+	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -121,7 +122,9 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 	for _, opt := range opts {
 		opt(chatOpts)
 	}
-
+	if chatOpts.sessionID == "" {
+		chatOpts.sessionID = utils.GetUUIDNoDash()
+	}
 	agentOpts := agent.WithComposeOptions(chatOpts.composeOptions...)
 
 	_input, err := this.inputMessageModifier(ctx, input, chatOpts)
@@ -162,6 +165,10 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 	chatOpts := &chatOptions{}
 	for _, opt := range opts {
 		opt(chatOpts)
+	}
+
+	if chatOpts.sessionID == "" {
+		chatOpts.sessionID = utils.GetUUIDNoDash()
 	}
 
 	agentOpts := agent.WithComposeOptions(chatOpts.composeOptions...)

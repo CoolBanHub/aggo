@@ -71,7 +71,7 @@ type MemoryConfig struct {
 	EnableUserMemories bool `json:"enableUserMemories"`
 	// 是否启用会话摘要
 	EnableSessionSummary bool `json:"enableSessionSummary"`
-	// 记忆检索方式
+	// 用户记忆检索方式 EnableUserMemories开启采生效
 	Retrieval MemoryRetrieval `json:"retrieval"`
 	// 记忆数量限制
 	MemoryLimit int `json:"memoryLimit"`

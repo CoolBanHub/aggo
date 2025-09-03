@@ -40,8 +40,8 @@ func main() {
 		return
 	}
 	memoryManager, err := memory.NewMemoryManager(cm, s, &memory.MemoryConfig{
-		EnableSessionSummary: true,
-		EnableUserMemories:   true,
+		EnableSessionSummary: false,
+		EnableUserMemories:   false,
 		MemoryLimit:          8,
 		Retrieval:            memory.RetrievalLastN,
 		AsyncProcessing:      true,
@@ -65,7 +65,7 @@ func main() {
 		"你好，我是Alice",
 		"我是一名软件工程师，专门做后端开发",
 		"我住在北京，今年28岁",
-		//"你有什么爱好吗?",
+		"你有什么爱好吗?",
 		//"我喜欢读书和摄影，特别是科幻小说",
 		//"我最近在学习Go语言和云原生技术",
 		//"我的工作主要涉及微服务架构设计",
@@ -82,7 +82,7 @@ func main() {
 		log.Printf("User: %s", conversation)
 		out, err := bot.Generate(ctx, []*schema.Message{
 			schema.UserMessage(conversation),
-		}, agent.WithChatSessionID(sessionID))
+		}, agent.WithChatSessionID(sessionID), agent.WithChatUserID(sessionID))
 		if err != nil {
 			log.Fatalf("generate fail,err:%s", err)
 			return

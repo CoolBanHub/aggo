@@ -101,7 +101,6 @@ func (s *SQLStore) GetUserMemories(ctx context.Context, userID string, limit int
 	if userID == "" {
 		return nil, errors.New("用户ID不能为空")
 	}
-
 	var models []UserMemoryModel
 	query := s.db.WithContext(ctx).Table(s.tableNameProvider.GetUserMemoryTableName()).Where("user_id = ?", userID)
 
@@ -109,8 +108,10 @@ func (s *SQLStore) GetUserMemories(ctx context.Context, userID string, limit int
 		// 根据检索方式确定排序和限制
 		switch retrieval {
 		case memory.RetrievalLastN:
+			// 先按更新时间降序获取最近的N条记忆
 			query = query.Order("updated_at DESC")
 		case memory.RetrievalFirstN:
+			// 按创建时间升序获取最早的N条记忆
 			query = query.Order("created_at ASC")
 		default:
 			query = query.Order("updated_at DESC")
@@ -122,18 +123,9 @@ func (s *SQLStore) GetUserMemories(ctx context.Context, userID string, limit int
 		return nil, fmt.Errorf("获取用户记忆失败: %v", err)
 	}
 
-	// 转换为业务模型
 	var memories []*memory.UserMemory
 	for _, model := range models {
 		memories = append(memories, model.ToUserMemory())
-	}
-
-	// RetrievalLastN和其他，目前需要反转顺序，使得最早的记忆在前，最新的在后
-	// 这样更符合AI理解上下文的逻辑
-	if retrieval != memory.RetrievalFirstN {
-		for i, j := 0, len(memories)-1; i < j; i, j = i+1, j-1 {
-			memories[i], memories[j] = memories[j], memories[i]
-		}
 	}
 
 	return memories, nil
@@ -436,6 +428,10 @@ func (s *SQLStore) GetMessages(ctx context.Context, sessionID string, userID str
 	var messages []*memory.ConversationMessage
 	for _, model := range models {
 		messages = append(messages, model.ToConversationMessage())
+	}
+
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
 	}
 
 	return messages, nil
