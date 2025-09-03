@@ -55,7 +55,7 @@ type VectorDB interface {
 	Upsert(ctx context.Context, docs []Document) error
 
 	// Search 在向量数据库中搜索相似文档
-	Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}) ([]SearchResult, error)
+	Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}, sort float64) ([]SearchResult, error)
 
 	// DocExists 检查文档是否存在于向量数据库中
 	DocExists(ctx context.Context, docID string) (bool, error)
@@ -107,18 +107,6 @@ type ChunkingStrategy interface {
 
 	// SetChunkOverlap 设置分块重叠大小
 	SetChunkOverlap(overlap int)
-}
-
-// Embedder 嵌入器接口，定义生成嵌入的契约
-type Embedder interface {
-	// Embed 为给定文本生成嵌入
-	Embed(ctx context.Context, text string) ([]float32, error)
-
-	// EmbedBatch 为多个文本批量生成嵌入
-	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
-
-	// GetDimension 获取嵌入向量的维度
-	GetDimension() int
 }
 
 // KnowledgeStorage 知识库存储接口

@@ -180,7 +180,7 @@ func (m *MilvusVectorDB) Upsert(ctx context.Context, docs []knowledge.Document) 
 }
 
 // Search 向量搜索
-func (m *MilvusVectorDB) Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}) ([]knowledge.SearchResult, error) {
+func (m *MilvusVectorDB) Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}, sort float64) ([]knowledge.SearchResult, error) {
 	if len(queryVector) == 0 {
 		return nil, fmt.Errorf("查询向量不能为空")
 	}
@@ -189,7 +189,7 @@ func (m *MilvusVectorDB) Search(ctx context.Context, queryVector []float32, limi
 
 	// 构建搜索参数
 	annParam := index.NewCustomAnnParam()
-	annParam.WithRadius(0.1)
+	annParam.WithRadius(sort)
 	annParam.WithRangeFilter(1.0)
 
 	// 构建过滤器表达式
@@ -224,7 +224,7 @@ func (m *MilvusVectorDB) Search(ctx context.Context, queryVector []float32, limi
 
 			searchResult := knowledge.SearchResult{
 				Document: doc,
-				Score:    result.Scores[i],
+				Score:    float64(result.Scores[i]),
 			}
 			searchResults = append(searchResults, searchResult)
 		}

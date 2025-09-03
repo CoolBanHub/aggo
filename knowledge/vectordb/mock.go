@@ -51,7 +51,7 @@ func (m *MockVectorDB) Upsert(ctx context.Context, docs []knowledge.Document) er
 }
 
 // Search 向量搜索
-func (m *MockVectorDB) Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}) ([]knowledge.SearchResult, error) {
+func (m *MockVectorDB) Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}, sort float64) ([]knowledge.SearchResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -66,7 +66,7 @@ func (m *MockVectorDB) Search(ctx context.Context, queryVector []float32, limit 
 		if passesFilter(doc, filters) {
 			result := knowledge.SearchResult{
 				Document: doc,
-				Score:    0.8 - float32(count)*0.1, // Mock相似度得分
+				Score:    0.8 - float64(count)*0.1, // Mock相似度得分
 			}
 			results = append(results, result)
 			count++

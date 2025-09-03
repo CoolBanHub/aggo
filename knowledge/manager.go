@@ -2,6 +2,7 @@ package knowledge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -17,7 +18,7 @@ type KnowledgeManager struct {
 	// 知识库存储
 	storage KnowledgeStorage
 	// 嵌入器
-	embedder Embedder
+	embedder embedding.Embedder
 	// 分块策略
 	chunkingStrategy ChunkingStrategy
 	// 知识库配置
@@ -46,9 +47,6 @@ func NewKnowledgeManager(config *KnowledgeConfig) (*KnowledgeManager, error) {
 		}
 	}
 
-	// 创建嵌入器
-	embedder := NewEmbedder(config.Em)
-
 	// 创建分块策略
 	chunkingStrategy := NewFixedSizeChunkingStrategy(
 		config.DefaultLoadOptions.ChunkSize,
@@ -60,7 +58,7 @@ func NewKnowledgeManager(config *KnowledgeConfig) (*KnowledgeManager, error) {
 	manager := &KnowledgeManager{
 		vectorDB:         config.VectorDB,
 		storage:          config.Storage,
-		embedder:         embedder,
+		embedder:         config.Em,
 		chunkingStrategy: chunkingStrategy,
 		config:           config,
 		ctx:              ctx,
@@ -94,7 +92,7 @@ func (km *KnowledgeManager) LoadDocuments(ctx context.Context, docs []Document, 
 
 			// 为每个分块生成嵌入
 			for i, chunk := range chunks {
-				vector, err := km.embedder.Embed(ctx, chunk.Content)
+				vector, err := km.embed(ctx, chunk.Content)
 				if err != nil {
 					return fmt.Errorf("生成嵌入失败: %w", err)
 				}
@@ -126,7 +124,7 @@ func (km *KnowledgeManager) LoadDocuments(ctx context.Context, docs []Document, 
 			}
 		} else {
 			// 为整个文档生成嵌入
-			vector, err := km.embedder.Embed(ctx, doc.Content)
+			vector, err := km.embed(ctx, doc.Content)
 			if err != nil {
 				return fmt.Errorf("生成嵌入失败: %w", err)
 			}
@@ -155,13 +153,13 @@ func (km *KnowledgeManager) Search(ctx context.Context, query string, options Se
 	km.mu.RLock()
 	defer km.mu.RUnlock()
 
-	vector, err := km.embedder.Embed(ctx, query)
+	vector, err := km.embed(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("生成嵌入失败: %w", err)
 	}
 
 	// 使用向量数据库进行搜索
-	results, err := km.vectorDB.Search(ctx, vector, options.Limit, options.Filters)
+	results, err := km.vectorDB.Search(ctx, vector, options.Limit, options.Filters, options.Threshold)
 	if err != nil {
 		return nil, fmt.Errorf("向量搜索失败: %w", err)
 	}
@@ -283,9 +281,19 @@ func (km *KnowledgeManager) Close() error {
 	return nil
 }
 
-// NewEmbedder 创建嵌入器
-func NewEmbedder(em embedding.Embedder) Embedder {
-	return &embeddingAdapter{
-		embedder: em,
+func (km *KnowledgeManager) embed(ctx context.Context, content string) ([]float32, error) {
+	vectorsList, err := km.embedder.EmbedStrings(ctx, []string{content})
+	if err != nil {
+		return nil, err
 	}
+	if len(vectorsList) == 0 {
+		return nil, errors.New("embedding failed")
+	}
+	vectors := vectorsList[0]
+	// 转换float64到float32
+	result := make([]float32, len(vectors))
+	for i, v := range vectors {
+		result[i] = float32(v)
+	}
+	return result, nil
 }

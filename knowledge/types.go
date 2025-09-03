@@ -49,7 +49,7 @@ type SearchOptions struct {
 	// 元数据过滤条件
 	Filters map[string]interface{} `json:"filters,omitempty"`
 	// 相似度阈值
-	Threshold float32 `json:"threshold,omitempty"`
+	Threshold float64 `json:"threshold,omitempty"`
 }
 
 // LoadOptions 加载选项配置
@@ -73,7 +73,7 @@ type SearchResult struct {
 	// 文档信息
 	Document Document `json:"document"`
 	// 相似度得分
-	Score float32 `json:"score"`
+	Score float64 `json:"score"`
 	// 匹配的分块（如果启用了分块）
 	Chunk *Chunk `json:"chunk,omitempty"`
 }
