@@ -166,8 +166,7 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, compos
 	return response, nil
 }
 
-func (this *Agent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
-	composeOpts := []compose.Option{}
+func (this *Agent) Stream(ctx context.Context, input []*schema.Message, composeOpts ...compose.Option) (*schema.StreamReader[*schema.Message], error) {
 
 	opts := agent.WithComposeOptions(composeOpts...)
 
