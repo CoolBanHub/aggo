@@ -87,7 +87,7 @@ type KnowledgeConfig struct {
 	VectorDB VectorDB //存储向量数据
 	// 嵌入模型
 	Em embedding.Embedder
-	// 默认搜索配置
+	// 默认搜索配置,没有设置SearchOptions的时候使用此配置
 	DefaultSearchOptions SearchOptions `json:"defaultSearchOptions"`
 	// 默认加载配置
 	DefaultLoadOptions LoadOptions `json:"defaultLoadOptions"`

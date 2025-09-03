@@ -128,6 +128,14 @@ func (s *SQLStore) GetUserMemories(ctx context.Context, userID string, limit int
 		memories = append(memories, model.ToUserMemory())
 	}
 
+	// RetrievalLastN和其他，目前需要反转顺序，使得最早的记忆在前，最新的在后
+	// 这样更符合AI理解上下文的逻辑
+	if retrieval != memory.RetrievalFirstN {
+		for i, j := 0, len(memories)-1; i < j; i, j = i+1, j-1 {
+			memories[i], memories[j] = memories[j], memories[i]
+		}
+	}
+
 	return memories, nil
 }
 

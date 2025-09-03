@@ -84,6 +84,13 @@ func (km *KnowledgeManager) LoadDocuments(ctx context.Context, docs []Document, 
 	km.mu.Lock()
 	defer km.mu.Unlock()
 
+	if options.ChunkSize == 0 {
+		options.ChunkSize = km.config.DefaultLoadOptions.ChunkSize
+	}
+	if options.ChunkOverlap == 0 {
+		options.ChunkOverlap = km.config.DefaultLoadOptions.ChunkOverlap
+	}
+
 	var processedDocs []Document
 
 	for _, doc := range docs {
@@ -167,6 +174,13 @@ func (km *KnowledgeManager) Search(ctx context.Context, query string, options Se
 	vector, err := km.embed(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("生成嵌入失败: %w", err)
+	}
+
+	if options.Limit == 0 {
+		options.Limit = km.GetConfig().DefaultSearchOptions.Limit
+	}
+	if options.Threshold == 0 {
+		options.Threshold = km.GetConfig().DefaultSearchOptions.Threshold
 	}
 
 	// 使用向量数据库进行搜索

@@ -16,10 +16,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-type state struct {
-	Messages []*schema.Message
-}
-
 type Agent struct {
 	systemPrompt string
 	cm           model.ToolCallingChatModel
@@ -45,10 +41,6 @@ type Agent struct {
 // KnowledgeQueryConfig 知识库查询配置
 type KnowledgeQueryConfig struct {
 
-	// 最大查询结果数量
-	MaxResults int
-	// 相似度阈值
-	Threshold float64
 	// 是否总是查询（不使用关键词触发）
 	AlwaysQuery bool
 }
@@ -73,8 +65,6 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 		if this.knowledgeConfig == nil {
 			// 默认知识库查询配置
 			this.knowledgeConfig = &KnowledgeQueryConfig{
-				MaxResults:  3,
-				Threshold:   0.7,
 				AlwaysQuery: false,
 			}
 		}
@@ -346,8 +336,8 @@ func (this *Agent) queryKnowledge(ctx context.Context, query string) ([]*knowled
 	}
 
 	searchOptions := knowledge.SearchOptions{
-		Limit:     this.knowledgeConfig.MaxResults,
-		Threshold: this.knowledgeConfig.Threshold,
+		Limit:     this.knowledgeManager.GetConfig().DefaultSearchOptions.Limit,
+		Threshold: this.knowledgeManager.GetConfig().DefaultSearchOptions.Threshold,
 	}
 
 	results, err := this.knowledgeManager.Search(ctx, query, searchOptions)

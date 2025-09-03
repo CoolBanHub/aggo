@@ -157,8 +157,6 @@ func main() {
 		agent.WithMemoryManager(memoryManager),
 		agent.WithKnowledgeManager(knowledgeManager),
 		agent.WithKnowledgeQueryConfig(&agent.KnowledgeQueryConfig{
-			MaxResults:  3,
-			Threshold:   0.7,
 			AlwaysQuery: false,
 		}),
 		agent.WithSystemPrompt("你是一个技术专家助手。当用户询问技术问题时，你应该使用 knowledge_reason 工具来搜索和分析相关信息，然后提供准确的回答。"))
