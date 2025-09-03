@@ -82,6 +82,8 @@ type SearchResult struct {
 type KnowledgeConfig struct {
 	Storage KnowledgeStorage //存储数据
 
+	StorageTablePrefix string
+
 	VectorDB VectorDB //存储向量数据
 	// 嵌入模型
 	Em embedding.Embedder

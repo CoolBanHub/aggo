@@ -47,6 +47,10 @@ func NewKnowledgeManager(config *KnowledgeConfig) (*KnowledgeManager, error) {
 		}
 	}
 
+	if config.StorageTablePrefix != "" && config.Storage != nil {
+		config.Storage.SetTablePrefix(config.StorageTablePrefix)
+	}
+
 	// 创建分块策略
 	chunkingStrategy := NewFixedSizeChunkingStrategy(
 		config.DefaultLoadOptions.ChunkSize,
