@@ -47,8 +47,15 @@ func NewKnowledgeManager(config *KnowledgeConfig) (*KnowledgeManager, error) {
 		}
 	}
 
-	if config.StorageTablePrefix != "" && config.Storage != nil {
-		config.Storage.SetTablePrefix(config.StorageTablePrefix)
+	if config.Storage != nil {
+		if config.StorageTablePrefix != "" {
+			config.Storage.SetTablePrefix(config.StorageTablePrefix)
+		}
+
+		// 自动迁移数据库表结构
+		if err := config.Storage.AutoMigrate(); err != nil {
+			return nil, fmt.Errorf("failed to auto migrate: %w", err)
+		}
 	}
 
 	// 创建分块策略

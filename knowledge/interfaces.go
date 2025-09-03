@@ -112,6 +112,7 @@ type ChunkingStrategy interface {
 
 // KnowledgeStorage 知识库存储接口
 type KnowledgeStorage interface {
+	AutoMigrate() error
 
 	//SetTablePrefix 设置表前缀
 	SetTablePrefix(prefix string)

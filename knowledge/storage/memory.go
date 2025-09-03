@@ -26,6 +26,10 @@ func NewMemoryStorage() *MemoryStorage {
 func (gs *MemoryStorage) SetTablePrefix(prefix string) {
 }
 
+func (gs *MemoryStorage) AutoMigrate() error {
+	return nil
+}
+
 // SaveDocument 保存文档
 func (ms *MemoryStorage) SaveDocument(ctx context.Context, doc *knowledge.Document) error {
 	ms.mu.Lock()

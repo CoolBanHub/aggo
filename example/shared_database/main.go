@@ -140,11 +140,16 @@ func demonstrateSharedUsage(ctx context.Context, knowledgeStorage knowledge.Know
 	// 5. 创建记忆管理器（使用共享的memory存储）
 	var memoryManager *memory.MemoryManager
 	if chatModel != nil {
-		memoryManager = memory.NewMemoryManager(chatModel, memoryStorage, &memory.MemoryConfig{
+		memoryManager, err = memory.NewMemoryManager(chatModel, memoryStorage, &memory.MemoryConfig{
 			EnableUserMemories:   true,
 			EnableSessionSummary: false,
 			MemoryLimit:          100,
 		})
+
+		if err != nil {
+			log.Fatalf("new manager fail,err:%s", err)
+			return err
+		}
 	}
 
 	// 6. 加载一些测试文档到知识库

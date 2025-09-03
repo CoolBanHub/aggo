@@ -38,11 +38,6 @@ func NewGormStorage(db *gorm.DB) (*SQLStore, error) {
 		tableNameProvider: NewTableNameProvider("aggo_mem"), // 默认前缀
 	}
 
-	// 自动迁移表结构
-	if err := store.migrate(); err != nil {
-		return nil, fmt.Errorf("数据库迁移失败: %v", err)
-	}
-
 	return store, nil
 }
 
@@ -50,8 +45,8 @@ func (s *SQLStore) SetTablePrefix(prefix string) {
 	s.tableNameProvider = NewTableNameProvider(prefix)
 }
 
-// migrate 自动迁移表结构
-func (s *SQLStore) migrate() error {
+// AutoMigrate 自动迁移表结构
+func (s *SQLStore) AutoMigrate() error {
 	// 使用实例的表名提供器来指定表名
 	if err := s.db.Table(s.tableNameProvider.GetUserMemoryTableName()).AutoMigrate(&UserMemoryModel{}); err != nil {
 		return err

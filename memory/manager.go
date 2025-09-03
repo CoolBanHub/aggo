@@ -41,7 +41,7 @@ type asyncTask struct {
 }
 
 // NewMemoryManager 创建新的记忆管理器
-func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage, config *MemoryConfig) *MemoryManager {
+func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage, config *MemoryConfig) (*MemoryManager, error) {
 	if config == nil {
 		config = &MemoryConfig{
 			EnableUserMemories:   true,
@@ -61,6 +61,11 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 	// 设置表前缀
 	if config.TablePre != "" {
 		memoryStorage.SetTablePrefix(config.TablePre)
+	}
+
+	err := memoryStorage.AutoMigrate()
+	if err != nil {
+		return nil, err
 	}
 
 	if config.MemoryLimit == 0 {
@@ -94,7 +99,7 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 		manager.startAsyncWorkers()
 	}
 
-	return manager
+	return manager, nil
 }
 
 // startAsyncWorkers 启动异步工作goroutine池

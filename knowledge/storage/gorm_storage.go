@@ -27,11 +27,6 @@ func NewGormStorage(db *gorm.DB) (*GormStorage, error) {
 		tableNameProvider: NewTableNameProvider("aggo_knowledge"),
 	}
 
-	// 自动迁移数据库表结构
-	if err := storage.AutoMigrate(); err != nil {
-		return nil, fmt.Errorf("failed to auto migrate: %w", err)
-	}
-
 	return storage, nil
 }
 

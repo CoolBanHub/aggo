@@ -39,13 +39,17 @@ func main() {
 		log.Fatalf("new sql store fail,err:%s", err)
 		return
 	}
-	memoryManager := memory.NewMemoryManager(cm, s, &memory.MemoryConfig{
+	memoryManager, err := memory.NewMemoryManager(cm, s, &memory.MemoryConfig{
 		EnableSessionSummary: true,
 		EnableUserMemories:   true,
 		MemoryLimit:          8,
 		Retrieval:            memory.RetrievalLastN,
 		AsyncProcessing:      true,
 	})
+	if err != nil {
+		log.Fatalf("new manager fail,err:%s", err)
+		return
+	}
 	defer memoryManager.Close()
 	sessionID := utils.GetUUIDNoDash()
 	bot, err := agent.NewAgent(ctx, cm,
