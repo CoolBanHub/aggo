@@ -7,7 +7,6 @@ import (
 
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/memory"
-	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -24,9 +23,6 @@ type state struct {
 type Agent struct {
 	systemPrompt string
 	cm           model.ToolCallingChatModel
-
-	userID    string
-	sessionID string //会话id，记忆需要使用
 
 	knowledgeManager *knowledge.KnowledgeManager
 	// 知识库查询配置
@@ -65,13 +61,13 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 	for _, opt := range opts {
 		opt(this)
 	}
-	if this.sessionID == "" {
-		this.sessionID = utils.GetUUIDNoDash()
-	}
-
-	if this.sessionID != "" && this.userID == "" {
-		this.userID = this.sessionID
-	}
+	//if this.sessionID == "" {
+	//	this.sessionID = utils.GetUUIDNoDash()
+	//}
+	//
+	//if this.sessionID != "" && this.userID == "" {
+	//	this.userID = this.sessionID
+	//}
 	if this.knowledgeManager != nil {
 		//配置知识库的分析tool
 		if this.knowledgeConfig == nil {
@@ -129,11 +125,16 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 	return this, nil
 }
 
-func (this *Agent) Generate(ctx context.Context, input []*schema.Message, composeOpts ...compose.Option) (*schema.Message, error) {
+func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.Message, error) {
 
-	opts := agent.WithComposeOptions(composeOpts...)
+	chatOpts := &chatOptions{}
+	for _, opt := range opts {
+		opt(chatOpts)
+	}
 
-	_input, err := this.inputMessageModifier(ctx, input)
+	agentOpts := agent.WithComposeOptions(chatOpts.composeOptions...)
+
+	_input, err := this.inputMessageModifier(ctx, input, chatOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -143,22 +144,22 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, compos
 		ctx = context.WithValue(ctx, "messages", _input)
 	}
 	// 存储用户消息
-	if err := this.storeUserMessage(ctx, input); err != nil {
+	if err := this.storeUserMessage(ctx, input, chatOpts); err != nil {
 		return nil, err
 	}
 
 	var response *schema.Message
 	if this.multiAgent != nil {
-		response, err = this.multiAgent.Generate(ctx, _input, opts)
+		response, err = this.multiAgent.Generate(ctx, _input, agentOpts)
 	} else {
-		response, err = this.agent.Generate(ctx, _input, opts)
+		response, err = this.agent.Generate(ctx, _input, agentOpts)
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	// 存储助手回复
-	if err := this.storeAssistantMessage(ctx, response); err != nil {
+	if err := this.storeAssistantMessage(ctx, response, chatOpts); err != nil {
 		// 存储失败不应阻断回复，只记录错误
 		fmt.Printf("存储助手消息失败: %v\n", err)
 	}
@@ -166,11 +167,16 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, compos
 	return response, nil
 }
 
-func (this *Agent) Stream(ctx context.Context, input []*schema.Message, composeOpts ...compose.Option) (*schema.StreamReader[*schema.Message], error) {
+func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
 
-	opts := agent.WithComposeOptions(composeOpts...)
+	chatOpts := &chatOptions{}
+	for _, opt := range opts {
+		opt(chatOpts)
+	}
 
-	_input, err := this.inputMessageModifier(ctx, input)
+	agentOpts := agent.WithComposeOptions(chatOpts.composeOptions...)
+
+	_input, err := this.inputMessageModifier(ctx, input, chatOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -180,28 +186,28 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, composeO
 		ctx = context.WithValue(ctx, "messages", _input)
 	}
 	// 存储用户消息
-	if err := this.storeUserMessage(ctx, input); err != nil {
+	if err := this.storeUserMessage(ctx, input, chatOpts); err != nil {
 		return nil, err
 	}
 
 	//todo 增加stream的callback
 	var response *schema.StreamReader[*schema.Message]
 	if this.multiAgent != nil {
-		response, err = this.multiAgent.Stream(ctx, _input, opts)
+		response, err = this.multiAgent.Stream(ctx, _input, agentOpts)
 	} else {
-		response, err = this.agent.Stream(ctx, _input, opts)
+		response, err = this.agent.Stream(ctx, _input, agentOpts)
 	}
 	return response, err
 }
 
-func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Message) ([]*schema.Message, error) {
+func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) ([]*schema.Message, error) {
 	var _input []*schema.Message
 
 	if this.memoryManager != nil {
 		//input 肯定只有1条
 
 		// 1. 获取历史消息（不包含当前消息）
-		historyMessages, err := this.memoryManager.GetMessages(ctx, this.sessionID, this.userID, this.memoryManager.GetConfig().MemoryLimit)
+		historyMessages, err := this.memoryManager.GetMessages(ctx, chatOpts.sessionID, chatOpts.userID, this.memoryManager.GetConfig().MemoryLimit)
 		if err != nil {
 			return nil, fmt.Errorf("获取历史消息失败: %v", err)
 		}
@@ -211,7 +217,7 @@ func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Mes
 
 		// 3. 添加用户记忆到上下文
 		if this.memoryManager.GetConfig().EnableUserMemories {
-			userMemories, err := this.memoryManager.GetUserMemories(ctx, this.userID)
+			userMemories, err := this.memoryManager.GetUserMemories(ctx, chatOpts.userID)
 			if err != nil {
 				return nil, fmt.Errorf("获取用户记忆失败: %v", err)
 			}
@@ -229,7 +235,7 @@ func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Mes
 
 		// 4. 添加会话摘要到上下文
 		if this.memoryManager.GetConfig().EnableSessionSummary {
-			sessionSummary, err := this.memoryManager.GetSessionSummary(ctx, this.sessionID, this.userID)
+			sessionSummary, err := this.memoryManager.GetSessionSummary(ctx, chatOpts.sessionID, chatOpts.userID)
 			if err != nil {
 				return nil, fmt.Errorf("获取会话摘要失败: %v", err)
 			}
@@ -286,17 +292,17 @@ func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Mes
 }
 
 // storeUserMessage 存储用户消息
-func (this *Agent) storeUserMessage(ctx context.Context, input []*schema.Message) error {
-	if this.sessionID != "" && this.memoryManager != nil && len(input) > 0 {
-		return this.memoryManager.ProcessUserMessage(ctx, this.userID, this.sessionID, input[0].Content)
+func (this *Agent) storeUserMessage(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) error {
+	if chatOpts.sessionID != "" && this.memoryManager != nil && len(input) > 0 {
+		return this.memoryManager.ProcessUserMessage(ctx, chatOpts.userID, chatOpts.sessionID, input[0].Content)
 	}
 	return nil
 }
 
 // storeAssistantMessage 存储助手消息
-func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.Message) error {
-	if this.sessionID != "" && this.memoryManager != nil && response != nil {
-		return this.memoryManager.ProcessAssistantMessage(ctx, this.userID, this.sessionID, response.Content)
+func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.Message, chatOpts *chatOptions) error {
+	if chatOpts.sessionID != "" && this.memoryManager != nil && response != nil {
+		return this.memoryManager.ProcessAssistantMessage(ctx, chatOpts.userID, chatOpts.sessionID, response.Content)
 	}
 	return nil
 }
@@ -389,7 +395,6 @@ func (this *Agent) formatKnowledgeResults(results []*knowledge.SearchResult) str
 
 func (this *Agent) NewSpecialist() *host.Specialist {
 	//作为子agent的时候，不调用memory，这个由父级的agent去调用接管
-	this.sessionID = ""
 	this.memoryManager = nil
 
 	return &host.Specialist{

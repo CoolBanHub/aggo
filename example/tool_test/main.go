@@ -40,7 +40,7 @@ func main() {
 		log.Printf("User: %s", conversation)
 		out, err := bot.Generate(ctx, []*schema.Message{
 			schema.UserMessage(conversation),
-		}, agent.ConvToolsToCompose(tools.GetSysInfoTool())...)
+		}, agent.WithChatTools(tools.GetSysInfoTool()))
 		if err != nil {
 			log.Fatalf("generate fail,err:%s", err)
 			return

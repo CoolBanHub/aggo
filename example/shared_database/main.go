@@ -259,8 +259,6 @@ func demonstrateSharedUsage(ctx context.Context, knowledgeStorage knowledge.Know
 	aiAgent, err := agent.NewAgent(ctx, chatModel,
 		agent.WithKnowledgeManager(knowledgeManager),
 		agent.WithMemoryManager(memoryManager),
-		agent.WithUserID(userID),
-		agent.WithSessionID(sessionID),
 		agent.WithSystemPrompt("我是一个使用共享数据库的AI助手"),
 	)
 	if err != nil {
@@ -271,7 +269,7 @@ func demonstrateSharedUsage(ctx context.Context, knowledgeStorage knowledge.Know
 	// 测试对话
 	response, err := aiAgent.Generate(ctx, []*schema.Message{
 		schema.UserMessage("你能告诉我关于共享数据库的信息吗？"),
-	})
+	}, agent.WithChatUserID(userID), agent.WithChatSessionID(sessionID))
 	if err != nil {
 		log.Printf("代理对话失败: %v", err)
 		return nil

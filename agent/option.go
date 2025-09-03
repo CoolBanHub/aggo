@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"context"
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/memory"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/multiagent/host"
 )
 
@@ -33,18 +36,6 @@ func WithKnowledgeManager(knowledgeManager *knowledge.KnowledgeManager) Option {
 	}
 }
 
-func WithSessionID(sessionID string) Option {
-	return func(agent *Agent) {
-		agent.sessionID = sessionID
-	}
-}
-
-func WithUserID(userID string) Option {
-	return func(agent *Agent) {
-		agent.userID = userID
-	}
-}
-
 func WithMemoryManager(memoryManager *memory.MemoryManager) Option {
 	return func(agent *Agent) {
 		agent.memoryManager = memoryManager
@@ -66,5 +57,35 @@ func WithKnowledgeQueryConfig(config *KnowledgeQueryConfig) Option {
 func WithSpecialists(specialist []*host.Specialist) Option {
 	return func(agent *Agent) {
 		agent.specialist = specialist
+	}
+}
+
+type chatOptions struct {
+	composeOptions []compose.Option
+	userID         string
+	sessionID      string
+}
+
+type ChatOption func(*chatOptions)
+
+func WithChatTools(tools []tool.BaseTool) ChatOption {
+	return func(co *chatOptions) {
+		toolInfos, _ := genToolInfos(context.Background(), tools)
+		co.composeOptions = append(co.composeOptions,
+			compose.WithToolsNodeOption(compose.WithToolList(tools...)),
+			compose.WithChatModelOption(model.WithTools(toolInfos)),
+		)
+	}
+}
+
+func WithChatUserID(userID string) ChatOption {
+	return func(co *chatOptions) {
+		co.userID = userID
+	}
+}
+
+func WithChatSessionID(sessionID string) ChatOption {
+	return func(co *chatOptions) {
+		co.sessionID = sessionID
 	}
 }

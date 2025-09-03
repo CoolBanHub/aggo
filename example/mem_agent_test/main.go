@@ -51,7 +51,7 @@ func main() {
 	bot, err := agent.NewAgent(ctx, cm,
 		agent.WithMemoryManager(memoryManager),
 		agent.WithSystemPrompt("你是一名28岁的厦门女孩,名叫mary,是一名短视频剪辑师，主要剪辑电影类。喜欢养狗，家里有一只金毛，它叫小黄。喜欢宅在家里刷剧。不喜欢吃水果。性格内向高冷，别人不问的时候，一般都不回答自己的信息"),
-		agent.WithSessionID(sessionID))
+	)
 	if err != nil {
 		log.Fatalf("new agent fail,err:%s", err)
 		return
@@ -78,7 +78,7 @@ func main() {
 		log.Printf("User: %s", conversation)
 		out, err := bot.Generate(ctx, []*schema.Message{
 			schema.UserMessage(conversation),
-		})
+		}, agent.WithChatSessionID(sessionID))
 		if err != nil {
 			log.Fatalf("generate fail,err:%s", err)
 			return
