@@ -106,7 +106,7 @@ type LoadOptionsInput struct {
 type SearchParams struct {
 	Query     string                 `json:"query" jsonschema:"description=搜索查询,required"`
 	Limit     int                    `json:"limit,omitempty" jsonschema:"description=返回结果数量限制,默认10"`
-	Threshold float32                `json:"threshold,omitempty" jsonschema:"description=相似度阈值,默认0.7"`
+	Threshold float64                `json:"threshold,omitempty" jsonschema:"description=相似度阈值,默认0.7"`
 	Filters   map[string]interface{} `json:"filters,omitempty" jsonschema:"description=元数据过滤条件"`
 }
 

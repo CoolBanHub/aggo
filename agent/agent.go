@@ -52,7 +52,7 @@ type KnowledgeQueryConfig struct {
 	// 最大查询结果数量
 	MaxResults int
 	// 相似度阈值
-	Threshold float32
+	Threshold float64
 	// 是否总是查询（不使用关键词触发）
 	AlwaysQuery bool
 }

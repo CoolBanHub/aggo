@@ -37,6 +37,9 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
+func (m *MemoryStore) SetTablePrefix(prefix string) {
+}
+
 // generateKey 生成会话相关的复合键
 func (m *MemoryStore) generateKey(sessionID, userID string) string {
 	return fmt.Sprintf("%s:%s", sessionID, userID)

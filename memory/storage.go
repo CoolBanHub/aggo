@@ -5,6 +5,10 @@ import "context"
 // MemoryStorage 记忆存储接口
 // 定义了记忆存储的基本操作，可以有多种实现（内存、SQL、NoSQL等）
 type MemoryStorage interface {
+
+	//SetTablePrefix 设置表前缀
+	SetTablePrefix(prefix string)
+
 	// 用户记忆操作
 
 	// SaveUserMemory 保存用户记忆

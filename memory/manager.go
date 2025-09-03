@@ -41,7 +41,7 @@ type asyncTask struct {
 }
 
 // NewMemoryManager 创建新的记忆管理器
-func NewMemoryManager(cm model.ToolCallingChatModel, storage MemoryStorage, config *MemoryConfig) *MemoryManager {
+func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage, config *MemoryConfig) *MemoryManager {
 	if config == nil {
 		config = &MemoryConfig{
 			EnableUserMemories:   true,
@@ -56,6 +56,11 @@ func NewMemoryManager(cm model.ToolCallingChatModel, storage MemoryStorage, conf
 				MinInterval:      600, // 600秒最小间隔
 			},
 		}
+	}
+
+	// 设置表前缀
+	if config.TablePre != "" {
+		memoryStorage.SetTablePrefix(config.TablePre)
 	}
 
 	if config.MemoryLimit == 0 {
@@ -74,7 +79,7 @@ func NewMemoryManager(cm model.ToolCallingChatModel, storage MemoryStorage, conf
 	ctx, cancel := context.WithCancel(context.Background())
 
 	manager := &MemoryManager{
-		storage:                 storage,
+		storage:                 memoryStorage,
 		config:                  config,
 		userMemoryAnalyzer:      NewUserMemoryAnalyzer(cm),
 		sessionSummaryGenerator: NewSessionSummaryGenerator(cm),

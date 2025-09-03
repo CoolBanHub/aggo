@@ -44,6 +44,10 @@ func NewGormStorage(db *gorm.DB) (*SQLStore, error) {
 	return store, nil
 }
 
+func (s *SQLStore) SetTablePrefix(prefix string) {
+	SetTablePrefix(prefix)
+}
+
 // migrate 自动迁移表结构
 func (s *SQLStore) migrate() error {
 	return s.db.AutoMigrate(

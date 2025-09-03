@@ -18,7 +18,7 @@ type UserMemoryModel struct {
 
 // TableName 指定表名
 func (UserMemoryModel) TableName() string {
-	return "aggo_mem_user_memories"
+	return tableNameProvider.GetUserMemoryTableName()
 }
 
 // SessionSummaryModel GORM模型 - 会话摘要表
@@ -32,7 +32,7 @@ type SessionSummaryModel struct {
 
 // TableName 指定表名
 func (SessionSummaryModel) TableName() string {
-	return "aggo_mem_session_summaries"
+	return tableNameProvider.GetSessionSummaryTableName()
 }
 
 // ConversationMessageModel GORM模型 - 对话消息表
@@ -47,7 +47,7 @@ type ConversationMessageModel struct {
 
 // TableName 指定表名
 func (ConversationMessageModel) TableName() string {
-	return "aggo_mem_conversation_messages"
+	return tableNameProvider.GetConversationMessageTableName()
 }
 
 // 模型转换函数

@@ -82,6 +82,8 @@ type MemoryConfig struct {
 
 	// 摘要触发配置
 	SummaryTrigger SummaryTriggerConfig `json:"summaryTrigger"`
+
+	TablePre string `json:"tablePre"`
 }
 
 // SummaryTriggerConfig 摘要触发配置
