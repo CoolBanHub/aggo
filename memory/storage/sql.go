@@ -22,7 +22,8 @@ const (
 // SQLStore 通用SQL存储实现
 // 支持MySQL、PostgreSQL和SQLite
 type SQLStore struct {
-	db *gorm.DB
+	db                *gorm.DB
+	tableNameProvider *TableNameProvider
 }
 
 // NewGormStorage 创建新的SQL存储实例
@@ -33,7 +34,8 @@ func NewGormStorage(db *gorm.DB) (*SQLStore, error) {
 	}
 
 	store := &SQLStore{
-		db: db,
+		db:                db,
+		tableNameProvider: NewTableNameProvider("aggo_mem"), // 默认前缀
 	}
 
 	// 自动迁移表结构
@@ -45,16 +47,22 @@ func NewGormStorage(db *gorm.DB) (*SQLStore, error) {
 }
 
 func (s *SQLStore) SetTablePrefix(prefix string) {
-	SetTablePrefix(prefix)
+	s.tableNameProvider = NewTableNameProvider(prefix)
 }
 
 // migrate 自动迁移表结构
 func (s *SQLStore) migrate() error {
-	return s.db.AutoMigrate(
-		&UserMemoryModel{},
-		&SessionSummaryModel{},
-		&ConversationMessageModel{},
-	)
+	// 使用实例的表名提供器来指定表名
+	if err := s.db.Table(s.tableNameProvider.GetUserMemoryTableName()).AutoMigrate(&UserMemoryModel{}); err != nil {
+		return err
+	}
+	if err := s.db.Table(s.tableNameProvider.GetSessionSummaryTableName()).AutoMigrate(&SessionSummaryModel{}); err != nil {
+		return err
+	}
+	if err := s.db.Table(s.tableNameProvider.GetConversationMessageTableName()).AutoMigrate(&ConversationMessageModel{}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // SaveUserMemory 保存用户记忆
@@ -86,7 +94,7 @@ func (s *SQLStore) SaveUserMemory(ctx context.Context, memory *memory.UserMemory
 	model.FromUserMemory(memory)
 
 	// 保存到数据库
-	if err := s.db.WithContext(ctx).Create(model).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetUserMemoryTableName()).Create(model).Error; err != nil {
 		return fmt.Errorf("保存记忆到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
@@ -100,7 +108,7 @@ func (s *SQLStore) GetUserMemories(ctx context.Context, userID string, limit int
 	}
 
 	var models []UserMemoryModel
-	query := s.db.WithContext(ctx).Where("user_id = ?", userID)
+	query := s.db.WithContext(ctx).Table(s.tableNameProvider.GetUserMemoryTableName()).Where("user_id = ?", userID)
 
 	if limit > 0 {
 		// 根据检索方式确定排序和限制
@@ -142,7 +150,7 @@ func (s *SQLStore) UpdateUserMemory(ctx context.Context, userMemory *memory.User
 
 	// 检查记忆是否存在
 	var exists bool
-	if err := s.db.WithContext(ctx).Model(&UserMemoryModel{}).
+	if err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetUserMemoryTableName()).
 		Select("count(*) > 0").Where("id = ?", userMemory.ID).
 		Find(&exists).Error; err != nil {
 		return fmt.Errorf("检查记忆是否存在失败: %v", err)
@@ -159,7 +167,7 @@ func (s *SQLStore) UpdateUserMemory(ctx context.Context, userMemory *memory.User
 	model.FromUserMemory(userMemory)
 
 	// 更新数据库
-	if err := s.db.WithContext(ctx).Save(model).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetUserMemoryTableName()).Save(model).Error; err != nil {
 		return fmt.Errorf("更新记忆到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
@@ -172,7 +180,7 @@ func (s *SQLStore) DeleteUserMemory(ctx context.Context, memoryID string) error 
 		return errors.New("记忆ID不能为空")
 	}
 
-	result := s.db.WithContext(ctx).Delete(&UserMemoryModel{}, "id = ?", memoryID)
+	result := s.db.WithContext(ctx).Table(s.tableNameProvider.GetUserMemoryTableName()).Delete(&UserMemoryModel{}, "id = ?", memoryID)
 	if result.Error != nil {
 		return fmt.Errorf("删除记忆失败: %v", result.Error)
 	}
@@ -190,7 +198,7 @@ func (s *SQLStore) DeleteUserMemoriesByIds(ctx context.Context, userID string, m
 	if len(memoryIDs) == 0 {
 		return nil
 	}
-	result := s.db.WithContext(ctx).Delete(&UserMemoryModel{}, "user_id = ? and id in ?", userID, memoryIDs)
+	result := s.db.WithContext(ctx).Table(s.tableNameProvider.GetUserMemoryTableName()).Delete(&UserMemoryModel{}, "user_id = ? and id in ?", userID, memoryIDs)
 	if result.Error != nil {
 		return fmt.Errorf("删除记忆失败: %v", result.Error)
 	}
@@ -207,7 +215,7 @@ func (s *SQLStore) ClearUserMemories(ctx context.Context, userID string) error {
 		return errors.New("用户ID不能为空")
 	}
 
-	if err := s.db.WithContext(ctx).Where("user_id = ?", userID).Delete(&UserMemoryModel{}).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetUserMemoryTableName()).Where("user_id = ?", userID).Delete(&UserMemoryModel{}).Error; err != nil {
 		return fmt.Errorf("清空用户记忆失败: %v", err)
 	}
 
@@ -227,7 +235,7 @@ func (s *SQLStore) SearchUserMemories(ctx context.Context, userID string, query 
 	searchQuery := "%" + query + "%"
 
 	// 根据数据库类型使用不同的搜索语法
-	dbQuery := s.db.WithContext(ctx).Where("user_id = ?", userID)
+	dbQuery := s.db.WithContext(ctx).Table(s.tableNameProvider.GetUserMemoryTableName()).Where("user_id = ?", userID)
 	if s.db.Config.Dialector.Name() == DialectPostgreSQL {
 		// PostgreSQL使用ILIKE进行大小写不敏感的搜索
 		dbQuery = dbQuery.Where("memory ILIKE ? OR input ILIKE ?", searchQuery, searchQuery)
@@ -279,7 +287,7 @@ func (s *SQLStore) SaveSessionSummary(ctx context.Context, summary *memory.Sessi
 	model.FromSessionSummary(summary)
 
 	// 使用UPSERT语义
-	if err := s.db.WithContext(ctx).Save(model).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetSessionSummaryTableName()).Save(model).Error; err != nil {
 		return fmt.Errorf("保存会话摘要到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
@@ -296,7 +304,7 @@ func (s *SQLStore) GetSessionSummary(ctx context.Context, sessionID string, user
 	}
 
 	var model SessionSummaryModel
-	err := s.db.WithContext(ctx).Where("session_id = ? AND user_id = ?", sessionID, userID).First(&model).Error
+	err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetSessionSummaryTableName()).Where("session_id = ? AND user_id = ?", sessionID, userID).First(&model).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil // 摘要不存在
@@ -321,7 +329,7 @@ func (s *SQLStore) UpdateSessionSummary(ctx context.Context, summary *memory.Ses
 
 	// 检查摘要是否存在
 	var exists bool
-	if err := s.db.WithContext(ctx).Model(&SessionSummaryModel{}).
+	if err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetSessionSummaryTableName()).
 		Select("count(*) > 0").Where("session_id = ? AND user_id = ?", summary.SessionID, summary.UserID).
 		Find(&exists).Error; err != nil {
 		return fmt.Errorf("检查会话摘要是否存在失败: %v", err)
@@ -338,7 +346,7 @@ func (s *SQLStore) UpdateSessionSummary(ctx context.Context, summary *memory.Ses
 	model.FromSessionSummary(summary)
 
 	// 更新数据库
-	if err := s.db.WithContext(ctx).Save(model).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetSessionSummaryTableName()).Save(model).Error; err != nil {
 		return fmt.Errorf("更新会话摘要到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
@@ -354,7 +362,7 @@ func (s *SQLStore) DeleteSessionSummary(ctx context.Context, sessionID string, u
 		return errors.New("用户ID不能为空")
 	}
 
-	result := s.db.WithContext(ctx).Delete(&SessionSummaryModel{}, "session_id = ? AND user_id = ?", sessionID, userID)
+	result := s.db.WithContext(ctx).Table(s.tableNameProvider.GetSessionSummaryTableName()).Delete(&SessionSummaryModel{}, "session_id = ? AND user_id = ?", sessionID, userID)
 	if result.Error != nil {
 		return fmt.Errorf("删除会话摘要失败: %v", result.Error)
 	}
@@ -392,7 +400,7 @@ func (s *SQLStore) SaveMessage(ctx context.Context, message *memory.Conversation
 	model.FromConversationMessage(message)
 
 	// 保存到数据库
-	if err := s.db.WithContext(ctx).Create(model).Error; err != nil {
+	if err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetConversationMessageTableName()).Create(model).Error; err != nil {
 		return fmt.Errorf("保存消息到%s失败: %v", s.db.Config.Dialector.Name(), err)
 	}
 
@@ -409,7 +417,7 @@ func (s *SQLStore) GetMessages(ctx context.Context, sessionID string, userID str
 	}
 
 	var models []ConversationMessageModel
-	query := s.db.WithContext(ctx).Where("session_id = ? AND user_id = ?", sessionID, userID).
+	query := s.db.WithContext(ctx).Table(s.tableNameProvider.GetConversationMessageTableName()).Where("session_id = ? AND user_id = ?", sessionID, userID).
 		Order("created_at DESC")
 
 	if limit > 0 {
@@ -439,7 +447,7 @@ func (s *SQLStore) DeleteMessages(ctx context.Context, sessionID string, userID 
 		return errors.New("用户ID不能为空")
 	}
 
-	if err := s.db.WithContext(ctx).Where("session_id = ? AND user_id = ?", sessionID, userID).
+	if err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetConversationMessageTableName()).Where("session_id = ? AND user_id = ?", sessionID, userID).
 		Delete(&ConversationMessageModel{}).Error; err != nil {
 		return fmt.Errorf("删除消息历史失败: %v", err)
 	}

@@ -18,11 +18,6 @@ type DocumentModel struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deletedAt,omitempty"`
 }
 
-// TableName 指定表名
-func (DocumentModel) TableName() string {
-	return "aggo_knowledge_documents"
-}
-
 // SetMetadata 设置元数据（从 map 转为 JSON 字符串）
 func (d *DocumentModel) SetMetadata(metadata map[string]interface{}) error {
 	if metadata == nil {

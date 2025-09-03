@@ -16,11 +16,6 @@ type UserMemoryModel struct {
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
-// TableName 指定表名
-func (UserMemoryModel) TableName() string {
-	return tableNameProvider.GetUserMemoryTableName()
-}
-
 // SessionSummaryModel GORM模型 - 会话摘要表
 type SessionSummaryModel struct {
 	SessionID string    `gorm:"primaryKey;size:255" json:"sessionId"`
@@ -28,11 +23,6 @@ type SessionSummaryModel struct {
 	Summary   string    `gorm:"type:text;not null" json:"summary"`
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"createdAt"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
-}
-
-// TableName 指定表名
-func (SessionSummaryModel) TableName() string {
-	return tableNameProvider.GetSessionSummaryTableName()
 }
 
 // ConversationMessageModel GORM模型 - 对话消息表
@@ -43,11 +33,6 @@ type ConversationMessageModel struct {
 	Role      string    `gorm:"size:50;not null" json:"role"`
 	Content   string    `gorm:"type:text;not null" json:"content"`
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"createdAt"`
-}
-
-// TableName 指定表名
-func (ConversationMessageModel) TableName() string {
-	return tableNameProvider.GetConversationMessageTableName()
 }
 
 // 模型转换函数

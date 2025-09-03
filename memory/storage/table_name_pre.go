@@ -27,11 +27,3 @@ func (p *TableNameProvider) GetSessionSummaryTableName() string {
 func (p *TableNameProvider) GetConversationMessageTableName() string {
 	return p.tablePrefix + "_conversation_messages"
 }
-
-// Global table name provider instance
-var tableNameProvider *TableNameProvider = NewTableNameProvider("aggo_mem")
-
-// SetTablePrefix sets the global table prefix
-func SetTablePrefix(prefix string) {
-	tableNameProvider = NewTableNameProvider(prefix)
-}

@@ -12,7 +12,8 @@ import (
 
 // GormStorage GORM 存储实现
 type GormStorage struct {
-	db *gorm.DB
+	db                *gorm.DB
+	tableNameProvider *TableNameProvider
 }
 
 // NewGormStorage 使用现有的 GORM 实例创建存储实例
@@ -22,7 +23,8 @@ func NewGormStorage(db *gorm.DB) (*GormStorage, error) {
 	}
 
 	storage := &GormStorage{
-		db: db,
+		db:                db,
+		tableNameProvider: NewTableNameProvider("aggo_knowledge"),
 	}
 
 	// 自动迁移数据库表结构
@@ -33,9 +35,13 @@ func NewGormStorage(db *gorm.DB) (*GormStorage, error) {
 	return storage, nil
 }
 
+func (gs *GormStorage) SetTablePrefix(prefix string) {
+	gs.tableNameProvider = NewTableNameProvider(prefix)
+}
+
 // AutoMigrate 自动迁移数据库表结构
 func (gs *GormStorage) AutoMigrate() error {
-	return gs.db.AutoMigrate(&DocumentModel{})
+	return gs.db.Table(gs.tableNameProvider.GetDocumentTableName()).AutoMigrate(&DocumentModel{})
 }
 
 // documentToModel 将知识库文档转换为 GORM 模型（不包含向量数据）
@@ -79,7 +85,7 @@ func (gs *GormStorage) SaveDocument(ctx context.Context, doc *knowledge.Document
 	}
 
 	// 使用 GORM 的 Save 方法，自动处理插入或更新
-	if err := gs.db.WithContext(ctx).Save(model).Error; err != nil {
+	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Save(model).Error; err != nil {
 		return fmt.Errorf("failed to save document: %w", err)
 	}
 
@@ -94,7 +100,7 @@ func (gs *GormStorage) SaveDocument(ctx context.Context, doc *knowledge.Document
 func (gs *GormStorage) GetDocument(ctx context.Context, docID string) (*knowledge.Document, error) {
 	var model DocumentModel
 
-	if err := gs.db.WithContext(ctx).Where("id = ?", docID).First(&model).Error; err != nil {
+	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", docID).First(&model).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("文档未找到: %s", docID)
 		}
@@ -108,7 +114,7 @@ func (gs *GormStorage) GetDocument(ctx context.Context, docID string) (*knowledg
 func (gs *GormStorage) UpdateDocument(ctx context.Context, doc *knowledge.Document) error {
 	// 首先检查文档是否存在
 	var count int64
-	if err := gs.db.WithContext(ctx).Model(&DocumentModel{}).Where("id = ?", doc.ID).Count(&count).Error; err != nil {
+	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", doc.ID).Count(&count).Error; err != nil {
 		return fmt.Errorf("failed to check document existence: %w", err)
 	}
 
@@ -122,13 +128,13 @@ func (gs *GormStorage) UpdateDocument(ctx context.Context, doc *knowledge.Docume
 	}
 
 	// 使用 Updates 方法更新（会自动更新 updated_at）
-	if err := gs.db.WithContext(ctx).Model(&DocumentModel{}).Where("id = ?", doc.ID).Updates(model).Error; err != nil {
+	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", doc.ID).Updates(model).Error; err != nil {
 		return fmt.Errorf("failed to update document: %w", err)
 	}
 
 	// 获取更新后的时间戳
 	var updatedModel DocumentModel
-	if err := gs.db.WithContext(ctx).Where("id = ?", doc.ID).First(&updatedModel).Error; err != nil {
+	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", doc.ID).First(&updatedModel).Error; err != nil {
 		return fmt.Errorf("failed to get updated document: %w", err)
 	}
 
@@ -139,7 +145,7 @@ func (gs *GormStorage) UpdateDocument(ctx context.Context, doc *knowledge.Docume
 
 // DeleteDocument 删除文档
 func (gs *GormStorage) DeleteDocument(ctx context.Context, docID string) error {
-	result := gs.db.WithContext(ctx).Where("id = ?", docID).Delete(&DocumentModel{})
+	result := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", docID).Delete(&DocumentModel{})
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to delete document: %w", result.Error)
@@ -156,7 +162,7 @@ func (gs *GormStorage) DeleteDocument(ctx context.Context, docID string) error {
 func (gs *GormStorage) ListDocuments(ctx context.Context, limit int, offset int) ([]*knowledge.Document, error) {
 	var models []DocumentModel
 
-	query := gs.db.WithContext(ctx).Model(&DocumentModel{})
+	query := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName())
 
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -188,7 +194,7 @@ func (gs *GormStorage) SearchDocuments(ctx context.Context, query string, limit 
 	var models []DocumentModel
 
 	// 构建搜索查询
-	dbQuery := gs.db.WithContext(ctx).Model(&DocumentModel{})
+	dbQuery := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName())
 
 	// 根据数据库类型使用不同的搜索策略
 	switch gs.db.Config.Dialector.Name() {
@@ -245,7 +251,7 @@ func (gs *GormStorage) GetDB() *gorm.DB {
 // Count 获取文档总数
 func (gs *GormStorage) Count(ctx context.Context) (int64, error) {
 	var count int64
-	if err := gs.db.WithContext(ctx).Model(&DocumentModel{}).Count(&count).Error; err != nil {
+	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Count(&count).Error; err != nil {
 		return 0, fmt.Errorf("failed to count documents: %w", err)
 	}
 	return count, nil
@@ -278,7 +284,7 @@ func (gs *GormStorage) BatchSaveDocuments(ctx context.Context, docs []*knowledge
 		}
 
 		batch := models[i:end]
-		if err := gs.db.WithContext(ctx).CreateInBatches(batch, len(batch)).Error; err != nil {
+		if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).CreateInBatches(batch, len(batch)).Error; err != nil {
 			return fmt.Errorf("failed to batch save documents: %w", err)
 		}
 	}

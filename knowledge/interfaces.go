@@ -6,6 +6,7 @@ import (
 
 // KnowledgeBase 知识库接口，定义所有知识库实现的契约
 type KnowledgeBase interface {
+
 	// Load 加载文档到知识库
 	Load(ctx context.Context, options LoadOptions) error
 
@@ -111,6 +112,10 @@ type ChunkingStrategy interface {
 
 // KnowledgeStorage 知识库存储接口
 type KnowledgeStorage interface {
+
+	//SetTablePrefix 设置表前缀
+	SetTablePrefix(prefix string)
+
 	// SaveDocument 保存文档
 	SaveDocument(ctx context.Context, doc *Document) error
 
