@@ -7,6 +7,7 @@ import (
 
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/memory"
+	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -14,7 +15,6 @@ import (
 	"github.com/cloudwego/eino/flow/agent/multiagent/host"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
-	"github.com/xmkuban/utils/utils"
 )
 
 type state struct {
@@ -130,7 +130,6 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 }
 
 func (this *Agent) Generate(ctx context.Context, input []*schema.Message) (*schema.Message, error) {
-	ctx = context.WithValue(ctx, "messages", input)
 	composeOpts := []compose.Option{}
 	opts := agent.WithComposeOptions(composeOpts...)
 
@@ -138,7 +137,11 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message) (*sche
 	if err != nil {
 		return nil, err
 	}
-
+	if this.agent != nil && this.systemPrompt != "" {
+		ctx = context.WithValue(ctx, "messages", _input[1:])
+	} else {
+		ctx = context.WithValue(ctx, "messages", _input)
+	}
 	// 存储用户消息
 	if err := this.storeUserMessage(ctx, input); err != nil {
 		return nil, err
@@ -166,15 +169,17 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message) (*sche
 func (this *Agent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
 	composeOpts := []compose.Option{}
 
-	ctx = context.WithValue(ctx, "messages", input)
-
 	opts := agent.WithComposeOptions(composeOpts...)
 
 	_input, err := this.inputMessageModifier(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-
+	if this.agent != nil && this.systemPrompt != "" {
+		ctx = context.WithValue(ctx, "messages", _input[1:])
+	} else {
+		ctx = context.WithValue(ctx, "messages", _input)
+	}
 	// 存储用户消息
 	if err := this.storeUserMessage(ctx, input); err != nil {
 		return nil, err
@@ -267,7 +272,6 @@ func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Mes
 			}
 		}
 	}
-
 	// 5. 添加系统提示词到最前面
 	if this.agent != nil && this.systemPrompt != "" {
 		//单agent的时候需要

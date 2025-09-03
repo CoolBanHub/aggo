@@ -189,10 +189,7 @@ func (t *KnowledgeSearchTool) search(ctx context.Context, params KnowledgeSearch
 	}
 
 	// 构建搜索选项
-	searchOptions := knowledge.SearchOptions{
-		Limit:     limit,
-		Threshold: 0.7, // 默认相似度阈值
-	}
+	searchOptions := t.manager.GetConfig().DefaultSearchOptions
 
 	// 执行搜索
 	results, err := t.manager.Search(ctx, params.Query, searchOptions)

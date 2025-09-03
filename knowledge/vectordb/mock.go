@@ -3,7 +3,6 @@ package vectordb
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/CoolBanHub/aggo/knowledge"
@@ -68,33 +67,6 @@ func (m *MockVectorDB) Search(ctx context.Context, queryVector []float32, limit 
 			result := knowledge.SearchResult{
 				Document: doc,
 				Score:    0.8 - float32(count)*0.1, // Mock相似度得分
-			}
-			results = append(results, result)
-			count++
-		}
-	}
-
-	return results, nil
-}
-
-// SearchByText 文本搜索
-func (m *MockVectorDB) SearchByText(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]knowledge.SearchResult, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	results := make([]knowledge.SearchResult, 0)
-	count := 0
-
-	for _, doc := range m.documents {
-		if count >= limit {
-			break
-		}
-
-		// 简单的文本匹配
-		if strings.Contains(strings.ToLower(doc.Content), strings.ToLower(query)) && passesFilter(doc, filters) {
-			result := knowledge.SearchResult{
-				Document: doc,
-				Score:    0.9 - float32(count)*0.05, // Mock相似度得分
 			}
 			results = append(results, result)
 			count++

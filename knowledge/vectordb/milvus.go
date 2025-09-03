@@ -233,12 +233,6 @@ func (m *MilvusVectorDB) Search(ctx context.Context, queryVector []float32, limi
 	return searchResults, nil
 }
 
-// SearchByText 文本搜索（需要先将文本转换为向量）
-func (m *MilvusVectorDB) SearchByText(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]knowledge.SearchResult, error) {
-	// 这里需要先将文本转换为向量，暂时返回错误提示需要外部处理
-	return nil, fmt.Errorf("SearchByText需要外部先将文本转换为向量，然后调用Search方法")
-}
-
 // DocExists 检查文档是否存在
 func (m *MilvusVectorDB) DocExists(ctx context.Context, docID string) (bool, error) {
 	resultSet, err := m.client.Get(ctx, milvusclient.NewQueryOption(m.collectionName).

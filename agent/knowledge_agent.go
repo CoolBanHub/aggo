@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/flow/agent/multiagent/host"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	"github.com/gookit/slog"
 )
 
 type KnowledgeAgent struct {
@@ -73,7 +74,6 @@ func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel, knowl
 		},
 		ToolReturnDirectly: map[string]struct{}{},
 		MessageModifier: func(ctx context.Context, input []*schema.Message) []*schema.Message {
-
 			return input
 		},
 	})
@@ -89,6 +89,7 @@ func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel, knowl
 func (this *KnowledgeAgent) Generate(ctx context.Context, input []*schema.Message) (*schema.Message, error) {
 	_input, err := this.inputMessageModifier(ctx, input)
 	if err != nil {
+		slog.Error(err)
 		return nil, err
 	}
 	return this.agent.Generate(ctx, _input)
@@ -97,6 +98,7 @@ func (this *KnowledgeAgent) Generate(ctx context.Context, input []*schema.Messag
 func (this *KnowledgeAgent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
 	_input, err := this.inputMessageModifier(ctx, input)
 	if err != nil {
+		slog.Error(err)
 		return nil, err
 	}
 	return this.agent.Stream(ctx, _input)
@@ -135,6 +137,7 @@ func (this *KnowledgeAgent) Run(ctx context.Context, param any) (string, error) 
 	input := ctx.Value("messages").([]*schema.Message)
 	r, err := this.Generate(ctx, input)
 	if err != nil {
+		slog.Error(err)
 		return "", err
 	}
 	return r.Content, nil

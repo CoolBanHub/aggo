@@ -57,9 +57,6 @@ type VectorDB interface {
 	// Search 在向量数据库中搜索相似文档
 	Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}) ([]SearchResult, error)
 
-	// SearchByText 通过文本搜索相似文档（内部会进行向量化）
-	SearchByText(ctx context.Context, query string, limit int, filters map[string]interface{}) ([]SearchResult, error)
-
 	// DocExists 检查文档是否存在于向量数据库中
 	DocExists(ctx context.Context, docID string) (bool, error)
 

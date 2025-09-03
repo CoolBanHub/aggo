@@ -155,12 +155,16 @@ func (km *KnowledgeManager) Search(ctx context.Context, query string, options Se
 	km.mu.RLock()
 	defer km.mu.RUnlock()
 
+	vector, err := km.embedder.Embed(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("生成嵌入失败: %w", err)
+	}
+
 	// 使用向量数据库进行搜索
-	results, err := km.vectorDB.SearchByText(ctx, query, options.Limit, options.Filters)
+	results, err := km.vectorDB.Search(ctx, vector, options.Limit, options.Filters)
 	if err != nil {
 		return nil, fmt.Errorf("向量搜索失败: %w", err)
 	}
-
 	// 过滤低分结果
 	filteredResults := make([]SearchResult, 0, len(results))
 	for _, result := range results {
