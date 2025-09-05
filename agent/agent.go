@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	callbacks2 "github.com/CoolBanHub/aggo/callbacks"
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/memory"
+	"github.com/CoolBanHub/aggo/state"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -15,6 +17,7 @@ import (
 	"github.com/cloudwego/eino/flow/agent/multiagent/host"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	"github.com/cloudwego/eino/utils/callbacks"
 )
 
 type Agent struct {
@@ -54,13 +57,6 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 	for _, opt := range opts {
 		opt(this)
 	}
-	//if this.sessionID == "" {
-	//	this.sessionID = utils.GetUUIDNoDash()
-	//}
-	//
-	//if this.sessionID != "" && this.userID == "" {
-	//	this.userID = this.sessionID
-	//}
 	if this.knowledgeManager != nil {
 		//配置知识库的分析tool
 		if this.knowledgeConfig == nil {
@@ -118,26 +114,11 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 
 func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.Message, error) {
 
-	chatOpts := &chatOptions{}
-	for _, opt := range opts {
-		opt(chatOpts)
-	}
-	if chatOpts.sessionID == "" {
-		chatOpts.sessionID = utils.GetUUIDNoDash()
-	}
-	agentOpts := agent.WithComposeOptions(chatOpts.composeOptions...)
-
-	_input, err := this.inputMessageModifier(ctx, input, chatOpts)
+	var _input []*schema.Message
+	var err error
+	var agentOpts agent.AgentOption
+	ctx, _input, agentOpts, err = this.chatPreHandler(ctx, input, opts...)
 	if err != nil {
-		return nil, err
-	}
-	if this.agent != nil && this.systemPrompt != "" {
-		ctx = context.WithValue(ctx, "messages", _input[1:])
-	} else {
-		ctx = context.WithValue(ctx, "messages", _input)
-	}
-	// 存储用户消息
-	if err := this.storeUserMessage(ctx, input, chatOpts); err != nil {
 		return nil, err
 	}
 
@@ -151,21 +132,40 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 		return nil, err
 	}
 
-	// 存储助手回复
-	if err := this.storeAssistantMessage(ctx, response, chatOpts); err != nil {
-		// 存储失败不应阻断回复，只记录错误
-		fmt.Printf("存储助手消息失败: %v\n", err)
-	}
-
 	return response, nil
 }
 
 func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
 
+	var _input []*schema.Message
+	var err error
+	var agentOpts agent.AgentOption
+	ctx, _input, agentOpts, err = this.chatPreHandler(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	var response *schema.StreamReader[*schema.Message]
+	if this.multiAgent != nil {
+		response, err = this.multiAgent.Stream(ctx, _input, agentOpts)
+	} else {
+		response, err = this.agent.Stream(ctx, _input, agentOpts)
+	}
+	return response, err
+}
+
+func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, opts ...ChatOption) (context.Context, []*schema.Message, agent.AgentOption, error) {
 	chatOpts := &chatOptions{}
 	for _, opt := range opts {
 		opt(chatOpts)
 	}
+	chatModelCallback := callbacks2.NewChatModelCallback(this.storeAssistantMessage)
+	chatOpts.composeOptions = append(chatOpts.composeOptions, compose.WithCallbacks(callbacks.NewHandlerHelper().ChatModel(&callbacks.ModelCallbackHandler{
+		OnStart:               chatModelCallback.OnStart,
+		OnEnd:                 chatModelCallback.OnEnd,
+		OnEndWithStreamOutput: chatModelCallback.OnEndWithStreamOutput,
+		OnError:               chatModelCallback.OnError,
+	}).Handler()))
 
 	if chatOpts.sessionID == "" {
 		chatOpts.sessionID = utils.GetUUIDNoDash()
@@ -175,26 +175,25 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 
 	_input, err := this.inputMessageModifier(ctx, input, chatOpts)
 	if err != nil {
-		return nil, err
-	}
-	if this.agent != nil && this.systemPrompt != "" {
-		ctx = context.WithValue(ctx, "messages", _input[1:])
-	} else {
-		ctx = context.WithValue(ctx, "messages", _input)
-	}
-	// 存储用户消息
-	if err := this.storeUserMessage(ctx, input, chatOpts); err != nil {
-		return nil, err
+		return nil, nil, agentOpts, err
 	}
 
-	//todo 增加stream的callback
-	var response *schema.StreamReader[*schema.Message]
-	if this.multiAgent != nil {
-		response, err = this.multiAgent.Stream(ctx, _input, agentOpts)
-	} else {
-		response, err = this.agent.Stream(ctx, _input, agentOpts)
+	chatState := &state.ChatSate{
+		Input:     _input,
+		SessionID: chatOpts.sessionID,
+		UserID:    chatOpts.userID,
 	}
-	return response, err
+	if this.agent != nil && this.systemPrompt != "" {
+		chatState.Input = _input[1:]
+	}
+	ctx = state.SetChatChatSate(ctx, chatState)
+
+	// 存储用户消息,必须是最原始的input，不是_input
+	if err := this.storeUserMessage(ctx, input, chatOpts); err != nil {
+		return nil, nil, agentOpts, err
+	}
+
+	return ctx, _input, agentOpts, nil
 }
 
 func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) ([]*schema.Message, error) {
@@ -296,12 +295,17 @@ func (this *Agent) storeUserMessage(ctx context.Context, input []*schema.Message
 	return nil
 }
 
-// storeAssistantMessage 存储助手消息
-func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.Message, chatOpts *chatOptions) error {
-	if chatOpts.sessionID != "" && this.memoryManager != nil && response != nil {
-		return this.memoryManager.ProcessAssistantMessage(ctx, chatOpts.userID, chatOpts.sessionID, response.Content)
+// storeAssistantMessage 存储助手消息,在callback统一处理
+func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.Message) {
+	if this.memoryManager != nil && response != nil {
+		chatState := state.GetChatChatSate(ctx)
+		if chatState == nil {
+			return
+		}
+		this.memoryManager.ProcessAssistantMessage(ctx, chatState.UserID, chatState.SessionID, response.Content)
+		return
 	}
-	return nil
+	return
 }
 
 // formatUserMemories 格式化用户记忆为可读的上下文信息
