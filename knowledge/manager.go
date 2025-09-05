@@ -182,9 +182,12 @@ func (km *KnowledgeManager) Search(ctx context.Context, query string, options Se
 	if options.Threshold == 0 {
 		options.Threshold = km.GetConfig().DefaultSearchOptions.Threshold
 	}
+	if options.Mode == "" {
+		options.Mode = km.GetConfig().DefaultSearchOptions.Mode
+	}
 
 	// 根据搜索模式选择使用哪种搜索，默认是向量搜索,目前有向量搜索，模糊搜索，混合搜索
-	switch options.Model {
+	switch options.Mode {
 	case SearchModeFuzzy:
 		return km.fuzzySearch(ctx, query, options)
 	case SearchModeHybrid:

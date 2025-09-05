@@ -62,7 +62,7 @@ type SearchOptions struct {
 	Threshold float64 `json:"threshold,omitempty"`
 
 	//搜索模式 向量搜索，模糊搜索，混合搜索
-	Model string
+	Mode string
 }
 
 // LoadOptions 加载选项配置
