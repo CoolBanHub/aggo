@@ -18,6 +18,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	schemaGrom "gorm.io/gorm/schema"
@@ -47,22 +48,15 @@ func main() {
 		return
 	}
 
-	gormSql, err := NewMysqlGrom("root:123456@tcp(127.0.0.1:3306)/aggo", logger.Silent)
-
-	client, err := milvusclient.New(context.Background(), &milvusclient.ClientConfig{
-		Address: "127.0.0.1:19530",
-		DBName:  "",
-	})
+	//gormSql, err := NewMysqlGrom("root:123456@tcp(127.0.0.1:3306)/aggo", logger.Silent)
+	gormSql, err := NewPostgresGorm("host=localhost user=postgres password=postgres dbname=test port=5432 sslmode=disable", logger.Silent)
 	if err != nil {
+		log.Fatalf("创建gorm失败: %v", err)
 		return
 	}
-
 	// 2. 创建向量数据库（使用 Milvus）
-	vectorDB, err := vectordb.NewMilvusVectorDB(vectordb.MilvusConfig{
-		Client:         client,
-		EmbeddingDim:   1024,
-		CollectionName: "aggo",
-	})
+	//vectorDB, err := getMivusVectorDB()
+	vectorDB, err := getPostgresDB(gormSql)
 	if err != nil {
 		log.Fatalf("创建向量数据库失败: %v", err)
 		return
@@ -172,14 +166,17 @@ func main() {
 		"Docker是什么？有什么用途？",
 		"Go语言适合用来开发哪些类型的应用？",
 	}
-
+	userID := utils.GetUUIDNoDash()
+	sessionId := utils.GetUUIDNoDash()
 	for i, question := range testQuestions {
 		log.Printf("\n=== 测试问题 %d ===", i+1)
 		log.Printf("用户: %s", question)
 
 		response, err := mainAgent.Generate(ctx, []*schema.Message{
 			schema.UserMessage(question),
-		})
+		}, agent.WithChatUserID(userID),
+			agent.WithChatSessionID(sessionId),
+		)
 		if err != nil {
 			log.Printf("生成回答失败: %v", err)
 			continue
@@ -189,11 +186,70 @@ func main() {
 	}
 }
 
+func getMivusVectorDB() (knowledge.VectorDB, error) {
+	client, err := milvusclient.New(context.Background(), &milvusclient.ClientConfig{
+		Address: "127.0.0.1:19530",
+		DBName:  "",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. 创建向量数据库（使用 Milvus）
+	vectorDB, err := vectordb.NewMilvusVectorDB(vectordb.MilvusConfig{
+		Client:       client,
+		EmbeddingDim: 1024,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return vectorDB, nil
+}
+
+func getPostgresDB(gormSql *gorm.DB) (knowledge.VectorDB, error) {
+	vectorDB, err := vectordb.NewPostgresVectorDB(vectordb.PostgresConfig{
+		Client:          gormSql,
+		VectorDimension: 1024,
+	})
+	if err != nil {
+		log.Fatalf("创建向量数据库失败: %v", err)
+		return nil, err
+	}
+	return vectorDB, nil
+}
+
 func NewMysqlGrom(source string, logLevel logger.LogLevel) (*gorm.DB, error) {
 	if !strings.Contains(source, "parseTime") {
 		source += "?charset=utf8mb4&parseTime=True&loc=Local"
 	}
 	gdb, err := gorm.Open(mysql.Open(source), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+		NamingStrategy: schemaGrom.NamingStrategy{
+			SingularTable: true,
+		},
+	})
+	if err != nil {
+		panic("数据库连接失败: " + err.Error())
+	}
+
+	// 配置GORM日志
+	var gormLogger logger.Interface
+	if logLevel > 0 {
+		gormLogger = logger.Default.LogMode(logLevel)
+	} else {
+		gormLogger = logger.Default.LogMode(logger.Silent)
+	}
+
+	gdb.Logger = gormLogger
+
+	return gdb, nil
+}
+
+func NewPostgresGorm(source string, logLevel logger.LogLevel) (*gorm.DB, error) {
+	// PostgreSQL 不需要像 MySQL 那样的 parseTime 参数
+	// 但你可能需要确保连接字符串格式正确
+
+	gdb, err := gorm.Open(postgres.Open(source), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		NamingStrategy: schemaGrom.NamingStrategy{
 			SingularTable: true,

@@ -34,8 +34,9 @@ type Agent struct {
 	name        string
 	description string
 
-	tools []tool.BaseTool //只支持单agent的模式下使用
-	agent *react.Agent
+	tools   []tool.BaseTool //只支持单agent的模式下使用
+	agent   *react.Agent
+	maxStep int
 
 	//多agent的时候 使用
 	multiAgent *host.MultiAgent
@@ -57,6 +58,7 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 	for _, opt := range opts {
 		opt(this)
 	}
+
 	if this.knowledgeManager != nil {
 		//配置知识库的分析tool
 		if this.knowledgeConfig == nil {

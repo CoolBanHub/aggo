@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"errors"
 
 	"github.com/CoolBanHub/aggo/knowledge"
+	"github.com/CoolBanHub/aggo/state"
 	"github.com/CoolBanHub/aggo/tools"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -114,7 +116,7 @@ func (this *KnowledgeAgent) Generate(ctx context.Context, input []*schema.Messag
 		slog.Error(err)
 		return nil, err
 	}
-	return this.agent.Generate(ctx, _input)
+	return this.agent.Generate(ctx, _input, agent.WithComposeOptions(compose.WithRuntimeMaxSteps(40)))
 }
 
 func (this *KnowledgeAgent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
@@ -123,7 +125,7 @@ func (this *KnowledgeAgent) Stream(ctx context.Context, input []*schema.Message)
 		slog.Error(err)
 		return nil, err
 	}
-	return this.agent.Stream(ctx, _input)
+	return this.agent.Stream(ctx, _input, agent.WithComposeOptions(compose.WithRuntimeMaxSteps(40)))
 }
 
 func (this *KnowledgeAgent) inputMessageModifier(ctx context.Context, input []*schema.Message) ([]*schema.Message, error) {
@@ -156,8 +158,11 @@ func (this *KnowledgeAgent) NewSpecialist() *host.Specialist {
 
 // Run 实现工具调用接口，将消息转换为字符串响应
 func (this *KnowledgeAgent) Run(ctx context.Context, param any) (string, error) {
-	input := ctx.Value("messages").([]*schema.Message)
-	r, err := this.Generate(ctx, input)
+	chatState := state.GetChatChatSate(ctx)
+	if chatState == nil || len(chatState.Input) == 0 {
+		return "", errors.New("没有获取到用户消息")
+	}
+	r, err := this.Generate(ctx, chatState.Input)
 	if err != nil {
 		slog.Error(err)
 		return "", err

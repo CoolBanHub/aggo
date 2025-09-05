@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/cloudwego/eino/components/model"
@@ -60,6 +61,12 @@ func WithSpecialists(specialist []*host.Specialist) Option {
 	}
 }
 
+func WithMaxStep(maxStep int) Option {
+	return func(agent *Agent) {
+		agent.maxStep = maxStep
+	}
+}
+
 type chatOptions struct {
 	composeOptions []compose.Option
 	userID         string
@@ -87,5 +94,11 @@ func WithChatUserID(userID string) ChatOption {
 func WithChatSessionID(sessionID string) ChatOption {
 	return func(co *chatOptions) {
 		co.sessionID = sessionID
+	}
+}
+
+func WithChatComposeOptions(composeOptions []compose.Option) ChatOption {
+	return func(co *chatOptions) {
+		co.composeOptions = append(co.composeOptions, composeOptions...)
 	}
 }

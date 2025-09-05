@@ -37,11 +37,11 @@ func NewKnowledgeManager(config *KnowledgeConfig) (*KnowledgeManager, error) {
 		config = &KnowledgeConfig{
 			DefaultSearchOptions: SearchOptions{
 				Limit:     10,
-				Threshold: 0.7,
+				Threshold: 0.1,
 			},
 			DefaultLoadOptions: LoadOptions{
 				EnableChunking: true,
-				ChunkSize:      1000,
+				ChunkSize:      1024,
 				ChunkOverlap:   200,
 			},
 		}

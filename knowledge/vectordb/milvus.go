@@ -27,9 +27,12 @@ type MilvusConfig struct {
 
 // NewMilvusVectorDB 创建Milvus向量数据库实例
 func NewMilvusVectorDB(config MilvusConfig) (*MilvusVectorDB, error) {
+	if config.CollectionName == "" {
+		config.CollectionName = "aggo_knowledge_vectors"
+	}
 	db := &MilvusVectorDB{
 		client:         config.Client,
-		collectionName: "aggo_" + config.CollectionName,
+		collectionName: config.CollectionName,
 		embeddingDim:   config.EmbeddingDim,
 	}
 
