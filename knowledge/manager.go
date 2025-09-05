@@ -183,11 +183,27 @@ func (km *KnowledgeManager) Search(ctx context.Context, query string, options Se
 		options.Threshold = km.GetConfig().DefaultSearchOptions.Threshold
 	}
 
+	// 根据搜索模式选择使用哪种搜索，默认是向量搜索,目前有向量搜索，模糊搜索，混合搜索
+	switch options.Model {
+	case SearchModeFuzzy:
+		return km.fuzzySearch(ctx, query, options)
+	case SearchModeHybrid:
+		return km.hybridSearch(ctx, query, options, vector)
+	case SearchModeVector:
+		fallthrough
+	default: // 默认使用向量搜索
+		return km.vectorSearch(ctx, vector, options)
+	}
+}
+
+// vectorSearch 向量搜索
+func (km *KnowledgeManager) vectorSearch(ctx context.Context, vector []float32, options SearchOptions) ([]SearchResult, error) {
 	// 使用向量数据库进行搜索
 	results, err := km.vectorDB.Search(ctx, vector, options.Limit, options.Filters, options.Threshold)
 	if err != nil {
 		return nil, fmt.Errorf("向量搜索失败: %w", err)
 	}
+
 	// 过滤低分结果
 	filteredResults := make([]SearchResult, 0, len(results))
 	for _, result := range results {
@@ -197,6 +213,94 @@ func (km *KnowledgeManager) Search(ctx context.Context, query string, options Se
 	}
 
 	return filteredResults, nil
+}
+
+// fuzzySearch 模糊搜索
+func (km *KnowledgeManager) fuzzySearch(ctx context.Context, query string, options SearchOptions) ([]SearchResult, error) {
+	if km.storage == nil {
+		return nil, fmt.Errorf("存储未配置，无法进行模糊搜索")
+	}
+
+	// 使用存储接口进行模糊搜索
+	docs, err := km.storage.SearchDocuments(ctx, query, options.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("模糊搜索失败: %w", err)
+	}
+
+	// 转换为SearchResult格式
+	results := make([]SearchResult, 0, len(docs))
+	for _, doc := range docs {
+		if doc != nil {
+			// 模糊搜索使用固定分数1.0，表示匹配
+			results = append(results, SearchResult{
+				Document: *doc,
+				Score:    1.0,
+			})
+		}
+	}
+
+	return results, nil
+}
+
+// hybridSearch 混合搜索
+func (km *KnowledgeManager) hybridSearch(ctx context.Context, query string, options SearchOptions, vector []float32) ([]SearchResult, error) {
+	// 分别进行向量搜索和模糊搜索
+	vectorResults, err := km.vectorSearch(ctx, vector, options)
+	if err != nil {
+		return nil, fmt.Errorf("混合搜索中向量搜索失败: %w", err)
+	}
+
+	fuzzyResults, err := km.fuzzySearch(ctx, query, options)
+	if err != nil {
+		// 如果模糊搜索失败，仅使用向量搜索结果
+		return vectorResults, nil
+	}
+
+	// 合并和去重结果
+	resultMap := make(map[string]SearchResult)
+
+	// 添加向量搜索结果（权重0.7）
+	for _, result := range vectorResults {
+		result.Score = result.Score * 0.7
+		resultMap[result.Document.ID] = result
+	}
+
+	// 添加模糊搜索结果（权重0.3）
+	for _, result := range fuzzyResults {
+		if existing, exists := resultMap[result.Document.ID]; exists {
+			// 如果文档已存在，合并分数
+			existing.Score += result.Score * 0.3
+			resultMap[result.Document.ID] = existing
+		} else {
+			// 新文档，设置模糊搜索权重
+			result.Score = result.Score * 0.3
+			resultMap[result.Document.ID] = result
+		}
+	}
+
+	// 转换为切片并按分数排序
+	finalResults := make([]SearchResult, 0, len(resultMap))
+	for _, result := range resultMap {
+		if result.Score >= options.Threshold {
+			finalResults = append(finalResults, result)
+		}
+	}
+
+	// 按分数降序排序
+	for i := 0; i < len(finalResults)-1; i++ {
+		for j := i + 1; j < len(finalResults); j++ {
+			if finalResults[i].Score < finalResults[j].Score {
+				finalResults[i], finalResults[j] = finalResults[j], finalResults[i]
+			}
+		}
+	}
+
+	// 限制返回结果数量
+	if len(finalResults) > options.Limit {
+		finalResults = finalResults[:options.Limit]
+	}
+
+	return finalResults, nil
 }
 
 // AddDocument 添加单个文档

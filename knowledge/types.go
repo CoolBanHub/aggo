@@ -6,6 +6,16 @@ import (
 	"github.com/cloudwego/eino/components/embedding"
 )
 
+// 搜索模式常量
+const (
+	// SearchModeVector 向量搜索模式，使用语义相似度搜索
+	SearchModeVector = "vector"
+	// SearchModeFuzzy 模糊搜索模式，使用文本匹配搜索
+	SearchModeFuzzy = "fuzzy"
+	// SearchModeHybrid 混合搜索模式，结合向量搜索和模糊搜索
+	SearchModeHybrid = "hybrid"
+)
+
 // Document 文档结构，表示知识库中的一个文档
 type Document struct {
 	// 文档唯一标识符
@@ -50,6 +60,9 @@ type SearchOptions struct {
 	Filters map[string]interface{} `json:"filters,omitempty"`
 	// 相似度阈值
 	Threshold float64 `json:"threshold,omitempty"`
+
+	//搜索模式 向量搜索，模糊搜索，混合搜索
+	Model string
 }
 
 // LoadOptions 加载选项配置
