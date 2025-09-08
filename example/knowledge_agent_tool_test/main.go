@@ -29,7 +29,6 @@ func main() {
 
 	// 1. 创建聊天模型
 	cm, err := model.NewChatModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
-		model.WithAPIVersion(os.Getenv("APIVersion")),
 		model.WithAPIKey(os.Getenv("APIKey")),
 		model.WithModel("gpt-5-mini"),
 	)
@@ -39,7 +38,6 @@ func main() {
 	}
 
 	em, err := model.NewEmbModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
-		model.WithAPIVersion(os.Getenv("APIVersion")),
 		model.WithAPIKey(os.Getenv("APIKey")),
 		model.WithModel("text-embedding-3-large"),
 	)

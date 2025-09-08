@@ -18,17 +18,17 @@ func NewEmbModel(opts ...OptionFunc) (embedding.Embedder, error) {
 
 func getEmbeddingByOpenai(o *Option) (embedding.Embedder, error) {
 	_model := o.Model
-	dimensions := 1024
-	if o.Dimensions > 0 {
-		dimensions = o.Dimensions
-	}
-	cmb, err := embopenai.NewEmbedder(context.Background(), &embopenai.EmbeddingConfig{
+
+	param := &embopenai.EmbeddingConfig{
 		BaseURL:    o.BaseUrl,
 		Model:      _model,   // 使用的模型版本
 		APIKey:     o.APIKey, // OpenAI API 密钥
 		APIVersion: o.APIVersion,
 		ByAzure:    o.ByAzure,
-		Dimensions: &dimensions, // 设置向量维度为1024
-	})
+	}
+	if o.Dimensions > 0 {
+		param.Dimensions = &o.Dimensions
+	}
+	cmb, err := embopenai.NewEmbedder(context.Background(), param)
 	return cmb, err
 }

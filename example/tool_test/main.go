@@ -2,18 +2,18 @@ package main
 
 import (
 	"context"
+	"log"
+	"os"
+
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools"
 	"github.com/cloudwego/eino/schema"
-	"log"
-	"os"
 )
 
 func main() {
 	ctx := context.Background()
 	cm, err := model.NewChatModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
-		model.WithAPIVersion(os.Getenv("APIVersion")),
 		model.WithAPIKey(os.Getenv("APIKey")),
 		model.WithModel("gpt-5-mini"),
 	)

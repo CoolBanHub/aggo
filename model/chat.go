@@ -18,12 +18,19 @@ func NewChatModel(opts ...OptionFunc) (model.ToolCallingChatModel, error) {
 
 func getChatByOpenai(o *Option) (model.ToolCallingChatModel, error) {
 	_model := o.Model
-	cm, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
+
+	param := &openai.ChatModelConfig{
 		BaseURL:    o.BaseUrl,
 		Model:      _model,   // 使用的模型版本
 		APIKey:     o.APIKey, // OpenAI API 密钥
 		APIVersion: o.APIVersion,
 		ByAzure:    o.ByAzure,
-	})
+	}
+
+	if o.MaxTokens > 0 {
+		param.MaxTokens = &o.MaxTokens
+	}
+
+	cm, err := openai.NewChatModel(context.Background(), param)
 	return cm, err
 }

@@ -14,7 +14,6 @@ import (
 func main() {
 	ctx := context.Background()
 	cm, err := model.NewChatModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
-		model.WithAPIVersion(os.Getenv("APIVersion")),
 		model.WithAPIKey(os.Getenv("APIKey")),
 		model.WithModel("gpt-5-nano"),
 	)
