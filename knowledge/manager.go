@@ -152,8 +152,10 @@ func (km *KnowledgeManager) LoadDocuments(ctx context.Context, docs []Document, 
 		}
 
 		// 保存原始文档到存储
-		if err := km.storage.SaveDocument(ctx, &doc); err != nil {
-			return fmt.Errorf("保存文档失败: %w", err)
+		if km.storage != nil {
+			if err := km.storage.SaveDocument(ctx, &doc); err != nil {
+				return fmt.Errorf("保存文档失败: %w", err)
+			}
 		}
 	}
 
@@ -223,7 +225,6 @@ func (km *KnowledgeManager) fuzzySearch(ctx context.Context, query string, optio
 	if km.storage == nil {
 		return nil, fmt.Errorf("存储未配置，无法进行模糊搜索")
 	}
-
 	// 使用存储接口进行模糊搜索
 	docs, err := km.storage.SearchDocuments(ctx, query, options.Limit)
 	if err != nil {
@@ -247,14 +248,28 @@ func (km *KnowledgeManager) fuzzySearch(ctx context.Context, query string, optio
 
 // hybridSearch 混合搜索
 func (km *KnowledgeManager) hybridSearch(ctx context.Context, query string, options SearchOptions, vector []float32) ([]SearchResult, error) {
+	wg := sync.WaitGroup{}
+	wg.Add(2)
 	// 分别进行向量搜索和模糊搜索
-	vectorResults, err := km.vectorSearch(ctx, vector, options)
-	if err != nil {
-		return nil, fmt.Errorf("混合搜索中向量搜索失败: %w", err)
+	var vectorResults []SearchResult
+	var err1 error
+	go func() {
+		defer wg.Done()
+		vectorResults, err1 = km.vectorSearch(ctx, vector, options)
+	}()
+	var fuzzyResults []SearchResult
+	var err2 error
+	go func() {
+		defer wg.Done()
+		fuzzyResults, err2 = km.fuzzySearch(ctx, query, options)
+	}()
+	wg.Wait()
+
+	if err1 != nil {
+		return nil, fmt.Errorf("混合搜索中向量搜索失败: %w", err1)
 	}
 
-	fuzzyResults, err := km.fuzzySearch(ctx, query, options)
-	if err != nil {
+	if err2 != nil {
 		// 如果模糊搜索失败，仅使用向量搜索结果
 		return vectorResults, nil
 	}
@@ -319,10 +334,11 @@ func (km *KnowledgeManager) UpdateDocument(ctx context.Context, doc Document) er
 
 	// 设置更新时间
 	doc.UpdatedAt = time.Now()
-
-	// 更新存储
-	if err := km.storage.UpdateDocument(ctx, &doc); err != nil {
-		return fmt.Errorf("更新文档失败: %w", err)
+	if km.storage != nil {
+		// 更新存储
+		if err := km.storage.UpdateDocument(ctx, &doc); err != nil {
+			return fmt.Errorf("更新文档失败: %w", err)
+		}
 	}
 
 	// 更新向量数据库
@@ -338,10 +354,11 @@ func (km *KnowledgeManager) DeleteDocument(ctx context.Context, docID string) er
 
 	km.mu.Lock()
 	defer km.mu.Unlock()
-
-	// 从存储删除
-	if err := km.storage.DeleteDocument(ctx, docID); err != nil {
-		return fmt.Errorf("从存储删除文档失败: %w", err)
+	if km.storage != nil {
+		// 从存储删除
+		if err := km.storage.DeleteDocument(ctx, docID); err != nil {
+			return fmt.Errorf("从存储删除文档失败: %w", err)
+		}
 	}
 
 	// 从向量数据库删除
@@ -358,7 +375,10 @@ func (km *KnowledgeManager) GetDocument(ctx context.Context, docID string) (*Doc
 	km.mu.RLock()
 	defer km.mu.RUnlock()
 
-	return km.storage.GetDocument(ctx, docID)
+	if km.storage != nil {
+		return km.storage.GetDocument(ctx, docID)
+	}
+	return km.vectorDB.GetDocument(ctx, docID)
 }
 
 // ListDocuments 列出文档
@@ -367,7 +387,10 @@ func (km *KnowledgeManager) ListDocuments(ctx context.Context, limit, offset int
 	km.mu.RLock()
 	defer km.mu.RUnlock()
 
-	return km.storage.ListDocuments(ctx, limit, offset)
+	if km.storage != nil {
+		return km.storage.ListDocuments(ctx, limit, offset)
+	}
+	return nil, errors.New("not support")
 }
 
 // GetConfig 获取配置
