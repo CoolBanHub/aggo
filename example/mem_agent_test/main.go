@@ -10,7 +10,9 @@ import (
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/memory/storage"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/CoolBanHub/aggo/model/openai"
 	"github.com/CoolBanHub/aggo/utils"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -20,8 +22,15 @@ import (
 
 func main() {
 	ctx := context.Background()
-	cm, err := model.NewChatModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
-		model.WithAPIKey(os.Getenv("APIKey")),
+	baseUrl := os.Getenv("BaseUrl")
+	apiKey := os.Getenv("APIKey")
+	if baseUrl == "" || apiKey == "" {
+		log.Fatal("BaseUrl and APIKey environment variables must be set")
+		return
+	}
+
+	cm, err := model.NewChatModel(model.WithBaseUrl(baseUrl),
+		model.WithAPIKey(apiKey),
 		model.WithModel("gpt-5-mini"),
 	)
 	if err != nil {
@@ -81,7 +90,11 @@ func main() {
 		log.Printf("User: %s", conversation)
 		out, err := bot.Generate(ctx, []*schema.Message{
 			schema.UserMessage(conversation),
-		}, agent.WithChatSessionID(sessionID), agent.WithChatUserID(sessionID))
+		}, agent.WithChatSessionID(sessionID), agent.WithChatUserID(sessionID), agent.WithChatComposeOptions([]compose.Option{
+			compose.WithChatModelOption(openai.WithMetadata(map[string]string{
+				"session_id": sessionID,
+			})),
+		}))
 		if err != nil {
 			log.Fatalf("generate fail,err:%s", err)
 			return

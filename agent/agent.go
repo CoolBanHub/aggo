@@ -146,7 +146,6 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 	if err != nil {
 		return nil, err
 	}
-
 	var response *schema.StreamReader[*schema.Message]
 	if this.multiAgent != nil {
 		response, err = this.multiAgent.Stream(ctx, _input, agentOpts)
