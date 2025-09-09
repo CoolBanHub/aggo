@@ -5,7 +5,7 @@ go 1.24.4
 require (
 	github.com/cloudwego/eino v0.4.7
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20250828061307-a19adf5c9b50
-	github.com/cloudwego/eino-ext/components/model/openai v0.0.0-20250828061307-a19adf5c9b50
+	github.com/cloudwego/eino-ext/components/model/openai v0.0.0-20250905035413-86dbae6351d5
 	github.com/google/uuid v1.6.0
 	github.com/gookit/slog v0.6.0
 	github.com/milvus-io/milvus/client/v2 v2.6.0

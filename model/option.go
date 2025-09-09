@@ -5,8 +5,6 @@ type Option struct {
 	Model      string
 	BaseUrl    string
 	APIKey     string `json:"apiKey"`
-	APIVersion string `json:"apiVersion"`
-	ByAzure    bool
 	Dimensions int
 	MaxTokens  int
 }
@@ -37,21 +35,9 @@ func WithAPIKey(apiKey string) OptionFunc {
 	}
 }
 
-func WithAPIVersion(apiVersion string) OptionFunc {
-	return func(option *Option) {
-		option.APIVersion = apiVersion
-	}
-}
-
 func WithMaxTokens(maxTokens int) OptionFunc {
 	return func(option *Option) {
 		option.MaxTokens = maxTokens
-	}
-}
-
-func WithAzure(byAzure bool) OptionFunc {
-	return func(option *Option) {
-		option.ByAzure = byAzure
 	}
 }
 

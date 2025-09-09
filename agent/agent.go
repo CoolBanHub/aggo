@@ -86,6 +86,7 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 			SystemPrompt:     this.systemPrompt,
 		}
 		multiAgent, err := host.NewMultiAgent(ctx, &host.MultiAgentConfig{
+			Name:        this.name,
 			Host:        *h,
 			Specialists: this.specialist,
 		})
