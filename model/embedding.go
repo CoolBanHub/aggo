@@ -20,11 +20,9 @@ func getEmbeddingByOpenai(o *Option) (embedding.Embedder, error) {
 	_model := o.Model
 
 	param := &embopenai.EmbeddingConfig{
-		BaseURL:    o.BaseUrl,
-		Model:      _model,   // 使用的模型版本
-		APIKey:     o.APIKey, // OpenAI API 密钥
-		APIVersion: o.APIVersion,
-		ByAzure:    o.ByAzure,
+		BaseURL: o.BaseUrl,
+		Model:   _model,   // 使用的模型版本
+		APIKey:  o.APIKey, // OpenAI API 密钥
 	}
 	if o.Dimensions > 0 {
 		param.Dimensions = &o.Dimensions
