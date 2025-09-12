@@ -165,7 +165,10 @@ func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema
 		if chunk == nil || chunk.Content == "" {
 			break
 		}
-
+		newChunk := fn(chunk)
+		if newChunk == nil {
+			continue
+		}
 		b, err := sonic.Marshal(fn(chunk))
 		if err != nil {
 			return err
