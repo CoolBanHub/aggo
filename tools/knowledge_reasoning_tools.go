@@ -8,6 +8,7 @@ import (
 	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+	"github.com/cloudwego/eino/schema"
 )
 
 // GetKnowledgeReasoningTools 获取知识推理工具集合
@@ -51,13 +52,13 @@ type ThinkResult struct {
 
 // KnowledgeSearchResult 知识搜索结果
 type KnowledgeSearchResult struct {
-	Query         string                   `json:"query"`
-	Documents     []knowledge.SearchResult `json:"documents"`
-	DocumentCount int                      `json:"documentCount"`
-	Success       bool                     `json:"success"`
-	Error         string                   `json:"error,omitempty"`
-	Operation     string                   `json:"operation"`
-	Timestamp     int64                    `json:"timestamp"`
+	Query         string             `json:"query"`
+	Documents     []*schema.Document `json:"documents"`
+	DocumentCount int                `json:"documentCount"`
+	Success       bool               `json:"success"`
+	Error         string             `json:"error,omitempty"`
+	Operation     string             `json:"operation"`
+	Timestamp     int64              `json:"timestamp"`
 }
 
 // AnalysisResult 分析结果

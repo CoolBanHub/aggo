@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/CoolBanHub/aggo/knowledge"
+	"github.com/cloudwego/eino/schema"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
@@ -58,36 +57,36 @@ func buildFilterExpression(filters map[string]interface{}) string {
 }
 
 // buildDocumentFromResult 从搜索结果构建文档对象
-func (m *MilvusVectorDB) buildDocumentFromResult(result milvusclient.ResultSet, index int) (knowledge.Document, error) {
+func (m *MilvusVectorDB) buildDocumentFromResultSet(result milvusclient.ResultSet, index int) (*schema.Document, error) {
 	id, err := result.IDs.Get(index)
 	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取ID失败: %w", err)
+		return nil, fmt.Errorf("获取ID失败: %w", err)
 	}
 
 	content, err := getColumnValue(result, "content", index)
 	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取content失败: %w", err)
+		return nil, fmt.Errorf("获取content失败: %w", err)
 	}
 
 	metadataBytes, err := getColumnValue(result, "metadata", index)
 	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取metadata失败: %w", err)
+		return nil, fmt.Errorf("获取metadata失败: %w", err)
 	}
 
-	createdAtInt, err := getColumnValue(result, "created_at", index)
-	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取created_at失败: %w", err)
-	}
-
-	updatedAtInt, err := getColumnValue(result, "updated_at", index)
-	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取updated_at失败: %w", err)
-	}
+	//createdAtInt, err := getColumnValue(result, "created_at", index)
+	//if err != nil {
+	//	return nil, fmt.Errorf("获取created_at失败: %w", err)
+	//}
+	//
+	//updatedAtInt, err := getColumnValue(result, "updated_at", index)
+	//if err != nil {
+	//	return nil, fmt.Errorf("获取updated_at失败: %w", err)
+	//}
 
 	// 解析metadata
 	metadata, err := unmarshalMetadata(metadataBytes.([]byte))
 	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("解析metadata失败: %w", err)
+		return nil, fmt.Errorf("解析metadata失败: %w", err)
 	}
 
 	// 获取向量数据（如果存在）
@@ -98,67 +97,12 @@ func (m *MilvusVectorDB) buildDocumentFromResult(result milvusclient.ResultSet, 
 		}
 	}
 
-	doc := knowledge.Document{
-		ID:        id.(string),
-		Content:   content.(string),
-		Metadata:  metadata,
-		Vector:    vector,
-		CreatedAt: time.Unix(createdAtInt.(int64), 0),
-		UpdatedAt: time.Unix(updatedAtInt.(int64), 0),
+	doc := &schema.Document{
+		ID:       id.(string),
+		Content:  content.(string),
+		MetaData: metadata,
 	}
-
-	return doc, nil
-}
-
-// buildDocumentFromResultSet 从查询结果集构建文档对象
-func (m *MilvusVectorDB) buildDocumentFromResultSet(resultSet milvusclient.ResultSet, index int) (knowledge.Document, error) {
-	id, err := resultSet.IDs.Get(index)
-	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取ID失败: %w", err)
-	}
-
-	content, err := getColumnValue(resultSet, "content", index)
-	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取content失败: %w", err)
-	}
-
-	metadataBytes, err := getColumnValue(resultSet, "metadata", index)
-	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取metadata失败: %w", err)
-	}
-
-	createdAtInt, err := getColumnValue(resultSet, "created_at", index)
-	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取created_at失败: %w", err)
-	}
-
-	updatedAtInt, err := getColumnValue(resultSet, "updated_at", index)
-	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("获取updated_at失败: %w", err)
-	}
-
-	// 解析metadata
-	metadata, err := unmarshalMetadata(metadataBytes.([]byte))
-	if err != nil {
-		return knowledge.Document{}, fmt.Errorf("解析metadata失败: %w", err)
-	}
-
-	// 获取向量数据（如果存在）
-	var vector []float32
-	if vectorValue, err := getColumnValue(resultSet, "vector", index); err == nil {
-		if v, ok := vectorValue.([]float32); ok {
-			vector = v
-		}
-	}
-
-	doc := knowledge.Document{
-		ID:        id.(string),
-		Content:   content.(string),
-		Metadata:  metadata,
-		Vector:    vector,
-		CreatedAt: time.Unix(createdAtInt.(int64), 0),
-		UpdatedAt: time.Unix(updatedAtInt.(int64), 0),
-	}
+	doc.WithDenseVector(vector)
 
 	return doc, nil
 }

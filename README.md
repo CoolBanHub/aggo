@@ -7,9 +7,11 @@ AGGO是一个基于Go语言构建的智能AI代理框架，集成了对话AI、�
 - **智能对话代理**: 基于React模式的AI代理，支持工具调用和多轮对话
 - **知识库管理**: 双重存储架构，结合传统数据库和向量数据库实现高效的语义搜索
 - **记忆系统**: 会话级记忆管理，支持长期记忆存储和智能摘要
-- **工具集成**: 丰富的工具生态，包括知识推理、系统命令执行等
+- **工具集成**: 丰富的工具生态，包括知识推理、系统命令执行、数据库操作等
 - **多数据库支持**: 支持SQLite、MySQL、PostgreSQL等多种数据库
-- **向量搜索**: 基于Milvus的语义相似度搜索
+- **向量搜索**: 支持Milvus和PostgreSQL向量数据库的语义相似度搜索
+- **实时通信**: 支持Server-Sent Events (SSE) 流式响应
+- **可观测性**: 集成Langfuse进行AI应用监控和追踪
 
 ## 🏗️ 系统架构
 
@@ -49,9 +51,10 @@ go mod download
 
 ### 外部依赖
 
-- **Milvus**: 向量数据库服务
-- **MySQL/PostgreSQL/SQLite**: 关系型数据库（可选其一）
-- **Azure OpenAI**: 用于聊天和嵌入向量生成
+- **向量数据库**: Milvus或PostgreSQL with pgvector扩展
+- **关系型数据库**: MySQL、PostgreSQL或SQLite（可选其一）
+- **AI服务**: Azure OpenAI用于聊天和嵌入向量生成
+- **监控服务**: Langfuse（可选，用于AI应用监控）
 
 ## 🚀 快速开始
 
@@ -77,6 +80,12 @@ go run example/storage_vectordb_integration/main.go
 
 ```bash
 go run example/gorm_storage_test/main.go
+```
+
+### 5. SSE流式响应示例
+
+```bash
+go run example/sse/main.go
 ```
 
 ## 💡 使用示例
@@ -231,14 +240,28 @@ storage, err := storage.NewSQLiteStorage("knowledge.db")
 storage, err := storage.NewMySQLStorage("localhost", 3306, "aggo", "user", "password")
 ```
 
-#### Milvus (向量数据库)
+#### 向量数据库配置
 
+**Milvus向量数据库:**
 ```go
 vectorDB, err := vectordb.NewMilvusVectorDB(vectordb.MilvusConfig{
-Address:        "127.0.0.1:19530",
-EmbeddingDim:   1024,
-DBName:         "", // 空字符串使用默认数据库
-CollectionName: "aggo",
+	Address:        "127.0.0.1:19530",
+	EmbeddingDim:   1024,
+	DBName:         "", // 空字符串使用默认数据库
+	CollectionName: "aggo",
+})
+```
+
+**PostgreSQL向量数据库:**
+```go
+vectorDB, err := vectordb.NewPostgresVectorDB(vectordb.PostgresConfig{
+	Host:         "localhost",
+	Port:         5432,
+	User:         "user",
+	Password:     "password",
+	DBName:       "vectordb",
+	EmbeddingDim: 1024,
+	TableName:    "embeddings",
 })
 ```
 
@@ -264,6 +287,13 @@ aggo/
 │   ├── chat.go            # 聊天模型
 │   └── embedding.go       # 嵌入模型
 ├── tools/              # 工具集
+│   ├── knowledge_tool.go      # 知识管理工具
+│   ├── mysql_tool.go          # MySQL数据库工具
+│   ├── postgres_tool.go       # PostgreSQL数据库工具
+│   └── shell_tool.go          # 系统命令工具
+├── pkg/                # 公共包
+│   ├── sse/               # Server-Sent Events支持
+│   └── langfuse/          # Langfuse监控集成
 └── example/            # 示例代码
 ```
 
@@ -282,6 +312,9 @@ go test -v ./agent/...
 
 # 运行示例
 go run example/knowledge_agent_tool_test/main.go
+
+# 运行SSE示例
+go run example/sse/main.go
 ```
 
 ## 🐛 常见问题
@@ -307,6 +340,15 @@ go run example/knowledge_agent_tool_test/main.go
 **错误信息**: `nil pointer dereference`
 
 **解决方案**: 使用`logger.Default.LogMode()`而不是`config.Logger.LogMode()`
+
+### PostgreSQL向量数据库连接错误
+
+**错误信息**: `relation "public.embeddings" does not exist`
+
+**解决方案**: 确保PostgreSQL已安装并启用pgvector扩展：
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
 
 ## 📄 许可证
 

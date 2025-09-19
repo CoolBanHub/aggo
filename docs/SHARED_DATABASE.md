@@ -46,6 +46,7 @@ import (
     
     "github.com/CoolBanHub/aggo/knowledge/storage"
     memorystorage "github.com/CoolBanHub/aggo/memory/storage"
+    "github.com/CoolBanHub/aggo/pkg/langfuse"
     "gorm.io/driver/sqlite"
     "gorm.io/gorm"
     "gorm.io/gorm/logger"
@@ -76,8 +77,21 @@ func main() {
     }
     defer memoryStorage.Close()
     
+    // 4. 可选：初始化Langfuse监控
+    langfuseClient, err := langfuse.NewClient(&langfuse.Config{
+        PublicKey:  "your-public-key",
+        SecretKey:  "your-secret-key",
+        Host:       "https://cloud.langfuse.com", // 可选，默认为cloud.langfuse.com
+    })
+    if err != nil {
+        log.Printf("Langfuse初始化失败: %v", err)
+    } else {
+        defer langfuseClient.Shutdown()
+        log.Println("Langfuse监控已启用")
+    }
+
     log.Println("共享数据库连接创建成功！")
-    
+
     // 现在两个模块使用同一个数据库连接
 }
 ```
@@ -94,6 +108,7 @@ import (
     
     "github.com/CoolBanHub/aggo/knowledge/storage"
     memorystorage "github.com/CoolBanHub/aggo/memory/storage"
+    "github.com/CoolBanHub/aggo/pkg/langfuse"
     "gorm.io/driver/mysql"
     "gorm.io/gorm"
     "gorm.io/gorm/logger"
@@ -160,6 +175,8 @@ import (
     "github.com/CoolBanHub/aggo/memory"
     memorystorage "github.com/CoolBanHub/aggo/memory/storage"
     "github.com/CoolBanHub/aggo/model"
+    "github.com/CoolBanHub/aggo/pkg/langfuse"
+    "github.com/CoolBanHub/aggo/pkg/sse"
     "gorm.io/driver/sqlite"
     "gorm.io/gorm"
     "gorm.io/gorm/logger"
@@ -241,10 +258,25 @@ func main() {
         log.Fatal(err)
     }
     
+    // 6. 可选：初始化监控和SSE支持
+    langfuseClient, err := langfuse.NewClient(&langfuse.Config{
+        PublicKey: "your-public-key",
+        SecretKey: "your-secret-key",
+    })
+    if err != nil {
+        log.Printf("Langfuse初始化失败: %v", err)
+    } else {
+        defer langfuseClient.Shutdown()
+    }
+
+    // 初始化SSE写入器（用于流式响应）
+    sseWriter := sse.NewWriter()
+
     log.Println("应用初始化完成，所有组件使用共享数据库连接！")
-    
+
     // 现在可以使用aiAgent进行对话
     // knowledge和memory模块共享同一个数据库连接
+    // 支持Langfuse监控和SSE流式响应
 }
 ```
 
@@ -381,6 +413,7 @@ go run main.go
 1. 如何创建共享数据库连接
 2. 如何配置knowledge和memory存储使用共享连接
 3. 如何集成到完整的AI代理应用中
-4. 性能优化的实际效果
+4. 如何集成Langfuse监控和SSE流式响应
+5. 性能优化的实际效果
 
 通过使用共享数据库连接，你可以显著提高应用的资源利用效率，简化配置管理，同时保持各模块的功能完整性。

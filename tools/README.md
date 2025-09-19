@@ -18,14 +18,14 @@ AGGO工具系统是一个基于Eino框架的智能代理工具集合，为AI代�
 
 #### 可用工具
 
-| 工具名称 | 描述 | 主要功能 |
-|---------|------|----------|
-| `load_documents` | 文档加载工具 | 支持文本文件、URL、目录、内存文档的加载 |
-| `search_documents` | 文档搜索工具 | 基于向量相似度的文档搜索 |
-| `get_document` | 获取文档工具 | 根据ID获取单个文档详情 |
-| `update_document` | 更新文档工具 | 更新文档内容和元数据 |
-| `delete_document` | 删除文档工具 | 删除指定文档 |
-| `list_documents` | 列出文档工具 | 分页列出文档信息 |
+| 工具名称               | 描述     | 主要功能                  |
+|--------------------|--------|-----------------------|
+| `load_documents`   | 文档加载工具 | 支持文本文件、URL、目录、内存文档的加载 |
+| `search_documents` | 文档搜索工具 | 基于向量相似度的文档搜索          |
+| `get_document`     | 获取文档工具 | 根据ID获取单个文档详情          |
+| `update_document`  | 更新文档工具 | 更新文档内容和元数据            |
+| `delete_document`  | 删除文档工具 | 删除指定文档                |
+| `list_documents`   | 列出文档工具 | 分页列出文档信息              |
 
 #### 使用示例
 
@@ -35,22 +35,22 @@ knowledgeTools := tools.GetKnowledgeTools(knowledgeManager)
 
 // 加载目录中的文档
 loadParams := tools.LoadDocumentsParams{
-    SourceType:    "directory",
-    DirectoryPath: "/path/to/docs",
-    Extensions:    []string{".txt", ".md"},
-    Recursive:     true,
-    LoadOptions: tools.LoadOptionsInput{
-        EnableChunking: true,
-        ChunkSize:      1000,
-        ChunkOverlap:   200,
-    },
+SourceType:    "directory",
+DirectoryPath: "/path/to/docs",
+Extensions:    []string{".txt", ".md"},
+Recursive:     true,
+LoadOptions: tools.LoadOptionsInput{
+EnableChunking: true,
+ChunkSize:      1000,
+ChunkOverlap:   200,
+},
 }
 
 // 搜索文档
 searchParams := tools.SearchParams{
-    Query:     "机器学习算法",
-    Limit:     10,
-    Threshold: 0.75,
+Query:     "机器学习算法",
+Limit:     10,
+Threshold: 0.75,
 }
 ```
 
@@ -60,11 +60,11 @@ searchParams := tools.SearchParams{
 
 #### 可用工具
 
-| 工具名称 | 描述 | 主要功能 |
-|---------|------|----------|
-| `knowledge_think` | 知识思考工具 | 内部推理和策略规划（对用户不可见） |
-| `knowledge_search` | 知识搜索工具 | 执行知识库搜索操作 |
-| `knowledge_analysis` | 知识分析工具 | 分析搜索结果的质量和相关性 |
+| 工具名称                 | 描述     | 主要功能              |
+|----------------------|--------|-------------------|
+| `knowledge_think`    | 知识思考工具 | 内部推理和策略规划（对用户不可见） |
+| `knowledge_search`   | 知识搜索工具 | 执行知识库搜索操作         |
+| `knowledge_analysis` | 知识分析工具 | 分析搜索结果的质量和相关性     |
 
 #### 推理工作流程
 
@@ -80,20 +80,44 @@ reasoningTools := tools.GetKnowledgeReasoningTools(knowledgeManager)
 
 // 思考策略（内部使用）
 thinkParams := tools.ThinkParams{
-    Thought: "需要分析机器学习算法的优缺点，应该搜索相关技术文档",
+Thought: "需要分析机器学习算法的优缺点，应该搜索相关技术文档",
 }
 
 // 执行搜索
 searchParams := tools.KnowledgeSearchParams{
-    Query: "机器学习算法比较",
-    Limit: 10,
+Query: "机器学习算法比较",
+Limit: 10,
 }
 
 // 分析结果
 analysisParams := tools.AnalysisParams{
-    Analysis: "搜索结果包含了深度学习和传统机器学习的对比信息，质量较高",
+Analysis: "搜索结果包含了深度学习和传统机器学习的对比信息，质量较高",
 }
 ```
+
+### 数据库工具
+
+#### MySQL工具 (`mysql_tool.go`)
+
+提供MySQL数据库操作功能，支持查询、更新、数据分析等。
+
+| 工具名称            | 描述        | 主要功能                      |
+|-----------------|-----------|---------------------------|
+| `mysql_query`   | MySQL查询工具 | 执行SELECT查询操作              |
+| `mysql_execute` | MySQL执行工具 | 执行INSERT、UPDATE、DELETE等操作 |
+| `mysql_schema`  | MySQL架构工具 | 获取数据库结构信息                 |
+| `mysql_analyze` | MySQL分析工具 | 数据分析和统计                   |
+
+#### PostgreSQL工具 (`postgres_tool.go`)
+
+提供PostgreSQL数据库操作功能，支持查询、更新、数据分析等。
+
+| 工具名称               | 描述             | 主要功能                      |
+|--------------------|----------------|---------------------------|
+| `postgres_query`   | PostgreSQL查询工具 | 执行SELECT查询操作              |
+| `postgres_execute` | PostgreSQL执行工具 | 执行INSERT、UPDATE、DELETE等操作 |
+| `postgres_schema`  | PostgreSQL架构工具 | 获取数据库结构信息                 |
+| `postgres_analyze` | PostgreSQL分析工具 | 数据分析和统计                   |
 
 ### 系统工具 (`shell_tool.go`)
 
@@ -101,37 +125,41 @@ analysisParams := tools.AnalysisParams{
 
 #### 可用工具
 
-| 工具名称 | 描述 | 主要功能 |
-|---------|------|----------|
-| `shell_execute` | 命令执行工具 | 执行系统命令，支持超时和错误处理 |
-| `shell_system_info` | 系统信息工具 | 获取OS、环境变量、内存等系统信息 |
-| `shell_list_processes` | 进程管理工具 | 列出系统运行中的进程 |
-| `shell_directory` | 目录操作工具 | 获取和切换工作目录 |
+| 工具名称                   | 描述     | 主要功能              |
+|------------------------|--------|-------------------|
+| `shell_execute`        | 命令执行工具 | 执行系统命令，支持超时和错误处理  |
+| `shell_system_info`    | 系统信息工具 | 获取OS、环境变量、内存等系统信息 |
+| `shell_list_processes` | 进程管理工具 | 列出系统运行中的进程        |
+| `shell_directory`      | 目录操作工具 | 获取和切换工作目录         |
 
 #### 使用示例
 
 ```go
+// 获取数据库工具
+mysqlTools := tools.GetMySQLTools(mysqlConfig)
+postgresTools := tools.GetPostgreSQLTools(postgresConfig)
+
 // 获取系统工具
 shellTools := tools.GetSellTool()
 
 // 执行命令
 executeParams := tools.ExecuteParams{
-    Command:    "ls",
-    Args:       []string{"-la"},
-    WorkingDir: "/tmp",
-    Timeout:    30,
-    Shell:      false,
+Command:    "ls",
+Args:       []string{"-la"},
+WorkingDir: "/tmp",
+Timeout:    30,
+Shell:      false,
 }
 
 // 获取系统信息
 systemParams := tools.SystemInfoParams{
-    InfoType: "memory", // os, env, path, user, disk, memory
+InfoType: "memory", // os, env, path, user, disk, memory
 }
 
 // 目录操作
 dirParams := tools.DirectoryParams{
-    Operation: "change", // get, change
-    Path:      "/new/working/directory",
+Operation: "change", // get, change
+Path:      "/new/working/directory",
 }
 ```
 
@@ -144,13 +172,13 @@ dirParams := tools.DirectoryParams{
 ```go
 // 基础接口
 type tool.BaseTool interface {
-    Info(ctx context.Context) (*schema.ToolInfo, error)
+Info(ctx context.Context) (*schema.ToolInfo, error)
 }
 
 // 可调用接口
 type tool.InvokableTool interface {
-    tool.BaseTool
-    InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error)
+tool.BaseTool
+InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error)
 }
 ```
 
@@ -160,14 +188,14 @@ type tool.InvokableTool interface {
 
 ```go
 type MyTool struct {
-    // 工具依赖
-    manager *SomeManager
+// 工具依赖
+manager *SomeManager
 }
 
 // 参数结构体
 type MyParams struct {
-    Param1 string `json:"param1" jsonschema:"description=参数描述,required"`
-    Param2 int    `json:"param2,omitempty" jsonschema:"description=可选参数,默认值为10"`
+Param1 string `json:"param1" jsonschema:"description=参数描述,required"`
+Param2 int    `json:"param2,omitempty" jsonschema:"description=可选参数,默认值为10"`
 }
 ```
 
@@ -175,11 +203,11 @@ type MyParams struct {
 
 ```go
 func NewMyTool(manager *SomeManager) tool.InvokableTool {
-    this := &MyTool{manager: manager}
-    name := "my_tool"
-    desc := "工具功能描述"
-    t, _ := utils.InferTool(name, desc, this.execute)
-    return t
+this := &MyTool{manager: manager}
+name := "my_tool"
+desc := "工具功能描述"
+t, _ := utils.InferTool(name, desc, this.execute)
+return t
 }
 ```
 
@@ -187,20 +215,20 @@ func NewMyTool(manager *SomeManager) tool.InvokableTool {
 
 ```go
 func (t *MyTool) execute(ctx context.Context, params MyParams) (interface{}, error) {
-    // 参数验证
-    if params.Param1 == "" {
-        return nil, fmt.Errorf("param1 is required")
-    }
-    
-    // 业务逻辑实现
-    result := map[string]interface{}{
-        "operation": "my_operation",
-        "success":   true,
-        "result":    "执行结果",
-        "timestamp": time.Now().Unix(),
-    }
-    
-    return result, nil
+// 参数验证
+if params.Param1 == "" {
+return nil, fmt.Errorf("param1 is required")
+}
+
+// 业务逻辑实现
+result := map[string]interface{}{
+"operation": "my_operation",
+"success":   true,
+"result":    "执行结果",
+"timestamp": time.Now().Unix(),
+}
+
+return result, nil
 }
 ```
 
@@ -208,20 +236,20 @@ func (t *MyTool) execute(ctx context.Context, params MyParams) (interface{}, err
 
 ```go
 type ExampleParams struct {
-    // 必需参数
-    Required string `json:"required" jsonschema:"description=必需参数描述,required"`
-    
-    // 可选参数（带默认值说明）
-    Optional string `json:"optional,omitempty" jsonschema:"description=可选参数描述,默认值为xxx"`
-    
-    // 枚举参数
-    Enum string `json:"enum" jsonschema:"description=枚举参数,required,enum=value1,enum=value2,enum=value3"`
-    
-    // 数值范围
-    Number int `json:"number" jsonschema:"description=数值参数,minimum=1,maximum=100"`
-    
-    // 数组参数
-    Array []string `json:"array,omitempty" jsonschema:"description=数组参数"`
+// 必需参数
+Required string `json:"required" jsonschema:"description=必需参数描述,required"`
+
+// 可选参数（带默认值说明）
+Optional string `json:"optional,omitempty" jsonschema:"description=可选参数描述,默认值为xxx"`
+
+// 枚举参数
+Enum string `json:"enum" jsonschema:"description=枚举参数,required,enum=value1,enum=value2,enum=value3"`
+
+// 数值范围
+Number int `json:"number" jsonschema:"description=数值参数,minimum=1,maximum=100"`
+
+// 数组参数
+Array []string `json:"array,omitempty" jsonschema:"description=数组参数"`
 }
 ```
 
@@ -233,20 +261,24 @@ type ExampleParams struct {
 import "github.com/CoolBanHub/aggo/tools"
 
 func createAgent(knowledgeManager *knowledge.KnowledgeManager) *agent.Agent {
-    // 获取各类工具
-    knowledgeTools := tools.GetKnowledgeTools(knowledgeManager)
-    reasoningTools := tools.GetKnowledgeReasoningTools(knowledgeManager)
-    shellTools := tools.GetSellTool()
-    
-    // 合并所有工具
-    allTools := append(knowledgeTools, reasoningTools...)
-    allTools = append(allTools, shellTools...)
-    
-    // 创建代理
-    return agent.NewAgent(ctx, chatModel,
-        agent.WithTools(allTools),
-        // 其他配置...
-    )
+// 获取各类工具
+knowledgeTools := tools.GetKnowledgeTools(knowledgeManager)
+reasoningTools := tools.GetKnowledgeReasoningTools(knowledgeManager)
+mysqlTools := tools.GetMySQLTools(mysqlConfig) // 新增
+postgresTools := tools.GetPostgreSQLTools(postgresConfig) // 新增
+shellTools := tools.GetSellTool()
+
+// 合并所有工具
+allTools := append(knowledgeTools, reasoningTools...)
+allTools = append(allTools, mysqlTools...) // 新增
+allTools = append(allTools, postgresTools...) // 新增
+allTools = append(allTools, shellTools...)
+
+// 创建代理
+return agent.NewAgent(ctx, chatModel,
+agent.WithTools(allTools),
+// 其他配置...
+)
 }
 ```
 
@@ -267,12 +299,12 @@ toolResult, err := tool.InvokableRun(ctx, `{
 
 ```json
 {
-    "operation": "操作类型",
-    "success": true,
-    "result": "具体结果数据",
-    "error": "错误信息（仅在失败时）",
-    "timestamp": 1645123456,
-    "duration": "执行时长（某些工具）"
+  "operation": "操作类型",
+  "success": true,
+  "result": "具体结果数据",
+  "error": "错误信息（仅在失败时）",
+  "timestamp": 1645123456,
+  "duration": "执行时长（某些工具）"
 }
 ```
 
@@ -296,18 +328,18 @@ toolResult, err := tool.InvokableRun(ctx, `{
 
 ```go
 func TestMyTool(t *testing.T) {
-    tool := NewMyTool(manager)
-    
-    // 测试工具信息
-    info, err := tool.Info(context.Background())
-    require.NoError(t, err)
-    assert.Equal(t, "my_tool", info.Name)
-    
-    // 测试工具执行
-    params := MyParams{Param1: "test"}
-    result, err := tool.execute(context.Background(), params)
-    require.NoError(t, err)
-    assert.True(t, result.Success)
+tool := NewMyTool(manager)
+
+// 测试工具信息
+info, err := tool.Info(context.Background())
+require.NoError(t, err)
+assert.Equal(t, "my_tool", info.Name)
+
+// 测试工具执行
+params := MyParams{Param1: "test"}
+result, err := tool.execute(context.Background(), params)
+require.NoError(t, err)
+assert.True(t, result.Success)
 }
 ```
 
@@ -319,11 +351,5 @@ func TestMyTool(t *testing.T) {
 4. **文档完善**: JSON Schema描述详细，便于理解使用
 5. **性能考虑**: 对耗时操作设置超时，大数据量结果进行分页
 6. **版本兼容**: 新增功能保持向后兼容性
-
-## 🔄 版本历史
-
-- **v1.0.0**: 基础知识管理和系统工具实现
-- **v1.1.0**: 添加知识推理工具
-- **v1.2.0**: 优化性能和错误处理
 
 通过遵循以上指南，可以为AGGO框架开发出功能强大、安全可靠的智能代理工具。

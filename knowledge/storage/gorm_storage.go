@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/CoolBanHub/aggo/knowledge"
+	"github.com/cloudwego/eino/schema"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -40,7 +40,7 @@ func (gs *GormStorage) AutoMigrate() error {
 }
 
 // documentToModel 将知识库文档转换为 GORM 模型（不包含向量数据）
-func (gs *GormStorage) documentToModel(doc *knowledge.Document) (*DocumentModel, error) {
+func (gs *GormStorage) documentToModel(doc *schema.Document) (*DocumentModel, error) {
 	model := &DocumentModel{
 		ID:        doc.ID,
 		Content:   doc.Content,
@@ -48,7 +48,7 @@ func (gs *GormStorage) documentToModel(doc *knowledge.Document) (*DocumentModel,
 		UpdatedAt: doc.UpdatedAt,
 	}
 
-	if err := model.SetMetadata(doc.Metadata); err != nil {
+	if err := model.SetMetadata(doc.MetaData); err != nil {
 		return nil, fmt.Errorf("failed to set metadata: %w", err)
 	}
 
@@ -56,24 +56,23 @@ func (gs *GormStorage) documentToModel(doc *knowledge.Document) (*DocumentModel,
 }
 
 // modelToDocument 将 GORM 模型转换为知识库文档（不包含向量数据）
-func (gs *GormStorage) modelToDocument(model *DocumentModel) (*knowledge.Document, error) {
+func (gs *GormStorage) modelToDocument(model *DocumentModel) (*schema.Document, error) {
 	metadata, err := model.GetMetadata()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get metadata: %w", err)
 	}
 
-	return &knowledge.Document{
+	return &schema.Document{
 		ID:        model.ID,
 		Content:   model.Content,
-		Metadata:  metadata,
-		Vector:    nil, // 向量数据由 VectorDB 管理，Storage 不处理
+		MetaData:  metadata,
 		CreatedAt: model.CreatedAt,
 		UpdatedAt: model.UpdatedAt,
 	}, nil
 }
 
 // SaveDocument 保存文档
-func (gs *GormStorage) SaveDocument(ctx context.Context, doc *knowledge.Document) error {
+func (gs *GormStorage) SaveDocument(ctx context.Context, doc *schema.Document) error {
 	model, err := gs.documentToModel(doc)
 	if err != nil {
 		return fmt.Errorf("failed to convert document to model: %w", err)
@@ -92,7 +91,7 @@ func (gs *GormStorage) SaveDocument(ctx context.Context, doc *knowledge.Document
 }
 
 // GetDocument 获取文档
-func (gs *GormStorage) GetDocument(ctx context.Context, docID string) (*knowledge.Document, error) {
+func (gs *GormStorage) GetDocument(ctx context.Context, docID string) (*schema.Document, error) {
 	var model DocumentModel
 
 	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", docID).First(&model).Error; err != nil {
@@ -106,7 +105,7 @@ func (gs *GormStorage) GetDocument(ctx context.Context, docID string) (*knowledg
 }
 
 // UpdateDocument 更新文档
-func (gs *GormStorage) UpdateDocument(ctx context.Context, doc *knowledge.Document) error {
+func (gs *GormStorage) UpdateDocument(ctx context.Context, doc *schema.Document) error {
 	// 首先检查文档是否存在
 	var count int64
 	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", doc.ID).Count(&count).Error; err != nil {
@@ -154,7 +153,7 @@ func (gs *GormStorage) DeleteDocument(ctx context.Context, docID string) error {
 }
 
 // ListDocuments 列出文档
-func (gs *GormStorage) ListDocuments(ctx context.Context, limit int, offset int) ([]*knowledge.Document, error) {
+func (gs *GormStorage) ListDocuments(ctx context.Context, limit int, offset int) ([]*schema.Document, error) {
 	var models []DocumentModel
 
 	query := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName())
@@ -172,7 +171,7 @@ func (gs *GormStorage) ListDocuments(ctx context.Context, limit int, offset int)
 		return nil, fmt.Errorf("failed to list documents: %w", err)
 	}
 
-	documents := make([]*knowledge.Document, len(models))
+	documents := make([]*schema.Document, len(models))
 	for i, model := range models {
 		doc, err := gs.modelToDocument(&model)
 		if err != nil {
@@ -185,7 +184,7 @@ func (gs *GormStorage) ListDocuments(ctx context.Context, limit int, offset int)
 }
 
 // SearchDocuments 搜索文档（基于内容的简单文本搜索）
-func (gs *GormStorage) SearchDocuments(ctx context.Context, query string, limit int) ([]*knowledge.Document, error) {
+func (gs *GormStorage) SearchDocuments(ctx context.Context, query string, limit int) ([]*schema.Document, error) {
 	var models []DocumentModel
 
 	// 构建搜索查询
@@ -216,7 +215,7 @@ func (gs *GormStorage) SearchDocuments(ctx context.Context, query string, limit 
 		return nil, fmt.Errorf("failed to search documents: %w", err)
 	}
 
-	documents := make([]*knowledge.Document, len(models))
+	documents := make([]*schema.Document, len(models))
 	for i, model := range models {
 		doc, err := gs.modelToDocument(&model)
 		if err != nil {
@@ -253,7 +252,7 @@ func (gs *GormStorage) Count(ctx context.Context) (int64, error) {
 }
 
 // BatchSaveDocuments 批量保存文档（更高效）
-func (gs *GormStorage) BatchSaveDocuments(ctx context.Context, docs []*knowledge.Document, batchSize int) error {
+func (gs *GormStorage) BatchSaveDocuments(ctx context.Context, docs []*schema.Document, batchSize int) error {
 	if len(docs) == 0 {
 		return nil
 	}

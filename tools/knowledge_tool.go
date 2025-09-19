@@ -3,10 +3,11 @@ package tools
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/CoolBanHub/aggo/knowledge"
-	"github.com/CoolBanHub/aggo/knowledge/readers"
+	"github.com/cloudwego/eino-ext/components/document/loader/file"
+	"github.com/cloudwego/eino-ext/components/document/loader/url"
+	"github.com/cloudwego/eino/components/document"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 )
@@ -16,7 +17,6 @@ func GetKnowledgeTools(manager *knowledge.KnowledgeManager) []tool.BaseTool {
 		NewLoadDocumentsTool(manager),
 		NewSearchDocumentsTool(manager),
 		NewGetDocumentTool(manager),
-		NewUpdateDocumentTool(manager),
 		NewDeleteDocumentTool(manager),
 		NewListDocumentsTool(manager),
 	}
@@ -60,26 +60,10 @@ type ListDocumentsTool struct {
 
 // LoadDocumentsParams 加载文档的参数
 type LoadDocumentsParams struct {
-	// 文档来源类型：text_files, urls, directory, memory
-	SourceType string `json:"sourceType" jsonschema:"description=文档来源类型,required,enum=text_files,enum=urls,enum=directory,enum=memory"`
+	// 文档来源类型：file, url
+	SourceType LoadDocumentSourceType `json:"sourceType" jsonschema:"description=文档来源类型,required,enum=file,enum=url"`
 
-	// 文本文件路径列表（当sourceType为text_files时使用）
-	FilePaths []string `json:"filePaths,omitempty" jsonschema:"description=文本文件路径列表"`
-
-	// URL列表（当sourceType为urls时使用）
-	URLs []string `json:"urls,omitempty" jsonschema:"description=URL列表"`
-
-	// 目录路径（当sourceType为directory时使用）
-	DirectoryPath string `json:"directoryPath,omitempty" jsonschema:"description=目录路径"`
-
-	// 文件扩展名过滤器（当sourceType为directory时使用）
-	Extensions []string `json:"extensions,omitempty" jsonschema:"description=文件扩展名过滤器,例如: ['.txt', '.md']"`
-
-	// 是否递归搜索（当sourceType为directory时使用）
-	Recursive bool `json:"recursive,omitempty" jsonschema:"description=是否递归搜索子目录"`
-
-	// 内存文档（当sourceType为memory时使用）
-	Documents []DocumentInput `json:"documents,omitempty" jsonschema:"description=内存文档列表"`
+	Uri string `json:"uri"`
 
 	// 加载选项
 	LoadOptions LoadOptionsInput `json:"loadOptions,omitempty" jsonschema:"description=加载选项配置"`
@@ -166,17 +150,6 @@ func NewGetDocumentTool(manager *knowledge.KnowledgeManager) tool.InvokableTool 
 	return t
 }
 
-// NewUpdateDocumentTool 创建更新文档工具实例
-func NewUpdateDocumentTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	this := &UpdateDocumentTool{
-		manager: manager,
-	}
-	name := "update_document"
-	desc := "更新知识库中指定文档的内容和元数据。"
-	t, _ := utils.InferTool(name, desc, this.updateDocument)
-	return t
-}
-
 // NewDeleteDocumentTool 创建删除文档工具实例
 func NewDeleteDocumentTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
 	this := &DeleteDocumentTool{
@@ -199,6 +172,17 @@ func NewListDocumentsTool(manager *knowledge.KnowledgeManager) tool.InvokableToo
 	return t
 }
 
+type LoadDocumentSourceType string
+
+func (l LoadDocumentSourceType) String() string {
+	return string(l)
+}
+
+const (
+	LoadDocumentSourceTypeFile LoadDocumentSourceType = "file"
+	LoadDocumentSourceTypeUrl  LoadDocumentSourceType = "url"
+)
+
 // loadDocuments 加载文档到知识库
 func (t *LoadDocumentsTool) loadDocuments(ctx context.Context, params LoadDocumentsParams) (interface{}, error) {
 	if t.manager == nil {
@@ -206,51 +190,28 @@ func (t *LoadDocumentsTool) loadDocuments(ctx context.Context, params LoadDocume
 	}
 
 	// 创建文档读取器
-	var reader knowledge.DocumentReader
 	var err error
-
-	switch strings.ToLower(params.SourceType) {
-	case "text_files":
-		if len(params.FilePaths) == 0 {
-			return nil, fmt.Errorf("文本文件路径不能为空")
+	var loader document.Loader
+	switch params.SourceType {
+	case LoadDocumentSourceTypeFile:
+		fileLoader, err := file.NewFileLoader(ctx, &file.FileLoaderConfig{})
+		if err != nil {
+			return nil, err
 		}
-		reader = readers.NewTextFileReader(params.FilePaths)
-
-	case "urls":
-		if len(params.URLs) == 0 {
-			return nil, fmt.Errorf("URL列表不能为空")
+		loader = fileLoader
+	case LoadDocumentSourceTypeUrl:
+		urlLoader, err := url.NewLoader(ctx, &url.LoaderConfig{})
+		if err != nil {
+			return nil, err
 		}
-		reader = readers.NewURLReader(params.URLs)
-
-	case "directory":
-		if params.DirectoryPath == "" {
-			return nil, fmt.Errorf("目录路径不能为空")
-		}
-		reader = readers.NewDirectoryReader(params.DirectoryPath, params.Extensions, params.Recursive)
-
-	case "memory":
-		if len(params.Documents) == 0 {
-			return nil, fmt.Errorf("内存文档不能为空")
-		}
-		var docs []knowledge.Document
-		for _, docInput := range params.Documents {
-			doc := knowledge.Document{
-				ID:       docInput.ID,
-				Content:  docInput.Content,
-				Metadata: docInput.Metadata,
-			}
-			docs = append(docs, doc)
-		}
-		reader = readers.NewInMemoryReader(docs)
+		loader = urlLoader
 
 	default:
 		return nil, fmt.Errorf("不支持的文档来源类型: %s", params.SourceType)
 	}
-
-	// 读取文档
-	documents, err := reader.ReadDocuments(ctx)
+	documents, err := loader.Load(ctx, document.Source{URI: params.Uri})
 	if err != nil {
-		return nil, fmt.Errorf("读取文档失败: %w", err)
+		return nil, fmt.Errorf("加载文档失败: %w", err)
 	}
 
 	// 转换加载选项
@@ -259,16 +220,6 @@ func (t *LoadDocumentsTool) loadDocuments(ctx context.Context, params LoadDocume
 		Upsert:         params.LoadOptions.Upsert,
 		SkipExisting:   params.LoadOptions.SkipExisting,
 		EnableChunking: params.LoadOptions.EnableChunking,
-		ChunkSize:      params.LoadOptions.ChunkSize,
-		ChunkOverlap:   params.LoadOptions.ChunkOverlap,
-	}
-
-	// 设置默认值
-	if loadOptions.ChunkSize == 0 {
-		loadOptions.ChunkSize = 1000
-	}
-	if loadOptions.ChunkOverlap == 0 {
-		loadOptions.ChunkOverlap = 200
 	}
 
 	// 加载文档到知识库
@@ -340,35 +291,6 @@ func (t *GetDocumentTool) getDocument(ctx context.Context, params GetDocumentPar
 		"operation": "get_document",
 		"document":  doc,
 		"success":   true,
-	}, nil
-}
-
-// updateDocument 更新文档
-func (t *UpdateDocumentTool) updateDocument(ctx context.Context, params UpdateDocumentParams) (interface{}, error) {
-	if t.manager == nil {
-		return nil, fmt.Errorf("知识库管理器未初始化")
-	}
-
-	if params.DocID == "" {
-		return nil, fmt.Errorf("文档ID不能为空")
-	}
-
-	doc := knowledge.Document{
-		ID:       params.DocID,
-		Content:  params.Content,
-		Metadata: params.Metadata,
-	}
-
-	err := t.manager.UpdateDocument(ctx, doc)
-	if err != nil {
-		return nil, fmt.Errorf("更新文档失败: %w", err)
-	}
-
-	return map[string]interface{}{
-		"operation": "update_document",
-		"doc_id":    params.DocID,
-		"success":   true,
-		"message":   "文档更新成功",
 	}, nil
 }
 
