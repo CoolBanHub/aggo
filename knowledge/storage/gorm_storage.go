@@ -2,8 +2,10 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 	"gorm.io/driver/mysql"
@@ -30,6 +32,41 @@ func NewGormStorage(db *gorm.DB) (*GormStorage, error) {
 	return storage, nil
 }
 
+// Store 保存文档数组
+func (gs *GormStorage) Store(ctx context.Context, docs []*schema.Document) error {
+	batchSize := 100
+	if len(docs) == 0 {
+		return nil
+	}
+
+	models := make([]*DocumentModel, len(docs))
+	for i, doc := range docs {
+		model, err := gs.documentToModel(doc)
+		if err != nil {
+			return fmt.Errorf("failed to convert document to model: %w", err)
+		}
+		models[i] = model
+	}
+
+	for i := 0; i < len(models); i += batchSize {
+		end := i + batchSize
+		if end > len(models) {
+			end = len(models)
+		}
+
+		batch := models[i:end]
+		if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).CreateInBatches(batch, len(batch)).Error; err != nil {
+			return fmt.Errorf("failed to batch save documents: %w", err)
+		}
+	}
+
+	// 更新所有文档的DSL时间字段
+	for i, doc := range docs {
+		gs.updateDocumentDSL(doc, models[i])
+	}
+	return nil
+}
+
 func (gs *GormStorage) SetTablePrefix(prefix string) {
 	gs.tableNameProvider = NewTableNameProvider(prefix)
 }
@@ -39,13 +76,27 @@ func (gs *GormStorage) AutoMigrate() error {
 	return gs.db.Table(gs.tableNameProvider.GetDocumentTableName()).AutoMigrate(&DocumentModel{})
 }
 
-// documentToModel 将知识库文档转换为 GORM 模型（不包含向量数据）
+// documentToModel 将知识库文档转换为 GORM 模型
 func (gs *GormStorage) documentToModel(doc *schema.Document) (*DocumentModel, error) {
+	now := time.Now()
+	dslInfo := doc.DSLInfo()
+
 	model := &DocumentModel{
-		ID:        doc.ID,
-		Content:   doc.Content,
-		CreatedAt: doc.CreatedAt,
-		UpdatedAt: doc.UpdatedAt,
+		ID:      doc.ID,
+		Content: doc.Content,
+	}
+
+	// 从DSLInfo获取时间戳，默认使用当前时间
+	if createdAt, ok := dslInfo["created_at"].(time.Time); ok {
+		model.CreatedAt = createdAt
+	} else {
+		model.CreatedAt = now
+	}
+
+	if updatedAt, ok := dslInfo["updated_at"].(time.Time); ok {
+		model.UpdatedAt = updatedAt
+	} else {
+		model.UpdatedAt = now
 	}
 
 	if err := model.SetMetadata(doc.MetaData); err != nil {
@@ -62,13 +113,19 @@ func (gs *GormStorage) modelToDocument(model *DocumentModel) (*schema.Document, 
 		return nil, fmt.Errorf("failed to get metadata: %w", err)
 	}
 
-	return &schema.Document{
-		ID:        model.ID,
-		Content:   model.Content,
-		MetaData:  metadata,
-		CreatedAt: model.CreatedAt,
-		UpdatedAt: model.UpdatedAt,
-	}, nil
+	doc := &schema.Document{
+		ID:       model.ID,
+		Content:  model.Content,
+		MetaData: metadata,
+	}
+
+	// 只在DSL信息中添加时间字段
+	doc.WithDSLInfo(map[string]any{
+		"created_at": model.CreatedAt,
+		"updated_at": model.UpdatedAt,
+	})
+
+	return doc, nil
 }
 
 // SaveDocument 保存文档
@@ -78,15 +135,11 @@ func (gs *GormStorage) SaveDocument(ctx context.Context, doc *schema.Document) e
 		return fmt.Errorf("failed to convert document to model: %w", err)
 	}
 
-	// 使用 GORM 的 Save 方法，自动处理插入或更新
 	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Save(model).Error; err != nil {
 		return fmt.Errorf("failed to save document: %w", err)
 	}
 
-	// 更新文档的时间字段
-	doc.CreatedAt = model.CreatedAt
-	doc.UpdatedAt = model.UpdatedAt
-
+	gs.updateDocumentDSL(doc, model)
 	return nil
 }
 
@@ -95,7 +148,7 @@ func (gs *GormStorage) GetDocument(ctx context.Context, docID string) (*schema.D
 	var model DocumentModel
 
 	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", docID).First(&model).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("文档未找到: %s", docID)
 		}
 		return nil, fmt.Errorf("failed to get document: %w", err)
@@ -106,34 +159,27 @@ func (gs *GormStorage) GetDocument(ctx context.Context, docID string) (*schema.D
 
 // UpdateDocument 更新文档
 func (gs *GormStorage) UpdateDocument(ctx context.Context, doc *schema.Document) error {
-	// 首先检查文档是否存在
-	var count int64
-	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", doc.ID).Count(&count).Error; err != nil {
-		return fmt.Errorf("failed to check document existence: %w", err)
-	}
-
-	if count == 0 {
-		return fmt.Errorf("文档未找到: %s", doc.ID)
-	}
-
 	model, err := gs.documentToModel(doc)
 	if err != nil {
 		return fmt.Errorf("failed to convert document to model: %w", err)
 	}
 
-	// 使用 Updates 方法更新（会自动更新 updated_at）
-	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", doc.ID).Updates(model).Error; err != nil {
-		return fmt.Errorf("failed to update document: %w", err)
+	result := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", doc.ID).Updates(model)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update document: %w", result.Error)
 	}
 
-	// 获取更新后的时间戳
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("文档未找到: %s", doc.ID)
+	}
+
+	// 获取更新后的模型
 	var updatedModel DocumentModel
 	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Where("id = ?", doc.ID).First(&updatedModel).Error; err != nil {
 		return fmt.Errorf("failed to get updated document: %w", err)
 	}
 
-	doc.UpdatedAt = updatedModel.UpdatedAt
-
+	gs.updateDocumentDSL(doc, &updatedModel)
 	return nil
 }
 
@@ -237,51 +283,10 @@ func (gs *GormStorage) Close() error {
 	return sqlDB.Close()
 }
 
-// GetDB 获取底层 GORM 数据库实例（用于高级操作）
-func (gs *GormStorage) GetDB() *gorm.DB {
-	return gs.db
-}
-
-// Count 获取文档总数
-func (gs *GormStorage) Count(ctx context.Context) (int64, error) {
-	var count int64
-	if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).Count(&count).Error; err != nil {
-		return 0, fmt.Errorf("failed to count documents: %w", err)
-	}
-	return count, nil
-}
-
-// BatchSaveDocuments 批量保存文档（更高效）
-func (gs *GormStorage) BatchSaveDocuments(ctx context.Context, docs []*schema.Document, batchSize int) error {
-	if len(docs) == 0 {
-		return nil
-	}
-
-	models := make([]*DocumentModel, len(docs))
-	for i, doc := range docs {
-		model, err := gs.documentToModel(doc)
-		if err != nil {
-			return fmt.Errorf("failed to convert document to model: %w", err)
-		}
-		models[i] = model
-	}
-
-	// 分批处理
-	if batchSize <= 0 {
-		batchSize = 100 // 默认批次大小
-	}
-
-	for i := 0; i < len(models); i += batchSize {
-		end := i + batchSize
-		if end > len(models) {
-			end = len(models)
-		}
-
-		batch := models[i:end]
-		if err := gs.db.WithContext(ctx).Table(gs.tableNameProvider.GetDocumentTableName()).CreateInBatches(batch, len(batch)).Error; err != nil {
-			return fmt.Errorf("failed to batch save documents: %w", err)
-		}
-	}
-
-	return nil
+// updateDocumentDSL 更新文档的DSL时间信息
+func (gs *GormStorage) updateDocumentDSL(doc *schema.Document, model *DocumentModel) {
+	doc.WithDSLInfo(map[string]any{
+		"created_at": model.CreatedAt,
+		"updated_at": model.UpdatedAt,
+	})
 }

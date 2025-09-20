@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cloudwego/eino/schema"
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
@@ -56,57 +55,6 @@ func buildFilterExpression(filters map[string]interface{}) string {
 	return strings.Join(conditions, " and ")
 }
 
-// buildDocumentFromResult 从搜索结果构建文档对象
-func (m *MilvusVectorDB) buildDocumentFromResultSet(result milvusclient.ResultSet, index int) (*schema.Document, error) {
-	id, err := result.IDs.Get(index)
-	if err != nil {
-		return nil, fmt.Errorf("获取ID失败: %w", err)
-	}
-
-	content, err := getColumnValue(result, "content", index)
-	if err != nil {
-		return nil, fmt.Errorf("获取content失败: %w", err)
-	}
-
-	metadataBytes, err := getColumnValue(result, "metadata", index)
-	if err != nil {
-		return nil, fmt.Errorf("获取metadata失败: %w", err)
-	}
-
-	//createdAtInt, err := getColumnValue(result, "created_at", index)
-	//if err != nil {
-	//	return nil, fmt.Errorf("获取created_at失败: %w", err)
-	//}
-	//
-	//updatedAtInt, err := getColumnValue(result, "updated_at", index)
-	//if err != nil {
-	//	return nil, fmt.Errorf("获取updated_at失败: %w", err)
-	//}
-
-	// 解析metadata
-	metadata, err := unmarshalMetadata(metadataBytes.([]byte))
-	if err != nil {
-		return nil, fmt.Errorf("解析metadata失败: %w", err)
-	}
-
-	// 获取向量数据（如果存在）
-	var vector []float32
-	if vectorValue, err := getColumnValue(result, "vector", index); err == nil {
-		if v, ok := vectorValue.([]float32); ok {
-			vector = v
-		}
-	}
-
-	doc := &schema.Document{
-		ID:       id.(string),
-		Content:  content.(string),
-		MetaData: metadata,
-	}
-	doc.WithDenseVector(vector)
-
-	return doc, nil
-}
-
 // getColumnValue 从结果集中获取列值
 func getColumnValue(result milvusclient.ResultSet, columnName string, index int) (interface{}, error) {
 	column := result.GetColumn(columnName)
@@ -120,4 +68,79 @@ func getColumnValue(result milvusclient.ResultSet, columnName string, index int)
 	}
 
 	return value, nil
+}
+
+func Float64ToFloat32(src []float64) []float32 {
+	if src == nil {
+		return nil
+	}
+
+	dst := make([]float32, len(src))
+	for i, v := range src {
+		dst[i] = float32(v)
+	}
+	return dst
+}
+
+func Float32ToFloat64(src []float32) []float64 {
+	if src == nil {
+		return nil
+	}
+
+	dst := make([]float64, len(src))
+	for i, v := range src {
+		dst[i] = float64(v)
+	}
+	return dst
+}
+
+// vectorToString 将float32向量转换为PostgreSQL向量字符串格式
+func (p *PostgresVectorDB) vectorToString(vector []float32) string {
+	if len(vector) == 0 {
+		return "[]"
+	}
+
+	parts := make([]string, len(vector))
+	for i, v := range vector {
+		parts[i] = fmt.Sprintf("%.6f", v)
+	}
+
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func (p *PostgresVectorDB) vector64ToString(vector []float64) string {
+	if len(vector) == 0 {
+		return "[]"
+	}
+
+	parts := make([]string, len(vector))
+	for i, v := range vector {
+		parts[i] = fmt.Sprintf("%.6f", v)
+	}
+
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+// stringToVector 将PostgreSQL向量字符串转换为float32向量
+func (p *PostgresVectorDB) stringToVector(vectorStr string) ([]float32, error) {
+	// 简单的向量字符串解析
+	if vectorStr == "" || vectorStr == "[]" {
+		return []float32{}, nil
+	}
+
+	// 移除方括号
+	vectorStr = strings.Trim(vectorStr, "[]")
+	parts := strings.Split(vectorStr, ",")
+
+	vector := make([]float32, len(parts))
+	for i, part := range parts {
+		var f float64
+		_, err := fmt.Sscanf(strings.TrimSpace(part), "%f", &f)
+		if err != nil {
+			return nil, fmt.Errorf("解析向量元素失败: %w", err)
+		}
+		vector[i] = float32(f)
+	}
+
+	return vector, nil
 }
