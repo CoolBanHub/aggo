@@ -37,6 +37,11 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
+func (m *MemoryStore) AutoMigrate() error {
+
+	return nil
+}
+
 func (m *MemoryStore) SetTablePrefix(prefix string) {
 }
 

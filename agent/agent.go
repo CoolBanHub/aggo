@@ -24,10 +24,6 @@ type Agent struct {
 	systemPrompt string
 	cm           model.ToolCallingChatModel
 
-	//knowledgeManager *knowledge.KnowledgeManager
-	//知识库查询配置
-	knowledgeConfig *KnowledgeQueryConfig
-
 	memoryManager *memory.MemoryManager
 
 	//作为子agent的时候必须传
@@ -42,14 +38,8 @@ type Agent struct {
 	multiAgent *host.MultiAgent
 	specialist []*host.Specialist
 
-	retriever retriever.Retriever
-}
-
-// KnowledgeQueryConfig 知识库查询配置
-type KnowledgeQueryConfig struct {
-
-	// 是否总是查询（不使用关键词触发）
-	AlwaysQuery bool
+	retriever        retriever.Retriever
+	retrieverOptions []retriever.Option
 }
 
 func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*Agent, error) {
@@ -67,27 +57,6 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 		}
 	}
 
-	if this.retriever != nil {
-		//配置知识库的分析tool
-		if this.knowledgeConfig == nil {
-			// 默认知识库查询配置
-			this.knowledgeConfig = &KnowledgeQueryConfig{
-				AlwaysQuery: false,
-			}
-		}
-		knowagent, err := NewKnowledgeAgent(ctx, cm, this.retriever)
-		if err != nil {
-			return nil, err
-		}
-
-		if !this.knowledgeConfig.AlwaysQuery {
-			if len(this.specialist) > 0 {
-				this.specialist = append(this.specialist, knowagent.NewSpecialist())
-			} else {
-				this.tools = append(this.tools, knowagent.createTool())
-			}
-		}
-	}
 	if len(this.specialist) > 0 {
 		h := &host.Host{
 			ToolCallingModel: cm,
@@ -342,18 +311,11 @@ func (this *Agent) formatUserMemories(memories []*memory.UserMemory) string {
 
 // shouldQueryKnowledge 判断是否需要查询知识库
 func (this *Agent) shouldQueryKnowledge() bool {
-	if this.retriever == nil || this.knowledgeConfig == nil {
+	if this.retriever == nil {
 		return false
 	}
 
-	// 如果设置了总是查询，则直接返回true
-	if this.knowledgeConfig.AlwaysQuery {
-		return true
-	}
-
-	//让ai调用分析工具自己判断
-
-	return false
+	return true
 }
 
 // queryKnowledge 查询知识库并返回相关文档
@@ -402,18 +364,17 @@ func (this *Agent) formatKnowledgeResults(results []*schema.Document) string {
 func (this *Agent) NewSpecialist() *host.Specialist {
 	// 创建一个专门用于specialist的agent副本，避免修改原始实例
 	specialistAgent := &Agent{
-		systemPrompt:    this.systemPrompt,
-		cm:              this.cm,
-		knowledgeConfig: this.knowledgeConfig,
-		memoryManager:   nil, // 作为子agent时不使用memory manager
-		name:            this.name,
-		description:     this.description,
-		tools:           this.tools,
-		agent:           this.agent,
-		maxStep:         this.maxStep,
-		multiAgent:      this.multiAgent,
-		specialist:      this.specialist,
-		retriever:       this.retriever,
+		systemPrompt:  this.systemPrompt,
+		cm:            this.cm,
+		memoryManager: nil, // 作为子agent时不使用memory manager
+		name:          this.name,
+		description:   this.description,
+		tools:         this.tools,
+		agent:         this.agent,
+		maxStep:       this.maxStep,
+		multiAgent:    this.multiAgent,
+		specialist:    this.specialist,
+		retriever:     this.retriever,
 	}
 
 	return &host.Specialist{

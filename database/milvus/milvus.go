@@ -201,6 +201,15 @@ func (m *Milvus) Store(ctx context.Context, docs []*schema.Document, opts ...ind
 func (m *Milvus) Retrieve(ctx context.Context, query string, opts ...retriever.Option) ([]*schema.Document, error) {
 	options := retriever.GetCommonOptions(nil, opts...)
 	specOpts := retriever.GetImplSpecificOptions(&Option{}, opts...)
+
+	if specOpts.TopK == 0 {
+		specOpts.TopK = 10
+	}
+
+	if options.ScoreThreshold == nil {
+		options.ScoreThreshold = utils.NewFloat64Ptr(0.1)
+	}
+
 	filterExpr := buildFilterExpression(specOpts.Filters)
 	ctx = callbacks.EnsureRunInfo(ctx, m.GetType(), components.ComponentOfRetriever)
 	// callback info on start

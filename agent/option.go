@@ -37,6 +37,12 @@ func WithRetriever(retriever retriever.Retriever) Option {
 	}
 }
 
+func WithRetrieverOptions(retrieverOptions []retriever.Option) Option {
+	return func(agent *Agent) {
+		agent.retrieverOptions = retrieverOptions
+	}
+}
+
 func WithMemoryManager(memoryManager *memory.MemoryManager) Option {
 	return func(agent *Agent) {
 		agent.memoryManager = memoryManager
@@ -46,12 +52,6 @@ func WithMemoryManager(memoryManager *memory.MemoryManager) Option {
 func WithSystemPrompt(systemPrompt string) Option {
 	return func(agent *Agent) {
 		agent.systemPrompt = systemPrompt
-	}
-}
-
-func WithKnowledgeQueryConfig(config *KnowledgeQueryConfig) Option {
-	return func(agent *Agent) {
-		agent.knowledgeConfig = config
 	}
 }
 

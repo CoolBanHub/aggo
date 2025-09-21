@@ -40,20 +40,20 @@ func main() {
 	em, err := model.NewEmbModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
 		model.WithAPIKey(os.Getenv("APIKey")),
 		model.WithModel("text-embedding-3-large"),
+		model.WithDimensions(1024),
 	)
 	if err != nil {
 		log.Fatalf("创建嵌入模型失败: %v", err)
 		return
 	}
 
-	gormSql, err := NewPostgresGorm("host=localhost user=postgres password=postgres dbname=test port=5432 sslmode=disable", logger.Silent)
-	if err != nil {
-		log.Fatalf("创建gorm失败: %v", err)
-		return
-	}
-
-	databaseDB := getPostgresDB(gormSql, em)
-	//databaseDB := getMilvusDB(em)
+	//gormSql, err := NewPostgresGorm("host=localhost user=postgres password=postgres dbname=aggo port=5432 sslmode=disable", logger.Silent)
+	//if err != nil {
+	//	log.Fatalf("创建gorm失败: %v", err)
+	//	return
+	//}
+	//databaseDB := getPostgresDB(gormSql, em)
+	databaseDB := getMilvusDB(em)
 
 	log.Println("开始添加数据")
 
@@ -93,12 +93,15 @@ func main() {
 			log.Fatalf("加载文档到知识库失败: %v", err)
 		}
 		log.Println("知识库初始化完成，已加载示例文档")
-	}
-	s, err := storage2.NewGormStorage(gormSql)
-	if err != nil {
-		log.Fatalf("new sql store fail,err:%s", err)
 		return
 	}
+	//s, err := storage2.NewGormStorage(gormSql)
+	//if err != nil {
+	//	log.Fatalf("new sql store fail,err:%s", err)
+	//	return
+	//}
+	s := storage2.NewMemoryStore()
+
 	memoryManager, err := memory.NewMemoryManager(cm, s, &memory.MemoryConfig{
 		EnableSessionSummary: false,
 		EnableUserMemories:   false,
@@ -132,10 +135,11 @@ func main() {
 	// 5. 创建主 Agent，将 KnowledgeAgent 作为工具
 	mainAgent, err := agent.NewAgent(ctx, cm,
 		agent.WithMemoryManager(memoryManager),
-		agent.WithKnowledgeQueryConfig(&agent.KnowledgeQueryConfig{
-			AlwaysQuery: true,
-		}),
 		agent.WithRetriever(routerRetriever),
+		agent.WithRetrieverOptions([]retriever.Option{
+			retriever.WithTopK(3),
+			retriever.WithScoreThreshold(0.1),
+		}),
 		agent.WithSystemPrompt("你是一个技术专家助手。当用户询问技术问题时，你应该使用 knowledge_reason 工具来搜索和分析相关信息，然后提供准确的回答。"))
 
 	if err != nil {

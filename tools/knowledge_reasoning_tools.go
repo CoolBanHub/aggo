@@ -12,10 +12,10 @@ import (
 )
 
 // GetKnowledgeReasoningTools 获取知识推理工具集合
-func GetKnowledgeReasoningTools(retriever retriever.Retriever) []tool.BaseTool {
+func GetKnowledgeReasoningTools(retriever retriever.Retriever, retrieverOptions []retriever.Option) []tool.BaseTool {
 	return []tool.BaseTool{
 		NewKnowledgeThinkTool(),
-		NewKnowledgeSearchTool(retriever),
+		NewKnowledgeSearchTool(retriever, retrieverOptions),
 		NewKnowledgeAnalysisTool(),
 	}
 }
@@ -28,7 +28,8 @@ type KnowledgeThinkTool struct {
 // KnowledgeSearchTool 知识搜索工具
 // 提供知识库搜索功能
 type KnowledgeSearchTool struct {
-	retriever retriever.Retriever
+	retriever        retriever.Retriever
+	retrieverOptions []retriever.Option
 }
 
 // KnowledgeAnalysisTool 知识分析工具
@@ -99,9 +100,10 @@ func NewKnowledgeThinkTool() tool.InvokableTool {
 }
 
 // NewKnowledgeSearchTool 创建知识搜索工具实例
-func NewKnowledgeSearchTool(retriever retriever.Retriever) tool.InvokableTool {
+func NewKnowledgeSearchTool(retriever retriever.Retriever, retrieverOptions []retriever.Option) tool.InvokableTool {
 	this := &KnowledgeSearchTool{
-		retriever: retriever,
+		retriever:        retriever,
+		retrieverOptions: retrieverOptions,
 	}
 	name := "knowledge_search"
 	desc := "搜索知识库获取相关信息。在思考后使用此工具多次搜索相关信息。支持多种搜索策略，如精确短语（使用引号）、OR操作符和聚焦关键词。"
@@ -183,10 +185,8 @@ func (t *KnowledgeSearchTool) search(ctx context.Context, params KnowledgeSearch
 		limit = 10
 	}
 
-	// 构建搜索选项
-
 	// 执行搜索
-	results, err := t.retriever.Retrieve(ctx, params.Query)
+	results, err := t.retriever.Retrieve(ctx, params.Query, t.retrieverOptions...)
 	if err != nil {
 		return &KnowledgeSearchResult{
 			Query:     params.Query,

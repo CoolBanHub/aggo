@@ -200,7 +200,6 @@ func (p *Postgres) Store(ctx context.Context, docs []*schema.Document, opts ...i
 // Search 向量搜索
 func (p *Postgres) Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}, threshold float64) ([]*schema.Document, error) {
 	tableName := p.collectionName
-
 	// 将float32向量转换为字符串格式
 	vectorStr := utils.VectorToString(queryVector)
 
@@ -259,7 +258,13 @@ func (p *Postgres) Search(ctx context.Context, queryVector []float32, limit int,
 func (p *Postgres) Retrieve(ctx context.Context, query string, opts ...retriever.Option) ([]*schema.Document, error) {
 	options := retriever.GetCommonOptions(nil, opts...)
 	specOpts := retriever.GetImplSpecificOptions(&Option{}, opts...)
+	if specOpts.TopK == 0 {
+		specOpts.TopK = 10
+	}
 
+	if options.ScoreThreshold == nil {
+		options.ScoreThreshold = utils.NewFloat64Ptr(0.1)
+	}
 	ctx = callbacks.EnsureRunInfo(ctx, p.GetType(), components.ComponentOfRetriever)
 	// callback info on start
 	ctx = callbacks.OnStart(ctx, &retriever.CallbackInput{

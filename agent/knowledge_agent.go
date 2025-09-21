@@ -23,18 +23,16 @@ type KnowledgeAgent struct {
 	description  string
 	systemPrompt string
 
-	//knowledgeManager *knowledge.KnowledgeManager
-	//
-	//// 知识库查询配置
-	//knowledgeConfig *KnowledgeQueryConfig
-
 	agent *react.Agent
 
 	retriever retriever.Retriever
+
+	retrieverOptions []retriever.Option
 }
 
 func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel,
 	retriever retriever.Retriever,
+	retrieverOptions []retriever.Option,
 ) (*KnowledgeAgent, error) {
 	if cm == nil {
 		return nil, errors.New("chat model不能为空")
@@ -106,7 +104,7 @@ func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel,
 	reactAgent, err := react.NewAgent(ctx, &react.AgentConfig{
 		ToolCallingModel: cm,
 		ToolsConfig: compose.ToolsNodeConfig{
-			Tools: tools.GetKnowledgeReasoningTools(this.retriever),
+			Tools: tools.GetKnowledgeReasoningTools(this.retriever, this.retrieverOptions),
 		},
 		ToolReturnDirectly: map[string]struct{}{},
 		MessageModifier: func(ctx context.Context, input []*schema.Message) []*schema.Message {
