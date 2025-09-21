@@ -53,12 +53,18 @@ type KnowledgeQueryConfig struct {
 }
 
 func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*Agent, error) {
+	if cm == nil {
+		return nil, fmt.Errorf("chat model不能为空")
+	}
+
 	this := &Agent{
 		cm: cm,
 	}
 
 	for _, opt := range opts {
-		opt(this)
+		if opt != nil {
+			opt(this)
+		}
 	}
 
 	if this.retriever != nil {
@@ -257,6 +263,10 @@ func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Mes
 	// 6. 检查是否需要查询知识库
 	if this.retriever != nil && len(input) > 0 {
 		userInput := input[len(input)-1].Content // 获取最新的用户输入
+		if userInput == "" {
+			// 如果用户输入为空，跳过知识库查询
+			return _input, nil
+		}
 
 		// 判断是否需要查询知识库
 		if this.shouldQueryKnowledge() {
@@ -268,12 +278,14 @@ func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Mes
 			} else if len(knowledgeResults) > 0 {
 				// 格式化知识库结果
 				knowledgeContent := this.formatKnowledgeResults(knowledgeResults)
-				knowledgeMessage := &schema.Message{
-					Role:    schema.System,
-					Content: knowledgeContent,
+				if knowledgeContent != "" {
+					knowledgeMessage := &schema.Message{
+						Role:    schema.System,
+						Content: knowledgeContent,
+					}
+					// 将知识库信息插入到对话消息之前，但在摘要和记忆之后
+					_input = append([]*schema.Message{knowledgeMessage}, _input...)
 				}
-				// 将知识库信息插入到对话消息之前，但在摘要和记忆之后
-				_input = append([]*schema.Message{knowledgeMessage}, _input...)
 			}
 		}
 	}
@@ -293,10 +305,10 @@ func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Mes
 
 // storeUserMessage 存储用户消息
 func (this *Agent) storeUserMessage(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) error {
-	if chatOpts.sessionID != "" && this.memoryManager != nil && len(input) > 0 {
-		return this.memoryManager.ProcessUserMessage(ctx, chatOpts.userID, chatOpts.sessionID, input[0].Content)
+	if chatOpts == nil || chatOpts.sessionID == "" || this.memoryManager == nil || len(input) == 0 {
+		return nil
 	}
-	return nil
+	return this.memoryManager.ProcessUserMessage(ctx, chatOpts.userID, chatOpts.sessionID, input[0].Content)
 }
 
 // storeAssistantMessage 存储助手消息,在callback统一处理
@@ -388,19 +400,32 @@ func (this *Agent) formatKnowledgeResults(results []*schema.Document) string {
 }
 
 func (this *Agent) NewSpecialist() *host.Specialist {
-	//作为子agent的时候，不调用memory，这个由父级的agent去调用接管
-	this.memoryManager = nil
+	// 创建一个专门用于specialist的agent副本，避免修改原始实例
+	specialistAgent := &Agent{
+		systemPrompt:    this.systemPrompt,
+		cm:              this.cm,
+		knowledgeConfig: this.knowledgeConfig,
+		memoryManager:   nil, // 作为子agent时不使用memory manager
+		name:            this.name,
+		description:     this.description,
+		tools:           this.tools,
+		agent:           this.agent,
+		maxStep:         this.maxStep,
+		multiAgent:      this.multiAgent,
+		specialist:      this.specialist,
+		retriever:       this.retriever,
+	}
 
 	return &host.Specialist{
 		AgentMeta: host.AgentMeta{
-			Name:        this.name,
-			IntendedUse: this.description,
+			Name:        specialistAgent.name,
+			IntendedUse: specialistAgent.description,
 		},
 		Invokable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.Message, err error) {
-			return this.Generate(ctx, input)
+			return specialistAgent.Generate(ctx, input)
 		},
 		Streamable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.StreamReader[*schema.Message], err error) {
-			return this.Stream(ctx, input)
+			return specialistAgent.Stream(ctx, input)
 		},
 	}
 }

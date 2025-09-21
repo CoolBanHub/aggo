@@ -43,6 +43,12 @@ type PostgresConfig struct {
 
 // NewPostgres 使用现有GORM实例创建PostgreSQL向量数据库
 func NewPostgres(config PostgresConfig) (*Postgres, error) {
+	if config.Client == nil {
+		return nil, errors.New("postgres client不能为空")
+	}
+	if config.Embedding == nil {
+		return nil, errors.New("embedding组件不能为空")
+	}
 
 	if config.VectorDimension <= 0 {
 		config.VectorDimension = 1536 // 默认OpenAI embedding维度
@@ -273,11 +279,12 @@ func (p *Postgres) Retrieve(ctx context.Context, query string, opts ...retriever
 	// 使用embedding生成查询向量
 	vectorsList, err1 := p.Embedding.EmbedStrings(ctx, []string{query})
 	if err1 != nil {
-		err = err1
+		err = fmt.Errorf("查询向量化失败: %w", err1)
 		return nil, err
 	}
-	if len(vectorsList) == 0 {
-		return nil, nil
+	if len(vectorsList) == 0 || len(vectorsList[0]) == 0 {
+		err = errors.New("查询向量化失败: 向量数据为空")
+		return nil, err
 	}
 	queryVector := vectorsList[0]
 

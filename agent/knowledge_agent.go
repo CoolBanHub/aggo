@@ -36,6 +36,13 @@ type KnowledgeAgent struct {
 func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel,
 	retriever retriever.Retriever,
 ) (*KnowledgeAgent, error) {
+	if cm == nil {
+		return nil, errors.New("chat model不能为空")
+	}
+	if retriever == nil {
+		return nil, errors.New("retriever不能为空")
+	}
+
 	this := &KnowledgeAgent{
 		//knowledgeManager: knowledgeManager,
 		name:      "knowledge_reason",
@@ -171,6 +178,9 @@ func (this *KnowledgeAgent) Run(ctx context.Context, param any) (string, error) 
 	if err != nil {
 		slog.Error(err)
 		return "", err
+	}
+	if r == nil {
+		return "", errors.New("生成的响应为空")
 	}
 	return r.Content, nil
 }

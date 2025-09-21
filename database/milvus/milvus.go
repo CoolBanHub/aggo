@@ -37,9 +37,19 @@ type MilvusConfig struct {
 
 // NewMilvus 创建Milvus向量数据库实例
 func NewMilvus(config MilvusConfig) (*Milvus, error) {
+	if config.Client == nil {
+		return nil, errors.New("milvus client不能为空")
+	}
+	if config.Embedding == nil {
+		return nil, errors.New("embedding组件不能为空")
+	}
+	if config.EmbeddingDim <= 0 {
+		return nil, errors.New("embedding维度必须大于0")
+	}
 	if config.CollectionName == "" {
 		config.CollectionName = "aggo_knowledge_vectors"
 	}
+
 	db := &Milvus{
 		client:         config.Client,
 		collectionName: config.CollectionName,
@@ -83,7 +93,6 @@ func (m *Milvus) initCollection() error {
 	// 创建索引选项
 	indexOptions := []milvusclient.CreateIndexOption{
 		milvusclient.NewCreateIndexOption(m.collectionName, "vector", index.NewHNSWIndex(entity.COSINE, 64, 512)),
-		milvusclient.NewCreateIndexOption(m.collectionName, "id", index.NewAutoIndex(entity.COSINE)),
 	}
 
 	// 创建集合

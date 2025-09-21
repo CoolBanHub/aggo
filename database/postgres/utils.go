@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -47,9 +48,19 @@ func (p *Postgres) postgresDocumentToDocument(pgDoc *PostgresVectorDocument) (*s
 
 // mapToDocument 将查询结果map转换为Document
 func (p *Postgres) mapToDocument(result map[string]interface{}) (*schema.Document, error) {
+	id, ok := result["id"].(string)
+	if !ok {
+		return nil, fmt.Errorf("ID字段类型错误或缺失")
+	}
+
+	content, ok := result["content"].(string)
+	if !ok {
+		return nil, fmt.Errorf("content字段类型错误或缺失")
+	}
+
 	doc := &schema.Document{
-		ID:       result["id"].(string),
-		Content:  result["content"].(string),
+		ID:       id,
+		Content:  content,
 		MetaData: make(map[string]interface{}),
 	}
 
@@ -85,6 +96,13 @@ func (p *Postgres) mapToDocument(result map[string]interface{}) (*schema.Documen
 
 // documentToPostgresDocument 将知识库文档转换为PostgreSQL文档
 func (p *Postgres) documentToPostgresDocument(ctx context.Context, doc schema.Document) (*PostgresVectorDocument, error) {
+	if doc.ID == "" {
+		return nil, errors.New("文档ID不能为空")
+	}
+	if doc.Content == "" {
+		return nil, errors.New("文档内容不能为空")
+	}
+
 	// 序列化metadata
 	var metadataJSON string
 	if doc.MetaData != nil {
@@ -100,7 +118,7 @@ func (p *Postgres) documentToPostgresDocument(ctx context.Context, doc schema.Do
 	if err != nil {
 		return nil, fmt.Errorf("向量化失败: %w", err)
 	}
-	if len(vectorData) == 0 {
+	if len(vectorData) == 0 || len(vectorData[0]) == 0 {
 		return nil, fmt.Errorf("向量化失败: 向量数据为空")
 	}
 
