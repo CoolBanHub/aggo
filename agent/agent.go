@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	callbacks2 "github.com/CoolBanHub/aggo/callbacks"
-	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/state"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent"
@@ -24,8 +24,8 @@ type Agent struct {
 	systemPrompt string
 	cm           model.ToolCallingChatModel
 
-	knowledgeManager *knowledge.KnowledgeManager
-	// 知识库查询配置
+	//knowledgeManager *knowledge.KnowledgeManager
+	//知识库查询配置
 	knowledgeConfig *KnowledgeQueryConfig
 
 	memoryManager *memory.MemoryManager
@@ -41,6 +41,8 @@ type Agent struct {
 	//多agent的时候 使用
 	multiAgent *host.MultiAgent
 	specialist []*host.Specialist
+
+	retriever retriever.Retriever
 }
 
 // KnowledgeQueryConfig 知识库查询配置
@@ -59,7 +61,7 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 		opt(this)
 	}
 
-	if this.knowledgeManager != nil {
+	if this.retriever != nil {
 		//配置知识库的分析tool
 		if this.knowledgeConfig == nil {
 			// 默认知识库查询配置
@@ -67,7 +69,7 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 				AlwaysQuery: false,
 			}
 		}
-		knowagent, err := NewKnowledgeAgent(ctx, cm, this.knowledgeManager)
+		knowagent, err := NewKnowledgeAgent(ctx, cm, this.retriever)
 		if err != nil {
 			return nil, err
 		}
@@ -253,7 +255,7 @@ func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Mes
 	}
 
 	// 6. 检查是否需要查询知识库
-	if this.knowledgeManager != nil && len(input) > 0 {
+	if this.retriever != nil && len(input) > 0 {
 		userInput := input[len(input)-1].Content // 获取最新的用户输入
 
 		// 判断是否需要查询知识库
@@ -328,7 +330,7 @@ func (this *Agent) formatUserMemories(memories []*memory.UserMemory) string {
 
 // shouldQueryKnowledge 判断是否需要查询知识库
 func (this *Agent) shouldQueryKnowledge() bool {
-	if this.knowledgeManager == nil || this.knowledgeConfig == nil {
+	if this.retriever == nil || this.knowledgeConfig == nil {
 		return false
 	}
 
@@ -343,32 +345,21 @@ func (this *Agent) shouldQueryKnowledge() bool {
 }
 
 // queryKnowledge 查询知识库并返回相关文档
-func (this *Agent) queryKnowledge(ctx context.Context, query string) ([]*knowledge.SearchResult, error) {
-	if this.knowledgeManager == nil {
+func (this *Agent) queryKnowledge(ctx context.Context, query string) ([]*schema.Document, error) {
+	if this.retriever == nil {
 		return nil, nil
 	}
 
-	searchOptions := knowledge.SearchOptions{
-		Limit:     this.knowledgeManager.GetConfig().DefaultSearchOptions.Limit,
-		Threshold: this.knowledgeManager.GetConfig().DefaultSearchOptions.Threshold,
-	}
-
-	results, err := this.knowledgeManager.Search(ctx, query, searchOptions)
+	results, err := this.retriever.Retrieve(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("知识库搜索失败: %w", err)
 	}
 
-	// 转换为指针类型以便返回
-	resultPointers := make([]*knowledge.SearchResult, len(results))
-	for i := range results {
-		resultPointers[i] = &results[i]
-	}
-
-	return resultPointers, nil
+	return results, nil
 }
 
 // formatKnowledgeResults 格式化知识库搜索结果为上下文信息
-func (this *Agent) formatKnowledgeResults(results []*knowledge.SearchResult) string {
+func (this *Agent) formatKnowledgeResults(results []*schema.Document) string {
 	if len(results) == 0 {
 		return ""
 	}
@@ -377,15 +368,15 @@ func (this *Agent) formatKnowledgeResults(results []*knowledge.SearchResult) str
 	builder.WriteString("相关知识库信息（请基于以下信息回答用户问题）:\n\n")
 
 	for i, result := range results {
-		builder.WriteString(fmt.Sprintf("【知识%d】(相似度: %.2f)\n", i+1, result.Score))
-		builder.WriteString(fmt.Sprintf("内容: %s\n", result.Document.Content))
+		builder.WriteString(fmt.Sprintf("【知识%d】(相似度: %.2f)\n", i+1, result.Score()))
+		builder.WriteString(fmt.Sprintf("内容: %s\n", result.Content))
 
 		// 如果有元数据，添加一些有用的信息
-		if len(result.Document.Metadata) > 0 {
-			if title, ok := result.Document.Metadata["title"]; ok {
+		if len(result.MetaData) > 0 {
+			if title, ok := result.MetaData["title"]; ok {
 				builder.WriteString(fmt.Sprintf("标题: %v\n", title))
 			}
-			if source, ok := result.Document.Metadata["source"]; ok {
+			if source, ok := result.MetaData["source"]; ok {
 				builder.WriteString(fmt.Sprintf("来源: %v\n", source))
 			}
 		}

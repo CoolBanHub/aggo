@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/state"
 	"github.com/CoolBanHub/aggo/tools"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
@@ -23,18 +23,23 @@ type KnowledgeAgent struct {
 	description  string
 	systemPrompt string
 
-	knowledgeManager *knowledge.KnowledgeManager
-
-	// 知识库查询配置
-	knowledgeConfig *KnowledgeQueryConfig
+	//knowledgeManager *knowledge.KnowledgeManager
+	//
+	//// 知识库查询配置
+	//knowledgeConfig *KnowledgeQueryConfig
 
 	agent *react.Agent
+
+	retriever retriever.Retriever
 }
 
-func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel, knowledgeManager *knowledge.KnowledgeManager) (*KnowledgeAgent, error) {
+func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel,
+	retriever retriever.Retriever,
+) (*KnowledgeAgent, error) {
 	this := &KnowledgeAgent{
-		knowledgeManager: knowledgeManager,
-		name:             "knowledge_reason",
+		//knowledgeManager: knowledgeManager,
+		name:      "knowledge_reason",
+		retriever: retriever,
 	}
 
 	// 工具描述 - 用于AI判断何时调用此工具
@@ -94,7 +99,7 @@ func NewKnowledgeAgent(ctx context.Context, cm model.ToolCallingChatModel, knowl
 	reactAgent, err := react.NewAgent(ctx, &react.AgentConfig{
 		ToolCallingModel: cm,
 		ToolsConfig: compose.ToolsNodeConfig{
-			Tools: tools.GetKnowledgeReasoningTools(this.knowledgeManager),
+			Tools: tools.GetKnowledgeReasoningTools(this.retriever),
 		},
 		ToolReturnDirectly: map[string]struct{}{},
 		MessageModifier: func(ctx context.Context, input []*schema.Message) []*schema.Message {

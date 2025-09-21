@@ -1,12 +1,12 @@
-package vectordb
+package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components"
 	"github.com/cloudwego/eino/components/embedding"
@@ -16,14 +16,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// PostgresVectorDB PostgreSQL向量数据库实现
-// 使用pgvector扩展进行向量存储和搜索
-type PostgresVectorDB struct {
-	db                *gorm.DB
-	collectionName    string
-	vectorDimension   int
-	tableNameProvider *TableNameProvider
-	Embedding         embedding.Embedder
+type Postgres struct {
+	db              *gorm.DB
+	collectionName  string
+	vectorDimension int
+	Embedding       embedding.Embedder
 }
 
 // PostgresVectorDocument PostgreSQL向量文档模型
@@ -36,19 +33,6 @@ type PostgresVectorDocument struct {
 	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 }
 
-// TableNameProvider 表名提供器
-type TableNameProvider struct {
-	collectionName string
-}
-
-func NewTableNameProvider(collectionName string) *TableNameProvider {
-	return &TableNameProvider{collectionName: collectionName}
-}
-
-func (t *TableNameProvider) GetVectorTableName() string {
-	return t.collectionName
-}
-
 // PostgresConfig PostgreSQL配置
 type PostgresConfig struct {
 	Client          *gorm.DB
@@ -57,8 +41,8 @@ type PostgresConfig struct {
 	Embedding       embedding.Embedder
 }
 
-// NewPostgresVectorDB 使用现有GORM实例创建PostgreSQL向量数据库
-func NewPostgresVectorDB(config PostgresConfig) (*PostgresVectorDB, error) {
+// NewPostgres 使用现有GORM实例创建PostgreSQL向量数据库
+func NewPostgres(config PostgresConfig) (*Postgres, error) {
 
 	if config.VectorDimension <= 0 {
 		config.VectorDimension = 1536 // 默认OpenAI embedding维度
@@ -68,14 +52,11 @@ func NewPostgresVectorDB(config PostgresConfig) (*PostgresVectorDB, error) {
 		config.CollectionName = "aggo_knowledge_vectors"
 	}
 
-	tableNameProvider := NewTableNameProvider(config.CollectionName)
-
-	vectorDB := &PostgresVectorDB{
-		db:                config.Client,
-		collectionName:    config.CollectionName,
-		vectorDimension:   config.VectorDimension,
-		tableNameProvider: tableNameProvider,
-		Embedding:         config.Embedding,
+	vectorDB := &Postgres{
+		db:              config.Client,
+		collectionName:  config.CollectionName,
+		vectorDimension: config.VectorDimension,
+		Embedding:       config.Embedding,
 	}
 
 	// 初始化表
@@ -87,7 +68,7 @@ func NewPostgresVectorDB(config PostgresConfig) (*PostgresVectorDB, error) {
 }
 
 // initTable 初始化PostgreSQL表
-func (p *PostgresVectorDB) initTable() error {
+func (p *Postgres) initTable() error {
 	// 检查表是否存在
 	if !p.Exists() {
 		// 表不存在，创建表
@@ -98,8 +79,8 @@ func (p *PostgresVectorDB) initTable() error {
 }
 
 // Create 创建向量表
-func (p *PostgresVectorDB) Create() error {
-	tableName := p.tableNameProvider.GetVectorTableName()
+func (p *Postgres) Create() error {
+	tableName := p.collectionName
 
 	// 检查pgvector扩展是否已安装
 	var count int64
@@ -146,8 +127,8 @@ func (p *PostgresVectorDB) Create() error {
 }
 
 // Exists 检查表是否存在
-func (p *PostgresVectorDB) Exists() bool {
-	tableName := p.tableNameProvider.GetVectorTableName()
+func (p *Postgres) Exists() bool {
+	tableName := p.collectionName
 
 	var count int64
 	err := p.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?", tableName).Scan(&count).Error
@@ -159,7 +140,7 @@ func (p *PostgresVectorDB) Exists() bool {
 }
 
 // Store 存储文档（实现indexer.Indexer接口）
-func (p *PostgresVectorDB) Store(ctx context.Context, docs []*schema.Document, opts ...indexer.Option) ([]string, error) {
+func (p *Postgres) Store(ctx context.Context, docs []*schema.Document, opts ...indexer.Option) ([]string, error) {
 	ctx = callbacks.EnsureRunInfo(ctx, p.GetType(), components.ComponentOfIndexer)
 	ctx = callbacks.OnStart(ctx, &indexer.CallbackInput{Docs: docs})
 
@@ -175,7 +156,7 @@ func (p *PostgresVectorDB) Store(ctx context.Context, docs []*schema.Document, o
 		return nil, err
 	}
 
-	tableName := p.tableNameProvider.GetVectorTableName()
+	tableName := p.collectionName
 	ids := make([]string, len(docs))
 
 	// 使用PostgreSQL的ON CONFLICT进行批量Upsert
@@ -210,28 +191,12 @@ func (p *PostgresVectorDB) Store(ctx context.Context, docs []*schema.Document, o
 	return ids, nil
 }
 
-// Upsert 插入或更新文档（保持兼容性）
-func (p *PostgresVectorDB) Upsert(ctx context.Context, docs []schema.Document) error {
-	if len(docs) == 0 {
-		return nil
-	}
-
-	// 转换为指针切片
-	docPtrs := make([]*schema.Document, len(docs))
-	for i := range docs {
-		docPtrs[i] = &docs[i]
-	}
-
-	_, err := p.Store(ctx, docPtrs)
-	return err
-}
-
 // Search 向量搜索
-func (p *PostgresVectorDB) Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}, threshold float64) ([]*schema.Document, error) {
-	tableName := p.tableNameProvider.GetVectorTableName()
+func (p *Postgres) Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}, threshold float64) ([]*schema.Document, error) {
+	tableName := p.collectionName
 
 	// 将float32向量转换为字符串格式
-	vectorStr := p.vectorToString(queryVector)
+	vectorStr := utils.VectorToString(queryVector)
 
 	// 构建查询SQL，使用余弦相似度
 	query := p.db.WithContext(ctx).Table(tableName)
@@ -284,158 +249,8 @@ func (p *PostgresVectorDB) Search(ctx context.Context, queryVector []float32, li
 	return searchResults, nil
 }
 
-// GetDocument 获取文档
-func (p *PostgresVectorDB) GetDocument(ctx context.Context, docID string) (*schema.Document, error) {
-	tableName := p.tableNameProvider.GetVectorTableName()
-
-	var pgDoc PostgresVectorDocument
-	err := p.db.WithContext(ctx).Table(tableName).Where("id = ?", docID).First(&pgDoc).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("文档未找到: %s", docID)
-		}
-		return nil, fmt.Errorf("获取文档失败: %w", err)
-	}
-
-	return p.postgresDocumentToDocument(&pgDoc)
-}
-
-// DeleteDocument 删除文档
-func (p *PostgresVectorDB) DeleteDocument(ctx context.Context, docID string) error {
-	tableName := p.tableNameProvider.GetVectorTableName()
-
-	result := p.db.WithContext(ctx).Table(tableName).Where("id = ?", docID).Delete(&PostgresVectorDocument{})
-	if result.Error != nil {
-		return fmt.Errorf("删除文档失败: %w", result.Error)
-	}
-
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("文档未找到: %s", docID)
-	}
-
-	return nil
-}
-
-// 辅助方法
-
-// documentToPostgresDocument 将知识库文档转换为PostgreSQL文档
-func (p *PostgresVectorDB) documentToPostgresDocument(ctx context.Context, doc schema.Document) (*PostgresVectorDocument, error) {
-	// 序列化metadata
-	var metadataJSON string
-	if doc.MetaData != nil {
-		if metadataBytes, err := json.Marshal(doc.MetaData); err != nil {
-			return nil, fmt.Errorf("序列化元数据失败: %w", err)
-		} else {
-			metadataJSON = string(metadataBytes)
-		}
-	}
-
-	// 生成向量
-	vectorData, err := p.Embedding.EmbedStrings(ctx, []string{doc.Content})
-	if err != nil {
-		return nil, fmt.Errorf("向量化失败: %w", err)
-	}
-	if len(vectorData) == 0 {
-		return nil, fmt.Errorf("向量化失败: 向量数据为空")
-	}
-
-	// 处理时间字段
-	now := time.Now()
-	dslInfo := doc.DSLInfo()
-	createdAt, _ := dslInfo["created_at"].(time.Time)
-	if createdAt.IsZero() {
-		createdAt = now
-	}
-	updatedAt, _ := dslInfo["updated_at"].(time.Time)
-	if updatedAt.IsZero() {
-		updatedAt = now
-	}
-
-	return &PostgresVectorDocument{
-		ID:        doc.ID,
-		Content:   doc.Content,
-		Vector:    p.vector64ToString(vectorData[0]),
-		Metadata:  metadataJSON,
-		CreatedAt: createdAt,
-		UpdatedAt: updatedAt,
-	}, nil
-}
-
-// postgresDocumentToDocument 将PostgreSQL文档转换为知识库文档
-func (p *PostgresVectorDB) postgresDocumentToDocument(pgDoc *PostgresVectorDocument) (*schema.Document, error) {
-	// 反序列化metadata
-	var metadata map[string]interface{}
-	if pgDoc.Metadata != "" {
-		if err := json.Unmarshal([]byte(pgDoc.Metadata), &metadata); err != nil {
-			return nil, fmt.Errorf("反序列化元数据失败: %w", err)
-		}
-	}
-
-	// 解析向量
-	vector, err := p.stringToVector(pgDoc.Vector)
-	if err != nil {
-		return nil, fmt.Errorf("解析向量失败: %w", err)
-	}
-
-	// 创建文档
-	doc := &schema.Document{
-		ID:       pgDoc.ID,
-		Content:  pgDoc.Content,
-		MetaData: metadata,
-	}
-
-	// 设置向量和时间信息
-	if len(vector) > 0 {
-		doc.WithDenseVector(Float32ToFloat64(vector))
-	}
-	doc.WithDSLInfo(map[string]any{
-		"created_at": pgDoc.CreatedAt,
-		"updated_at": pgDoc.UpdatedAt,
-	})
-
-	return doc, nil
-}
-
-// mapToDocument 将查询结果map转换为Document
-func (p *PostgresVectorDB) mapToDocument(result map[string]interface{}) (*schema.Document, error) {
-	doc := &schema.Document{
-		ID:       result["id"].(string),
-		Content:  result["content"].(string),
-		MetaData: make(map[string]interface{}),
-	}
-
-	// 处理向量
-	if vectorStr, ok := result["vector"].(string); ok {
-		if vector, err := p.stringToVector(vectorStr); err == nil && len(vector) > 0 {
-			doc.WithDenseVector(Float32ToFloat64(vector))
-		}
-	}
-
-	// 处理metadata
-	if metadataStr, ok := result["metadata"].(string); ok && metadataStr != "" {
-		var metadata map[string]interface{}
-		if err := json.Unmarshal([]byte(metadataStr), &metadata); err == nil {
-			doc.MetaData = metadata
-		}
-	}
-
-	// 处理时间字段
-	dslInfo := make(map[string]any)
-	if createdAt, ok := result["created_at"].(time.Time); ok {
-		dslInfo["created_at"] = createdAt
-	}
-	if updatedAt, ok := result["updated_at"].(time.Time); ok {
-		dslInfo["updated_at"] = updatedAt
-	}
-	if len(dslInfo) > 0 {
-		doc.WithDSLInfo(dslInfo)
-	}
-
-	return doc, nil
-}
-
 // Retrieve 实现retriever.Retriever接口
-func (p *PostgresVectorDB) Retrieve(ctx context.Context, query string, opts ...retriever.Option) ([]*schema.Document, error) {
+func (p *Postgres) Retrieve(ctx context.Context, query string, opts ...retriever.Option) ([]*schema.Document, error) {
 	options := retriever.GetCommonOptions(nil, opts...)
 	specOpts := retriever.GetImplSpecificOptions(&Option{}, opts...)
 
@@ -444,7 +259,7 @@ func (p *PostgresVectorDB) Retrieve(ctx context.Context, query string, opts ...r
 	ctx = callbacks.OnStart(ctx, &retriever.CallbackInput{
 		Query:          query,
 		TopK:           specOpts.TopK,
-		Filter:         fmt.Sprintf("%v", specOpts.filters),
+		Filter:         fmt.Sprintf("%v", specOpts.Filters),
 		ScoreThreshold: options.ScoreThreshold,
 		Extra:          map[string]any{},
 	})
@@ -483,7 +298,7 @@ func (p *PostgresVectorDB) Retrieve(ctx context.Context, query string, opts ...r
 		limit = specOpts.TopK
 	}
 
-	searchResults, err2 := p.Search(ctx, queryVectorFloat32, limit, specOpts.filters, threshold)
+	searchResults, err2 := p.Search(ctx, queryVectorFloat32, limit, specOpts.Filters, threshold)
 	if err2 != nil {
 		err = err2
 		return nil, err
@@ -495,6 +310,6 @@ func (p *PostgresVectorDB) Retrieve(ctx context.Context, query string, opts ...r
 }
 
 // GetType 返回组件类型
-func (p *PostgresVectorDB) GetType() string {
-	return "PostgresVector"
+func (p *Postgres) GetType() string {
+	return "Postgres"
 }

@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 
-	"github.com/CoolBanHub/aggo/knowledge"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/multiagent/host"
@@ -31,9 +31,9 @@ func WithTools(tools []tool.BaseTool) Option {
 	}
 }
 
-func WithKnowledgeManager(knowledgeManager *knowledge.KnowledgeManager) Option {
+func WithRetriever(retriever retriever.Retriever) Option {
 	return func(agent *Agent) {
-		agent.knowledgeManager = knowledgeManager
+		agent.retriever = retriever
 	}
 }
 

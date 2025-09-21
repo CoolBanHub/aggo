@@ -1,4 +1,4 @@
-package vectordb
+package milvus
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components"
 	"github.com/cloudwego/eino/components/embedding"
@@ -18,8 +19,8 @@ import (
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
-// MilvusVectorDB Milvus向量数据库实现
-type MilvusVectorDB struct {
+// Milvus Milvus向量数据库实现
+type Milvus struct {
 	client         *milvusclient.Client
 	collectionName string
 	embeddingDim   int
@@ -34,12 +35,12 @@ type MilvusConfig struct {
 	Embedding      embedding.Embedder
 }
 
-// NewMilvusVectorDB 创建Milvus向量数据库实例
-func NewMilvusVectorDB(config MilvusConfig) (*MilvusVectorDB, error) {
+// NewMilvus 创建Milvus向量数据库实例
+func NewMilvus(config MilvusConfig) (*Milvus, error) {
 	if config.CollectionName == "" {
 		config.CollectionName = "aggo_knowledge_vectors"
 	}
-	db := &MilvusVectorDB{
+	db := &Milvus{
 		client:         config.Client,
 		collectionName: config.CollectionName,
 		embeddingDim:   config.EmbeddingDim,
@@ -55,7 +56,7 @@ func NewMilvusVectorDB(config MilvusConfig) (*MilvusVectorDB, error) {
 }
 
 // initCollection 初始化Milvus集合
-func (m *MilvusVectorDB) initCollection() error {
+func (m *Milvus) initCollection() error {
 	ctx := context.Background()
 
 	// 检查集合是否存在
@@ -101,7 +102,7 @@ func (m *MilvusVectorDB) initCollection() error {
 }
 
 // Store 存储文档（实现indexer.Indexer接口）
-func (m *MilvusVectorDB) Store(ctx context.Context, docs []*schema.Document, opts ...indexer.Option) ([]string, error) {
+func (m *Milvus) Store(ctx context.Context, docs []*schema.Document, opts ...indexer.Option) ([]string, error) {
 
 	ctx = callbacks.EnsureRunInfo(ctx, m.GetType(), components.ComponentOfIndexer)
 	// callback info on start
@@ -164,7 +165,7 @@ func (m *MilvusVectorDB) Store(ctx context.Context, docs []*schema.Document, opt
 			err = fmt.Errorf("向量化失败: 向量数据为空")
 			return nil, err
 		}
-		vectors[i] = Float64ToFloat32(vectorData[0])
+		vectors[i] = utils.Float64ToFloat32(vectorData[0])
 	}
 
 	// 执行插入
@@ -188,10 +189,10 @@ func (m *MilvusVectorDB) Store(ctx context.Context, docs []*schema.Document, opt
 }
 
 // Retrieve 实现retriever.Retriever接口
-func (m *MilvusVectorDB) Retrieve(ctx context.Context, query string, opts ...retriever.Option) ([]*schema.Document, error) {
+func (m *Milvus) Retrieve(ctx context.Context, query string, opts ...retriever.Option) ([]*schema.Document, error) {
 	options := retriever.GetCommonOptions(nil, opts...)
 	specOpts := retriever.GetImplSpecificOptions(&Option{}, opts...)
-	filterExpr := buildFilterExpression(specOpts.filters)
+	filterExpr := buildFilterExpression(specOpts.Filters)
 	ctx = callbacks.EnsureRunInfo(ctx, m.GetType(), components.ComponentOfRetriever)
 	// callback info on start
 	ctx = callbacks.OnStart(ctx, &retriever.CallbackInput{
@@ -219,7 +220,7 @@ func (m *MilvusVectorDB) Retrieve(ctx context.Context, query string, opts ...ret
 	}
 	queryVector := vectorsList[0]
 
-	vectors := []entity.Vector{entity.FloatVector(Float64ToFloat32(queryVector))}
+	vectors := []entity.Vector{entity.FloatVector(utils.Float64ToFloat32(queryVector))}
 
 	// 构建搜索参数
 	annParam := index.NewCustomAnnParam()
@@ -259,96 +260,6 @@ func (m *MilvusVectorDB) Retrieve(ctx context.Context, query string, opts ...ret
 	return searchResults, nil
 }
 
-// GetDocument 获取文档
-func (m *MilvusVectorDB) GetDocument(ctx context.Context, docID string) (*schema.Document, error) {
-	resultSet, err := m.client.Get(ctx, milvusclient.NewQueryOption(m.collectionName).
-		WithIDs(column.NewColumnVarChar("id", []string{docID})).
-		WithOutputFields("id", "content", "metadata", "created_at", "updated_at", "vector"))
-	if err != nil {
-		return nil, fmt.Errorf("查询文档失败: %w", err)
-	}
-
-	if resultSet.ResultCount <= 0 {
-		return nil, fmt.Errorf("文档未找到: %s", docID)
-	}
-
-	doc, err := m.buildDocumentFromResult(resultSet, 0)
-	if err != nil {
-		return nil, fmt.Errorf("构建文档失败: %w", err)
-	}
-	return doc, nil
-}
-
-// DeleteDocument 删除文档
-func (m *MilvusVectorDB) DeleteDocument(ctx context.Context, docID string) error {
-	_, err := m.client.Delete(ctx, milvusclient.NewDeleteOption(m.collectionName).
-		WithStringIDs("id", []string{docID}))
-	if err != nil {
-		return fmt.Errorf("删除文档失败: %w", err)
-	}
-	return nil
-}
-
-// buildDocumentFromResult 从搜索结果构建文档对象
-func (m *MilvusVectorDB) buildDocumentFromResult(result milvusclient.ResultSet, index int) (*schema.Document, error) {
-	id, err := result.IDs.Get(index)
-	if err != nil {
-		return nil, fmt.Errorf("获取ID失败: %w", err)
-	}
-
-	content, err := getColumnValue(result, "content", index)
-	if err != nil {
-		return nil, fmt.Errorf("获取content失败: %w", err)
-	}
-
-	metadataBytes, err := getColumnValue(result, "metadata", index)
-	if err != nil {
-		return nil, fmt.Errorf("获取metadata失败: %w", err)
-	}
-
-	// 解析metadata
-	metadata, err := unmarshalMetadata(metadataBytes.([]byte))
-	if err != nil {
-		return nil, fmt.Errorf("解析metadata失败: %w", err)
-	}
-
-	// 获取向量数据（如果存在）
-	var vector []float32
-	if vectorValue, err := getColumnValue(result, "vector", index); err == nil {
-		if v, ok := vectorValue.([]float32); ok {
-			vector = v
-		}
-	}
-
-	doc := &schema.Document{
-		ID:       id.(string),
-		Content:  content.(string),
-		MetaData: metadata,
-	}
-
-	// 设置向量数据
-	if len(vector) > 0 {
-		doc.WithDenseVector(Float32ToFloat64(vector))
-	}
-
-	// 添加DSL时间字段
-	dslInfo := make(map[string]any)
-	if createdAtValue, err := getColumnValue(result, "created_at", index); err == nil {
-		if createdAtInt, ok := createdAtValue.(int64); ok {
-			dslInfo["created_at"] = time.Unix(createdAtInt, 0)
-		}
-	}
-	if updatedAtValue, err := getColumnValue(result, "updated_at", index); err == nil {
-		if updatedAtInt, ok := updatedAtValue.(int64); ok {
-			dslInfo["updated_at"] = time.Unix(updatedAtInt, 0)
-		}
-	}
-	if len(dslInfo) > 0 {
-		doc.WithDSLInfo(dslInfo)
-	}
-	return doc, nil
-}
-
-func (m *MilvusVectorDB) GetType() string {
+func (m *Milvus) GetType() string {
 	return "Milvus"
 }

@@ -5,11 +5,14 @@ go 1.24.4
 require (
 	github.com/bytedance/sonic v1.14.0
 	github.com/cloudwego/eino v0.5.3
+	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20250918131725-26709efe4c4d
+	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20250918131725-26709efe4c4d
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20250828061307-a19adf5c9b50
 	github.com/cloudwego/eino-ext/components/model/openai v0.0.0-20250905035413-86dbae6351d5
 	github.com/google/uuid v1.6.0
 	github.com/gookit/slog v0.6.0
 	github.com/milvus-io/milvus/client/v2 v2.6.0
+	gopkg.in/resty.v1 v1.12.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.30.2
@@ -29,8 +32,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
-	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20250918131725-26709efe4c4d // indirect
-	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20250918131725-26709efe4c4d // indirect
 	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20241224063832-9fbcc0e56c28 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.0.0-20250826113018-8c6f6358d4bb // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect

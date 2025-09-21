@@ -5,37 +5,35 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/CoolBanHub/aggo/knowledge"
+	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 )
 
 // GetKnowledgeReasoningTools 获取知识推理工具集合
-func GetKnowledgeReasoningTools(manager *knowledge.KnowledgeManager) []tool.BaseTool {
+func GetKnowledgeReasoningTools(retriever retriever.Retriever) []tool.BaseTool {
 	return []tool.BaseTool{
-		NewKnowledgeThinkTool(manager),
-		NewKnowledgeSearchTool(manager),
-		NewKnowledgeAnalysisTool(manager),
+		NewKnowledgeThinkTool(),
+		NewKnowledgeSearchTool(retriever),
+		NewKnowledgeAnalysisTool(),
 	}
 }
 
 // KnowledgeThinkTool 知识推理思考工具
 // 提供思考和推理功能，用于知识探索策略规划
 type KnowledgeThinkTool struct {
-	manager *knowledge.KnowledgeManager
 }
 
 // KnowledgeSearchTool 知识搜索工具
 // 提供知识库搜索功能
 type KnowledgeSearchTool struct {
-	manager *knowledge.KnowledgeManager
+	retriever retriever.Retriever
 }
 
 // KnowledgeAnalysisTool 知识分析工具
 // 提供搜索结果分析功能
 type KnowledgeAnalysisTool struct {
-	manager *knowledge.KnowledgeManager
 }
 
 // 结果结构体定义
@@ -92,10 +90,8 @@ type AnalysisParams struct {
 // 工具构造函数
 
 // NewKnowledgeThinkTool 创建知识思考工具实例
-func NewKnowledgeThinkTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	this := &KnowledgeThinkTool{
-		manager: manager,
-	}
+func NewKnowledgeThinkTool() tool.InvokableTool {
+	this := &KnowledgeThinkTool{}
 	name := "knowledge_think"
 	desc := "用作思考和推理的工具，帮助规划知识探索策略。在需要分析问题、制定搜索策略或完善方法时使用此工具。思考内容不会暴露给用户，仅用于内部推理。"
 	t, _ := utils.InferTool(name, desc, this.think)
@@ -103,9 +99,9 @@ func NewKnowledgeThinkTool(manager *knowledge.KnowledgeManager) tool.InvokableTo
 }
 
 // NewKnowledgeSearchTool 创建知识搜索工具实例
-func NewKnowledgeSearchTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
+func NewKnowledgeSearchTool(retriever retriever.Retriever) tool.InvokableTool {
 	this := &KnowledgeSearchTool{
-		manager: manager,
+		retriever: retriever,
 	}
 	name := "knowledge_search"
 	desc := "搜索知识库获取相关信息。在思考后使用此工具多次搜索相关信息。支持多种搜索策略，如精确短语（使用引号）、OR操作符和聚焦关键词。"
@@ -114,10 +110,8 @@ func NewKnowledgeSearchTool(manager *knowledge.KnowledgeManager) tool.InvokableT
 }
 
 // NewKnowledgeAnalysisTool 创建知识分析工具实例
-func NewKnowledgeAnalysisTool(manager *knowledge.KnowledgeManager) tool.InvokableTool {
-	this := &KnowledgeAnalysisTool{
-		manager: manager,
-	}
+func NewKnowledgeAnalysisTool() tool.InvokableTool {
+	this := &KnowledgeAnalysisTool{}
 	name := "knowledge_analysis"
 	desc := "分析和评估搜索结果的质量、相关性和完整性。获得搜索结果后使用此工具分析信息质量。如果结果不足，可以返回使用Think或Search工具优化查询。"
 	t, _ := utils.InferTool(name, desc, this.analyze)
@@ -163,7 +157,7 @@ func (t *KnowledgeThinkTool) think(ctx context.Context, params ThinkParams) (*Th
 
 // search 执行搜索操作
 func (t *KnowledgeSearchTool) search(ctx context.Context, params KnowledgeSearchParams) (*KnowledgeSearchResult, error) {
-	if t.manager == nil {
+	if t.retriever == nil {
 		return &KnowledgeSearchResult{
 			Query:     params.Query,
 			Success:   false,
@@ -190,10 +184,9 @@ func (t *KnowledgeSearchTool) search(ctx context.Context, params KnowledgeSearch
 	}
 
 	// 构建搜索选项
-	searchOptions := t.manager.GetConfig().DefaultSearchOptions
 
 	// 执行搜索
-	results, err := t.manager.Search(ctx, params.Query, searchOptions)
+	results, err := t.retriever.Retrieve(ctx, params.Query)
 	if err != nil {
 		return &KnowledgeSearchResult{
 			Query:     params.Query,
