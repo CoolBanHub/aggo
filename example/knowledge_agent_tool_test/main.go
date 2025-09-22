@@ -13,6 +13,7 @@ import (
 	storage2 "github.com/CoolBanHub/aggo/memory/storage"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/utils"
+	"github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive"
 	"github.com/cloudwego/eino/components/embedding"
 	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/flow/retriever/router"
@@ -87,6 +88,23 @@ func main() {
 			},
 		},
 	}
+
+	//将文档转换为分块
+	chunkDocs, err := recursive.NewSplitter(ctx, &recursive.Config{
+		ChunkSize:   1024,
+		OverlapSize: 200,
+	})
+
+	if err != nil {
+		log.Fatalf("创建分词器失败: %v", err)
+		return
+	}
+	docs, err = chunkDocs.Transform(ctx, docs)
+	if err != nil {
+		log.Fatalf("分词失败: %v", err)
+		return
+	}
+
 	if false {
 		_, err = databaseDB.Store(ctx, docs)
 		if err != nil {

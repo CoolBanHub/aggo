@@ -33,6 +33,7 @@ require (
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20241224063832-9fbcc0e56c28 // indirect
+	github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20250919093114-b7a34962a8d8 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.0.0-20250826113018-8c6f6358d4bb // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect

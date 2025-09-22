@@ -44,7 +44,7 @@ type LoadDocumentsParams struct {
 type SearchParams struct {
 	Query     string                 `json:"query" jsonschema:"description=搜索查询,required"`
 	Limit     int                    `json:"limit,omitempty" jsonschema:"description=返回结果数量限制,默认10"`
-	Threshold float64                `json:"threshold,omitempty" jsonschema:"description=相似度阈值,默认0.7"`
+	Threshold float64                `json:"threshold,omitempty" jsonschema:"description=相似度阈值,默认0.1"`
 	Filters   map[string]interface{} `json:"filters,omitempty" jsonschema:"description=元数据过滤条件"`
 }
 
@@ -138,7 +138,7 @@ func (t *SearchDocumentsTool) searchDocuments(ctx context.Context, params Search
 		params.Limit = 10
 	}
 	if params.Threshold == 0 {
-		params.Threshold = 0.7
+		params.Threshold = 0.1
 	}
 
 	// 执行搜索

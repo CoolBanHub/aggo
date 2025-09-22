@@ -89,6 +89,8 @@ github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-202509181317
 github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20250918131725-26709efe4c4d/go.mod h1:PhkVE9zI2HHsyiFVfn3imwtOYJhK1FqYheSoEPKxzac=
 github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20241224063832-9fbcc0e56c28 h1:Z1cWrlqxdc5IuPV1UcqoW2BGlFr7IQJHGwn7I3Tax0A=
 github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20241224063832-9fbcc0e56c28/go.mod h1:e+Hf9OyKXFxAoCTF3thTm2Sz8KDfJ/iiEOHOmADpxRI=
+github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20250919093114-b7a34962a8d8 h1:XaWlSx8b3OyFcPZFLBk8oMGy9AfNjpCI+H4aQxQsjhI=
+github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20250919093114-b7a34962a8d8/go.mod h1:3R7eHOKq+O5aOWXNUAm950kgSnHH5ulfNGoM0SrrQy8=
 github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20250828061307-a19adf5c9b50 h1:8g20kkug2CtXAVKjhP+GibbgCEugKOlZ/WCMtnY/iuo=
 github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20250828061307-a19adf5c9b50/go.mod h1:fmiH53K78cbNy04YD7HQ0yYFul7y4dofusitomP+f1Y=
 github.com/cloudwego/eino-ext/components/model/openai v0.0.0-20250905035413-86dbae6351d5 h1:D04jOL3xKn9CstVRaPkunhPffIbEVp0VfQV5e/26lS8=
