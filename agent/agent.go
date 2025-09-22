@@ -3,12 +3,14 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
 	"strings"
 
-	callbacks2 "github.com/CoolBanHub/aggo/callbacks"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/state"
 	"github.com/CoolBanHub/aggo/utils"
+	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/components/tool"
@@ -17,7 +19,6 @@ import (
 	"github.com/cloudwego/eino/flow/agent/multiagent/host"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
-	"github.com/cloudwego/eino/utils/callbacks"
 )
 
 type Agent struct {
@@ -101,7 +102,6 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 	if err != nil {
 		return nil, err
 	}
-
 	var response *schema.Message
 	if this.multiAgent != nil {
 		response, err = this.multiAgent.Generate(ctx, _input, agentOpts)
@@ -111,7 +111,7 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 	if err != nil {
 		return nil, err
 	}
-
+	this.storeAssistantMessage(ctx, response)
 	return response, nil
 }
 
@@ -130,6 +130,21 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 	} else {
 		response, err = this.agent.Stream(ctx, _input, agentOpts)
 	}
+
+	go func() {
+		var outs []callbacks.CallbackOutput
+		content := ""
+		for {
+			chunk, err := response.Recv()
+			if err == io.EOF {
+				break
+			}
+			outs = append(outs, chunk)
+			content += chunk.Content
+		}
+		this.storeAssistantMessage(ctx, &schema.Message{Content: content})
+	}()
+
 	return response, err
 }
 
@@ -138,25 +153,21 @@ func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, 
 	for _, opt := range opts {
 		opt(chatOpts)
 	}
-	chatModelCallback := callbacks2.NewChatModelCallback(this.storeAssistantMessage)
-	chatOpts.composeOptions = append(chatOpts.composeOptions, compose.WithCallbacks(callbacks.NewHandlerHelper().ChatModel(&callbacks.ModelCallbackHandler{
-		OnStart:               chatModelCallback.OnStart,
-		OnEnd:                 chatModelCallback.OnEnd,
-		OnEndWithStreamOutput: chatModelCallback.OnEndWithStreamOutput,
-		OnError:               chatModelCallback.OnError,
-	}).Handler()))
-
 	if chatOpts.sessionID == "" {
 		chatOpts.sessionID = utils.GetUUIDNoDash()
 	}
-
+	if chatOpts.userID == "" {
+		chatOpts.userID = chatOpts.sessionID
+	}
 	agentOpts := agent.WithComposeOptions(chatOpts.composeOptions...)
 
 	_input, err := this.inputMessageModifier(ctx, input, chatOpts)
 	if err != nil {
 		return nil, nil, agentOpts, err
 	}
-
+	if this.memoryManager == nil {
+		return ctx, _input, agentOpts, nil
+	}
 	chatState := &state.ChatSate{
 		Input:     _input,
 		SessionID: chatOpts.sessionID,
@@ -285,9 +296,13 @@ func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.M
 	if this.memoryManager != nil && response != nil {
 		chatState := state.GetChatChatSate(ctx)
 		if chatState == nil {
+			log.Println("storeAssistantMessage: chatState is nil")
 			return
 		}
-		this.memoryManager.ProcessAssistantMessage(ctx, chatState.UserID, chatState.SessionID, response.Content)
+		err := this.memoryManager.ProcessAssistantMessage(ctx, chatState.UserID, chatState.SessionID, response.Content)
+		if err != nil {
+			log.Println("storeAssistantMessage is err:", err)
+		}
 		return
 	}
 	return
