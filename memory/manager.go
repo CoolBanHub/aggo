@@ -206,7 +206,7 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 	err := m.SaveMessage(ctx, &ConversationMessage{
 		SessionID: sessionID,
 		UserID:    userID,
-		Role:      "assistant",
+		Role:      string(schema.Assistant),
 		Content:   assistantMessage,
 	})
 	if err != nil {

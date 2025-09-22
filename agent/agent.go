@@ -10,9 +10,7 @@ import (
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/state"
 	"github.com/CoolBanHub/aggo/utils"
-	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
-	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent"
@@ -38,9 +36,6 @@ type Agent struct {
 	//多agent的时候 使用
 	multiAgent *host.MultiAgent
 	specialist []*host.Specialist
-
-	retriever        retriever.Retriever
-	retrieverOptions []retriever.Option
 }
 
 func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*Agent, error) {
@@ -94,14 +89,11 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 }
 
 func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.Message, error) {
-
-	var _input []*schema.Message
-	var err error
-	var agentOpts agent.AgentOption
-	ctx, _input, agentOpts, err = this.chatPreHandler(ctx, input, opts...)
+	ctx, _input, agentOpts, err := this.chatPreHandler(ctx, input, opts...)
 	if err != nil {
 		return nil, err
 	}
+
 	var response *schema.Message
 	if this.multiAgent != nil {
 		response, err = this.multiAgent.Generate(ctx, _input, agentOpts)
@@ -111,72 +103,48 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 	if err != nil {
 		return nil, err
 	}
-	this.storeAssistantMessage(ctx, response)
+
+	this.handleMessageStorage(ctx, response)
 	return response, nil
 }
 
 func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
-
-	var _input []*schema.Message
-	var err error
-	var agentOpts agent.AgentOption
-	ctx, _input, agentOpts, err = this.chatPreHandler(ctx, input, opts...)
+	ctx, _input, agentOpts, err := this.chatPreHandler(ctx, input, opts...)
 	if err != nil {
 		return nil, err
 	}
+
 	var response *schema.StreamReader[*schema.Message]
 	if this.multiAgent != nil {
 		response, err = this.multiAgent.Stream(ctx, _input, agentOpts)
 	} else {
 		response, err = this.agent.Stream(ctx, _input, agentOpts)
 	}
+	if err != nil {
+		return nil, err
+	}
 
-	go func() {
-		var outs []callbacks.CallbackOutput
-		content := ""
-		for {
-			chunk, err := response.Recv()
-			if err == io.EOF {
-				break
-			}
-			outs = append(outs, chunk)
-			content += chunk.Content
-		}
-		this.storeAssistantMessage(ctx, &schema.Message{Content: content})
-	}()
+	if this.hasMemoryManager() {
+		go this.handleStreamMessageStorage(ctx, response)
+	}
 
-	return response, err
+	return response, nil
 }
 
 func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, opts ...ChatOption) (context.Context, []*schema.Message, agent.AgentOption, error) {
-	chatOpts := &chatOptions{}
-	for _, opt := range opts {
-		opt(chatOpts)
-	}
-	if chatOpts.sessionID == "" {
-		chatOpts.sessionID = utils.GetUUIDNoDash()
-	}
-	if chatOpts.userID == "" {
-		chatOpts.userID = chatOpts.sessionID
-	}
+	chatOpts := this.buildChatOptions(opts...)
 	agentOpts := agent.WithComposeOptions(chatOpts.composeOptions...)
 
 	_input, err := this.inputMessageModifier(ctx, input, chatOpts)
 	if err != nil {
 		return nil, nil, agentOpts, err
 	}
-	if this.memoryManager == nil {
+
+	if !this.hasMemoryManager() {
 		return ctx, _input, agentOpts, nil
 	}
-	chatState := &state.ChatSate{
-		Input:     _input,
-		SessionID: chatOpts.sessionID,
-		UserID:    chatOpts.userID,
-	}
-	if this.agent != nil && this.systemPrompt != "" {
-		chatState.Input = _input[1:]
-	}
-	ctx = state.SetChatChatSate(ctx, chatState)
+
+	ctx = this.setupChatContext(ctx, _input, chatOpts)
 
 	// 存储用户消息,必须是最原始的input，不是_input
 	if err := this.storeUserMessage(ctx, input, chatOpts); err != nil {
@@ -187,125 +155,178 @@ func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, 
 }
 
 func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) ([]*schema.Message, error) {
-	var _input []*schema.Message
+	_input := this.buildBaseMessages(ctx, input, chatOpts)
 
-	if this.memoryManager != nil {
-		//input 肯定只有1条
-
-		// 1. 获取历史消息（不包含当前消息）
-		historyMessages, err := this.memoryManager.GetMessages(ctx, chatOpts.sessionID, chatOpts.userID, this.memoryManager.GetConfig().MemoryLimit)
-		if err != nil {
-			return nil, fmt.Errorf("获取历史消息失败: %v", err)
-		}
-
-		// 2. 构建消息序列：历史消息 + 当前输入
-		_input = append(historyMessages, input...)
-
-		// 3. 添加用户记忆到上下文
-		if this.memoryManager.GetConfig().EnableUserMemories {
-			userMemories, err := this.memoryManager.GetUserMemories(ctx, chatOpts.userID)
-			if err != nil {
-				return nil, fmt.Errorf("获取用户记忆失败: %v", err)
-			}
-
-			if len(userMemories) > 0 {
-				memoryContent := this.formatUserMemories(userMemories)
-				memoryMessage := &schema.Message{
-					Role:    schema.System,
-					Content: memoryContent,
-				}
-				// 将记忆消息插入到对话消息之前
-				_input = append([]*schema.Message{memoryMessage}, _input...)
-			}
-		}
-
-		// 4. 添加会话摘要到上下文
-		if this.memoryManager.GetConfig().EnableSessionSummary {
-			sessionSummary, err := this.memoryManager.GetSessionSummary(ctx, chatOpts.sessionID, chatOpts.userID)
-			if err != nil {
-				return nil, fmt.Errorf("获取会话摘要失败: %v", err)
-			}
-
-			if sessionSummary != nil && sessionSummary.Summary != "" {
-				summaryMessage := &schema.Message{
-					Role:    schema.System,
-					Content: fmt.Sprintf("会话背景: %s", sessionSummary.Summary),
-				}
-				// 将摘要消息插入到最前面
-				_input = append([]*schema.Message{summaryMessage}, _input...)
-			}
-		}
-	} else {
-		// 没有memory manager时，直接使用输入
-		_input = input
-	}
-
-	// 6. 检查是否需要查询知识库
-	if this.retriever != nil && len(input) > 0 {
-		userInput := input[len(input)-1].Content // 获取最新的用户输入
-		if userInput == "" {
-			// 如果用户输入为空，跳过知识库查询
-			return _input, nil
-		}
-
-		// 判断是否需要查询知识库
-		if this.shouldQueryKnowledge() {
-			// 查询知识库
-			knowledgeResults, err := this.queryKnowledge(ctx, userInput)
-			if err != nil {
-				// 知识库查询失败不应阻断对话，只记录错误
-				fmt.Printf("知识库查询失败: %v\n", err)
-			} else if len(knowledgeResults) > 0 {
-				// 格式化知识库结果
-				knowledgeContent := this.formatKnowledgeResults(knowledgeResults)
-				if knowledgeContent != "" {
-					knowledgeMessage := &schema.Message{
-						Role:    schema.System,
-						Content: knowledgeContent,
-					}
-					// 将知识库信息插入到对话消息之前，但在摘要和记忆之后
-					_input = append([]*schema.Message{knowledgeMessage}, _input...)
-				}
-			}
-		}
-	}
-	// 5. 添加系统提示词到最前面
-	if this.agent != nil && this.systemPrompt != "" {
-		//单agent的时候需要
-		_input = append([]*schema.Message{
-			{
-				Role:    schema.System,
-				Content: this.systemPrompt,
-			},
-		}, _input...)
-	}
+	// 添加系统提示词到最前面
+	this.addSystemPrompt(&_input)
 
 	return _input, nil
 }
 
+// buildBaseMessages 构建基础消息序列
+func (this *Agent) buildBaseMessages(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) []*schema.Message {
+	if !this.hasMemoryManager() {
+		return input
+	}
+
+	_input := this.buildMessagesWithHistory(ctx, input, chatOpts)
+	_input = this.addUserMemories(ctx, _input, chatOpts)
+	_input = this.addSessionSummary(ctx, _input, chatOpts)
+	return _input
+}
+
+// buildMessagesWithHistory 构建包含历史消息的序列
+func (this *Agent) buildMessagesWithHistory(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) []*schema.Message {
+	historyMessages, err := this.memoryManager.GetMessages(ctx, chatOpts.sessionID, chatOpts.userID, this.memoryManager.GetConfig().MemoryLimit)
+	if err != nil {
+		log.Printf("获取历史消息失败: %v", err)
+		return input
+	}
+	return append(historyMessages, input...)
+}
+
+// addUserMemories 添加用户记忆
+func (this *Agent) addUserMemories(ctx context.Context, _input []*schema.Message, chatOpts *chatOptions) []*schema.Message {
+	if !this.memoryManager.GetConfig().EnableUserMemories {
+		return _input
+	}
+
+	userMemories, err := this.memoryManager.GetUserMemories(ctx, chatOpts.userID)
+	if err != nil {
+		log.Printf("获取用户记忆失败: %v", err)
+		return _input
+	}
+
+	if len(userMemories) == 0 {
+		return _input
+	}
+
+	memoryContent := this.formatUserMemories(userMemories)
+	memoryMessage := &schema.Message{
+		Role:    schema.System,
+		Content: memoryContent,
+	}
+	return append([]*schema.Message{memoryMessage}, _input...)
+}
+
+// addSessionSummary 添加会话摘要
+func (this *Agent) addSessionSummary(ctx context.Context, _input []*schema.Message, chatOpts *chatOptions) []*schema.Message {
+	if !this.memoryManager.GetConfig().EnableSessionSummary {
+		return _input
+	}
+
+	sessionSummary, err := this.memoryManager.GetSessionSummary(ctx, chatOpts.sessionID, chatOpts.userID)
+	if err != nil {
+		log.Printf("获取会话摘要失败: %v", err)
+		return _input
+	}
+
+	if sessionSummary == nil || sessionSummary.Summary == "" {
+		return _input
+	}
+
+	summaryMessage := &schema.Message{
+		Role:    schema.System,
+		Content: fmt.Sprintf("会话背景: %s", sessionSummary.Summary),
+	}
+	return append([]*schema.Message{summaryMessage}, _input...)
+}
+
+// addSystemPrompt 添加系统提示词
+func (this *Agent) addSystemPrompt(_input *[]*schema.Message) {
+	if this.agent != nil && this.systemPrompt != "" {
+		systemMessage := &schema.Message{
+			Role:    schema.System,
+			Content: this.systemPrompt,
+		}
+		*_input = append([]*schema.Message{systemMessage}, *_input...)
+	}
+}
+
+// buildChatOptions 构建聊天选项
+func (this *Agent) buildChatOptions(opts ...ChatOption) *chatOptions {
+	chatOpts := &chatOptions{}
+	for _, opt := range opts {
+		opt(chatOpts)
+	}
+	if chatOpts.sessionID == "" {
+		chatOpts.sessionID = utils.GetUUIDNoDash()
+	}
+	if chatOpts.userID == "" {
+		chatOpts.userID = chatOpts.sessionID
+	}
+	return chatOpts
+}
+
+// setupChatContext 设置聊天上下文状态
+func (this *Agent) setupChatContext(ctx context.Context, _input []*schema.Message, chatOpts *chatOptions) context.Context {
+	chatState := &state.ChatSate{
+		Input:     _input,
+		SessionID: chatOpts.sessionID,
+		UserID:    chatOpts.userID,
+	}
+	if this.agent != nil && this.systemPrompt != "" {
+		chatState.Input = _input[1:]
+	}
+	return state.SetChatChatSate(ctx, chatState)
+}
+
 // storeUserMessage 存储用户消息
 func (this *Agent) storeUserMessage(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) error {
-	if chatOpts == nil || chatOpts.sessionID == "" || this.memoryManager == nil || len(input) == 0 {
+	if chatOpts == nil || chatOpts.sessionID == "" || !this.hasMemoryManager() || len(input) == 0 {
 		return nil
 	}
 	return this.memoryManager.ProcessUserMessage(ctx, chatOpts.userID, chatOpts.sessionID, input[0].Content)
 }
 
-// storeAssistantMessage 存储助手消息,在callback统一处理
-func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.Message) {
-	if this.memoryManager != nil && response != nil {
-		chatState := state.GetChatChatSate(ctx)
-		if chatState == nil {
-			log.Println("storeAssistantMessage: chatState is nil")
-			return
-		}
-		err := this.memoryManager.ProcessAssistantMessage(ctx, chatState.UserID, chatState.SessionID, response.Content)
-		if err != nil {
-			log.Println("storeAssistantMessage is err:", err)
-		}
+// hasMemoryManager 检查是否有内存管理器
+func (this *Agent) hasMemoryManager() bool {
+	return this.memoryManager != nil
+}
+
+// handleMessageStorage 处理消息存储的统一逻辑
+func (this *Agent) handleMessageStorage(ctx context.Context, response *schema.Message) {
+	if !this.hasMemoryManager() || response == nil {
 		return
 	}
-	return
+	this.storeAssistantMessage(ctx, response)
+}
+
+// handleStreamMessageStorage 处理流式消息存储
+func (this *Agent) handleStreamMessageStorage(ctx context.Context, response *schema.StreamReader[*schema.Message]) {
+	var content strings.Builder
+	for {
+		chunk, err := response.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Printf("读取流式消息失败: %v", err)
+			return
+		}
+		content.WriteString(chunk.Content)
+	}
+
+	if content.Len() > 0 {
+		this.storeAssistantMessage(ctx, &schema.Message{Role: schema.Assistant, Content: content.String()})
+	}
+}
+
+// storeAssistantMessage 存储助手消息,在callback统一处理
+func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.Message) {
+	if !this.hasMemoryManager() || response == nil {
+		return
+	}
+
+	chatState := state.GetChatChatSate(ctx)
+	if chatState == nil {
+		log.Println("storeAssistantMessage: chatState is nil")
+		return
+	}
+
+	if err := this.memoryManager.ProcessAssistantMessage(ctx, chatState.UserID, chatState.SessionID, response.Content); err != nil {
+		log.Printf("storeAssistantMessage failed: %v", err)
+	}
 }
 
 // formatUserMemories 格式化用户记忆为可读的上下文信息
@@ -324,58 +345,6 @@ func (this *Agent) formatUserMemories(memories []*memory.UserMemory) string {
 	return builder.String()
 }
 
-// shouldQueryKnowledge 判断是否需要查询知识库
-func (this *Agent) shouldQueryKnowledge() bool {
-	if this.retriever == nil {
-		return false
-	}
-
-	return true
-}
-
-// queryKnowledge 查询知识库并返回相关文档
-func (this *Agent) queryKnowledge(ctx context.Context, query string) ([]*schema.Document, error) {
-	if this.retriever == nil {
-		return nil, nil
-	}
-
-	results, err := this.retriever.Retrieve(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("知识库搜索失败: %w", err)
-	}
-
-	return results, nil
-}
-
-// formatKnowledgeResults 格式化知识库搜索结果为上下文信息
-func (this *Agent) formatKnowledgeResults(results []*schema.Document) string {
-	if len(results) == 0 {
-		return ""
-	}
-
-	var builder strings.Builder
-	builder.WriteString("相关知识库信息（请基于以下信息回答用户问题）:\n\n")
-
-	for i, result := range results {
-		builder.WriteString(fmt.Sprintf("【知识%d】(相似度: %.2f)\n", i+1, result.Score()))
-		builder.WriteString(fmt.Sprintf("内容: %s\n", result.Content))
-
-		// 如果有元数据，添加一些有用的信息
-		if len(result.MetaData) > 0 {
-			if title, ok := result.MetaData["title"]; ok {
-				builder.WriteString(fmt.Sprintf("标题: %v\n", title))
-			}
-			if source, ok := result.MetaData["source"]; ok {
-				builder.WriteString(fmt.Sprintf("来源: %v\n", source))
-			}
-		}
-		builder.WriteString("\n")
-	}
-
-	builder.WriteString("请结合以上知识库信息，为用户提供准确、有帮助的回答。\n")
-	return builder.String()
-}
-
 func (this *Agent) NewSpecialist() *host.Specialist {
 	// 创建一个专门用于specialist的agent副本，避免修改原始实例
 	specialistAgent := &Agent{
@@ -389,7 +358,6 @@ func (this *Agent) NewSpecialist() *host.Specialist {
 		maxStep:       this.maxStep,
 		multiAgent:    this.multiAgent,
 		specialist:    this.specialist,
-		retriever:     this.retriever,
 	}
 
 	return &host.Specialist{

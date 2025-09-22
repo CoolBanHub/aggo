@@ -5,7 +5,6 @@ import (
 
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/cloudwego/eino/components/model"
-	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/multiagent/host"
@@ -28,18 +27,6 @@ func WithDescription(description string) Option {
 func WithTools(tools []tool.BaseTool) Option {
 	return func(agent *Agent) {
 		agent.tools = tools
-	}
-}
-
-func WithRetriever(retriever retriever.Retriever) Option {
-	return func(agent *Agent) {
-		agent.retriever = retriever
-	}
-}
-
-func WithRetrieverOptions(retrieverOptions []retriever.Option) Option {
-	return func(agent *Agent) {
-		agent.retrieverOptions = retrieverOptions
 	}
 }
 
