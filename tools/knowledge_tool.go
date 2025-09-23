@@ -13,10 +13,10 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 )
 
-func GetKnowledgeTools(indexer indexer.Indexer, retriever retriever.Retriever) []tool.BaseTool {
+func GetKnowledgeTools(indexer indexer.Indexer, retriever retriever.Retriever, retrieverOptions *retriever.Options) []tool.BaseTool {
 	return []tool.BaseTool{
 		NewLoadDocumentsTool(indexer),
-		NewSearchDocumentsTool(retriever),
+		NewSearchDocumentsTool(retriever, retrieverOptions),
 	}
 }
 
@@ -30,6 +30,7 @@ type LoadDocumentsTool struct {
 // 提供在知识库中搜索文档的功能
 type SearchDocumentsTool struct {
 	retriever retriever.Retriever
+	options   *retriever.Options
 }
 
 // LoadDocumentsParams 加载文档的参数
@@ -42,10 +43,7 @@ type LoadDocumentsParams struct {
 
 // SearchParams 搜索参数
 type SearchParams struct {
-	Query     string                 `json:"query" jsonschema:"description=搜索查询,required"`
-	Limit     int                    `json:"limit,omitempty" jsonschema:"description=返回结果数量限制,默认10"`
-	Threshold float64                `json:"threshold,omitempty" jsonschema:"description=相似度阈值,默认0.1"`
-	Filters   map[string]interface{} `json:"filters,omitempty" jsonschema:"description=元数据过滤条件"`
+	Query string `json:"query" jsonschema:"description=搜索查询,required"`
 }
 
 // NewLoadDocumentsTool 创建文档加载工具实例
@@ -60,9 +58,10 @@ func NewLoadDocumentsTool(indexer indexer.Indexer) tool.InvokableTool {
 }
 
 // NewSearchDocumentsTool 创建文档搜索工具实例
-func NewSearchDocumentsTool(retriever retriever.Retriever) tool.InvokableTool {
+func NewSearchDocumentsTool(retriever retriever.Retriever, options *retriever.Options) tool.InvokableTool {
 	this := &SearchDocumentsTool{
 		retriever: retriever,
+		options:   options,
 	}
 	name := "search_documents"
 	desc := "在知识库中搜索文档。使用向量相似度匹配，支持设置搜索限制、相似度阈值和元数据过滤。"
@@ -133,18 +132,23 @@ func (t *SearchDocumentsTool) searchDocuments(ctx context.Context, params Search
 		return nil, fmt.Errorf("知识库管理器未初始化")
 	}
 
-	// 设置默认值
-	if params.Limit == 0 {
-		params.Limit = 10
+	if t.options == nil {
+		t.options = &retriever.Options{}
 	}
-	if params.Threshold == 0 {
-		params.Threshold = 0.1
+
+	topK := 10
+	if t.options.TopK != nil {
+		topK = *t.options.TopK
+	}
+	threshold := 0.1
+	if t.options.ScoreThreshold != nil {
+		threshold = *t.options.ScoreThreshold
 	}
 
 	// 执行搜索
 	results, err := t.retriever.Retrieve(ctx, params.Query,
-		retriever.WithTopK(params.Limit),
-		retriever.WithScoreThreshold(params.Threshold))
+		retriever.WithTopK(topK),
+		retriever.WithScoreThreshold(threshold))
 	if err != nil {
 		return nil, fmt.Errorf("搜索失败: %w", err)
 	}

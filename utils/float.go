@@ -79,7 +79,3 @@ func StringToVector(vectorStr string) ([]float32, error) {
 
 	return vector, nil
 }
-
-func NewFloat64Ptr(f float64) *float64 {
-	return &f
-}

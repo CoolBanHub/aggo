@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/components/indexer"
 	"github.com/cloudwego/eino/components/retriever"
 	"github.com/cloudwego/eino/schema"
+	"github.com/gookit/slog"
 	"gorm.io/gorm"
 )
 
@@ -126,7 +127,7 @@ func (p *Postgres) Create() error {
 	err = p.db.Exec(indexSQL).Error
 	if err != nil {
 		// 索引创建失败不是致命错误，记录警告即可
-		fmt.Printf("警告: 创建向量索引失败: %v\n", err)
+		slog.Errorf("创建向量索引失败: %v", err)
 	}
 
 	return nil
@@ -263,7 +264,7 @@ func (p *Postgres) Retrieve(ctx context.Context, query string, opts ...retriever
 	}
 
 	if options.ScoreThreshold == nil {
-		options.ScoreThreshold = utils.NewFloat64Ptr(0.1)
+		options.ScoreThreshold = utils.ValueToPtr(0.1)
 	}
 	ctx = callbacks.EnsureRunInfo(ctx, p.GetType(), components.ComponentOfRetriever)
 	// callback info on start

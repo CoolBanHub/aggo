@@ -12,6 +12,7 @@ import (
 	"github.com/CoolBanHub/aggo/memory"
 	storage2 "github.com/CoolBanHub/aggo/memory/storage"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/CoolBanHub/aggo/tools"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive"
 	"github.com/cloudwego/eino/components/embedding"
@@ -153,11 +154,10 @@ func main() {
 	// 5. 创建主 Agent，将 KnowledgeAgent 作为工具
 	mainAgent, err := agent.NewAgent(ctx, cm,
 		agent.WithMemoryManager(memoryManager),
-		agent.WithRetriever(routerRetriever),
-		agent.WithRetrieverOptions([]retriever.Option{
-			retriever.WithTopK(3),
-			retriever.WithScoreThreshold(0.1),
-		}),
+		agent.WithTools(tools.GetKnowledgeTools(databaseDB, routerRetriever, &retriever.Options{
+			TopK:           utils.ValueToPtr(10),
+			ScoreThreshold: utils.ValueToPtr(0.2),
+		})),
 		agent.WithSystemPrompt("你是一个技术专家助手。当用户询问技术问题时，你应该使用 knowledge_reason 工具来搜索和分析相关信息，然后提供准确的回答。"))
 
 	if err != nil {

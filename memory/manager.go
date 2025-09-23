@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/gookit/slog"
 )
 
 // MemoryManager 记忆管理器
@@ -134,7 +135,7 @@ func (m *MemoryManager) processAsyncTask(task asyncTask) {
 		defer cancel()
 		err := m.updateSessionSummary(ctx, task.userID, task.sessionID)
 		if err != nil {
-			fmt.Printf("异步更新会话摘要失败: sessionID=%s, userID=%s, err=%v\n", task.sessionID, task.userID, err)
+			slog.Errorf("异步更新会话摘要失败: sessionID=%s, userID=%s, err=%v\n", task.sessionID, task.userID, err)
 		} else {
 			// 标记摘要已更新
 			m.summaryTrigger.MarkSummaryUpdated(generateSessionKey(task.userID, task.sessionID))
@@ -179,7 +180,7 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 				// 任务已提交到队列
 			default:
 				// 队列已满，记录日志但不阻塞
-				fmt.Printf("警告: 用户记忆分析队列已满，跳过处理: userID=%s\n", userID)
+				slog.Errorf("警告: 用户记忆分析队列已满，跳过处理: userID=%s\n", userID)
 			}
 		} else {
 			// 同步处理
@@ -217,7 +218,7 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 	if m.config.EnableSessionSummary {
 		shouldTrigger, err := m.shouldTriggerSummaryUpdate(ctx, userID, sessionID)
 		if err != nil {
-			fmt.Printf("检查摘要触发条件失败: %v\n", err)
+			slog.Errorf("检查摘要触发条件失败: %v\n", err)
 		} else if shouldTrigger {
 			if m.config.AsyncProcessing {
 				// 异步处理
@@ -230,13 +231,13 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 					// 任务已提交到队列
 				default:
 					// 队列已满，记录日志但不阻塞
-					fmt.Printf("警告: 会话摘要更新队列已满，跳过处理: sessionID=%s, userID=%s\n", sessionID, userID)
+					slog.Errorf("警告: 会话摘要更新队列已满，跳过处理: sessionID=%s, userID=%s\n", sessionID, userID)
 				}
 			} else {
 				// 同步处理
 				err = m.updateSessionSummary(ctx, userID, sessionID)
 				if err != nil {
-					fmt.Printf("更新会话摘要失败: msg:%s,err:%v\n", assistantMessage, err)
+					slog.Errorf("更新会话摘要失败: msg:%s,err:%v\n", assistantMessage, err)
 				} else {
 					// 标记摘要已更新
 					m.summaryTrigger.MarkSummaryUpdated(generateSessionKey(userID, sessionID))
@@ -255,14 +256,14 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 	userMemoryList, err := m.storage.GetUserMemories(ctx, userID, 0, m.config.Retrieval)
 	if err != nil {
 		// 记忆创建失败不应该阻断主流程，只记录日志
-		fmt.Printf("创建用户记忆失败: %v\n", err)
+		slog.Errorf("创建用户记忆失败: %v\n", err)
 		return
 	}
 
 	classifierMemoryList, err := m.userMemoryAnalyzer.ShouldUpdateMemory(ctx, message, userMemoryList)
 	if err != nil {
 		// 记忆创建失败不应该阻断主流程，只记录日志
-		fmt.Printf("创建用户记忆失败: %v\n", err)
+		slog.Errorf("创建用户记忆失败: %v\n", err)
 		return
 	}
 
@@ -279,7 +280,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 			err = m.storage.SaveUserMemory(ctx, memory)
 			if err != nil {
 				// 记忆创建失败不应该阻断主流程，只记录日志
-				fmt.Printf("创建用户记忆失败: %v\n", err)
+				slog.Errorf("创建用户记忆失败: %v\n", err)
 			}
 		} else if v.Op == UserMemoryAnalyzerOpUpdate {
 			err = m.storage.UpdateUserMemory(ctx, &UserMemory{
@@ -289,7 +290,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 			})
 			if err != nil {
 				// 记忆创建失败不应该阻断主流程，只记录日志
-				fmt.Printf("创建用户记忆失败: %v\n", err)
+				slog.Errorf("创建用户记忆失败: %v\n", err)
 			}
 		}
 	}
@@ -298,7 +299,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 		err = m.storage.DeleteUserMemoriesByIds(ctx, userID, delIds)
 		if err != nil {
 			// 记忆创建失败不应该阻断主流程，只记录日志
-			fmt.Printf("创建用户记忆失败: %v\n", err)
+			slog.Errorf("创建用户记忆失败: %v\n", err)
 		}
 	}
 

@@ -207,7 +207,7 @@ func (m *Milvus) Retrieve(ctx context.Context, query string, opts ...retriever.O
 	}
 
 	if options.ScoreThreshold == nil {
-		options.ScoreThreshold = utils.NewFloat64Ptr(0.1)
+		options.ScoreThreshold = utils.ValueToPtr(0.1)
 	}
 
 	filterExpr := buildFilterExpression(specOpts.Filters)

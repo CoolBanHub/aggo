@@ -88,6 +88,21 @@ go run example/gorm_storage_test/main.go
 go run example/sse/main.go
 ```
 
+## 📋 最新更新说明
+
+### 版本变更 (2025-09-22)
+
+**重要变更**：
+1. **移除 KnowledgeQueryConfig**: 不再需要在创建Agent时配置 `WithKnowledgeQueryConfig`，知识库查询参数已简化
+2. **移除 retriever 依赖**: Agent内部重构，移除了对独立检索器组件的依赖，知识库查询更加直接
+3. **调整默认相似度阈值**: 知识库搜索的默认相似度阈值从 0.7 调整为 0.1，提高搜索结果的相关性
+4. **引入文档分块功能**: 支持更细粒度的文档处理，使用 `github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive` 组件
+
+**迁移指南**：
+- 移除代码中的 `agent.WithKnowledgeQueryConfig()` 调用
+- 如需自定义搜索参数，请在调用搜索时直接指定 `SearchOptions`
+- 更新搜索阈值设置，考虑使用新的默认值 0.1
+
 ## 💡 使用示例
 
 ### 创建知识库管理器
@@ -164,7 +179,7 @@ func main() {
 	// 6. 搜索文档
 	results, err := km.Search(ctx, "什么是Go语言", knowledge.SearchOptions{
 		Limit:     5,
-		Threshold: 0.7,
+		Threshold: 0.1, // 默认相似度阈值已调整为0.1
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -196,11 +211,6 @@ return nil, err
 // 创建带知识库的代理
 return agent.NewAgent(ctx, cm,
 agent.WithKnowledgeManager(knowledgeManager),
-agent.WithKnowledgeQueryConfig(&agent.KnowledgeQueryConfig{
-MaxResults:  3,
-Threshold:   0.7,
-AlwaysQuery: false,
-}),
 agent.WithSystemPrompt("你是一个技术专家助手，能够搜索和分析相关技术信息。"),
 )
 }
@@ -272,7 +282,7 @@ vectorDB, err := vectordb.NewPostgresVectorDB(vectordb.PostgresConfig{
 ```
 aggo/
 ├── agent/              # AI代理系统
-│   ├── agent.go           # 主代理实现
+│   ├── agent.go           # 主代理实现 (已重构消息处理与内存管理)
 │   ├── knowledge_agent.go # 知识型代理
 │   └── option.go          # 配置选项
 ├── knowledge/          # 知识管理系统
@@ -280,14 +290,14 @@ aggo/
 │   ├── interfaces.go      # 接口定义
 │   ├── storage/           # 存储层
 │   ├── vectordb/          # 向量数据库
-│   ├── readers/           # 文档读取器
-│   └── chunking/          # 文档分块策略
+│   └── readers/           # 文档读取器
 ├── memory/             # 记忆系统
 ├── model/              # AI模型封装
 │   ├── chat.go            # 聊天模型
 │   └── embedding.go       # 嵌入模型
 ├── tools/              # 工具集
-│   ├── knowledge_tool.go      # 知识管理工具
+│   ├── knowledge_tool.go      # 知识管理工具 (已更新相似度阈值)
+│   ├── knowledge_reasoning_tools.go # 知识推理工具
 │   ├── mysql_tool.go          # MySQL数据库工具
 │   ├── postgres_tool.go       # PostgreSQL数据库工具
 │   └── shell_tool.go          # 系统命令工具

@@ -13,7 +13,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gookit/slog v0.6.0
 	github.com/milvus-io/milvus/client/v2 v2.6.0
-	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	gopkg.in/resty.v1 v1.12.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.0

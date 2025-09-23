@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 
@@ -52,7 +51,7 @@ func main() {
 		for {
 			o, err2 := out.Recv()
 			if err2 != nil {
-				fmt.Println("err2:", err2)
+				log.Println("err2:", err2)
 				break
 			}
 			log.Printf("AI:%s", o.Content)
