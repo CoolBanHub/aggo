@@ -7,7 +7,7 @@ AGGO是一个基于Go语言构建的智能AI代理框架，集成了对话AI、�
 - **智能对话代理**: 基于React模式的AI代理，支持工具调用和多轮对话
 - **知识库管理**: 双重存储架构，结合传统数据库和向量数据库实现高效的语义搜索
 - **记忆系统**: 会话级记忆管理，支持长期记忆存储和智能摘要
-- **工具集成**: 丰富的工具生态，包括知识推理、系统命令执行、数据库操作等
+- **工具集成**: 丰富的工具生态，包括知识库操作、系统命令执行、数据库操作等
 - **多数据库支持**: 支持SQLite、MySQL、PostgreSQL等多种数据库
 - **向量搜索**: 支持Milvus和PostgreSQL向量数据库的语义相似度搜索
 - **实时通信**: 支持Server-Sent Events (SSE) 流式响应
@@ -70,42 +70,15 @@ go run example/knowledge_agent_tool_test/main.go
 go run example/mem_agent_test/main.go
 ```
 
-### 3. 存储集成测试
-
-```bash
-go run example/storage_vectordb_integration/main.go
-```
-
-### 4. GORM存储测试
-
-```bash
-go run example/gorm_storage_test/main.go
-```
-
-### 5. SSE流式响应示例
+### 3. SSE流式响应示例
 
 ```bash
 go run example/sse/main.go
 ```
 
-## 📋 最新更新说明
-
-### 版本变更 (2025-09-22)
-
-**重要变更**：
-1. **移除 KnowledgeQueryConfig**: 不再需要在创建Agent时配置 `WithKnowledgeQueryConfig`，知识库查询参数已简化
-2. **移除 retriever 依赖**: Agent内部重构，移除了对独立检索器组件的依赖，知识库查询更加直接
-3. **调整默认相似度阈值**: 知识库搜索的默认相似度阈值从 0.7 调整为 0.1，提高搜索结果的相关性
-4. **引入文档分块功能**: 支持更细粒度的文档处理，使用 `github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive` 组件
-
-**迁移指南**：
-- 移除代码中的 `agent.WithKnowledgeQueryConfig()` 调用
-- 如需自定义搜索参数，请在调用搜索时直接指定 `SearchOptions`
-- 更新搜索阈值设置，考虑使用新的默认值 0.1
-
 ## 💡 使用示例
 
-### 创建知识库管理器
+### 创建带知识库工具的AI代理
 
 ```go
 package main
@@ -113,93 +86,190 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 
-	"github.com/CoolBanHub/aggo/knowledge"
-	"github.com/CoolBanHub/aggo/knowledge/storage"
-	"github.com/CoolBanHub/aggo/knowledge/vectordb"
+	"github.com/CoolBanHub/aggo/agent"
+	"github.com/CoolBanHub/aggo/database/milvus"
+	"github.com/CoolBanHub/aggo/memory"
+	memoryStorage "github.com/CoolBanHub/aggo/memory/storage"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/CoolBanHub/aggo/tools"
+	"github.com/CoolBanHub/aggo/utils"
+	"github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive"
+	"github.com/cloudwego/eino/components/retriever"
+	"github.com/cloudwego/eino/flow/retriever/router"
+	"github.com/cloudwego/eino/schema"
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
 func main() {
 	ctx := context.Background()
 
-	// 1. 创建嵌入模型
-	em, err := model.NewEmbModel()
+	// 1. 创建聊天模型和嵌入模型
+	cm, err := model.NewChatModel(
+		model.WithBaseUrl(os.Getenv("BaseUrl")),
+		model.WithAPIKey(os.Getenv("APIKey")),
+		model.WithModel("gpt-4o-mini"),
+	)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("创建聊天模型失败: %v", err)
 	}
 
-	// 2. 创建向量数据库 (Milvus)
-	vectorDB, err := vectordb.NewMilvusVectorDB(vectordb.MilvusConfig{
-		Address:        "127.0.0.1:19530",
+	em, err := model.NewEmbModel(
+		model.WithBaseUrl(os.Getenv("BaseUrl")),
+		model.WithAPIKey(os.Getenv("APIKey")),
+		model.WithModel("text-embedding-3-large"),
+		model.WithDimensions(1024),
+	)
+	if err != nil {
+		log.Fatalf("创建嵌入模型失败: %v", err)
+	}
+
+	// 2. 创建 Milvus 向量数据库
+	client, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: "127.0.0.1:19530",
+		DBName:  "", // 使用默认数据库
+	})
+	if err != nil {
+		log.Fatalf("创建 Milvus 客户端失败: %v", err)
+	}
+
+	databaseDB, err := milvus.NewMilvus(milvus.MilvusConfig{
+		Client:         client,
+		CollectionName: "aggo_knowledge_vectors",
 		EmbeddingDim:   1024,
-		DBName:         "", // 使用默认数据库
-		CollectionName: "knowledge",
+		Embedding:      em,
 	})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("创建数据库失败: %v", err)
 	}
 
-	// 3. 创建存储层 (SQLite)
-	storage, err := storage.NewSQLiteStorage("knowledge.db")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 4. 创建知识库管理器
-	km, err := knowledge.NewKnowledgeManager(&knowledge.KnowledgeConfig{
-		Storage:  storage,
-		VectorDB: vectorDB,
-		Em:       em,
+	// 3. 创建记忆管理器
+	memoryStore := memoryStorage.NewMemoryStore()
+	memoryManager, err := memory.NewMemoryManager(cm, memoryStore, &memory.MemoryConfig{
+		EnableSessionSummary: false,
+		EnableUserMemories:   false,
+		MemoryLimit:          8,
+		Retrieval:            memory.RetrievalLastN,
 	})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("创建记忆管理器失败: %v", err)
 	}
+	defer memoryManager.Close()
 
-	// 5. 加载文档
-	docs := []knowledge.Document{
-		{
-			ID:      "doc1",
-			Content: "Go语言是由Google开发的开源编程语言",
-			Metadata: map[string]interface{}{
-				"title": "Go语言介绍",
-				"type":  "技术文档",
-			},
+	// 4. 创建检索路由器
+	routerRetriever, err := router.NewRetriever(ctx, &router.Config{
+		Retrievers: map[string]retriever.Retriever{
+			"vector": databaseDB,
 		},
-	}
-
-	err = km.LoadDocuments(ctx, docs, knowledge.LoadOptions{
-		EnableChunking: false,
-		Upsert:         true,
+		Router: func(ctx context.Context, query string) ([]string, error) {
+			return []string{"vector"}, nil
+		},
+		FusionFunc: func(ctx context.Context, result map[string][]*schema.Document) ([]*schema.Document, error) {
+			docsList := make([]*schema.Document, 0)
+			for _, v := range result {
+				docsList = append(docsList, v...)
+			}
+			return docsList, nil
+		},
 	})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("创建检索路由器失败: %v", err)
 	}
 
-	// 6. 搜索文档
-	results, err := km.Search(ctx, "什么是Go语言", knowledge.SearchOptions{
-		Limit:     5,
-		Threshold: 0.1, // 默认相似度阈值已调整为0.1
-	})
+	// 5. 创建带知识库工具的 AI 代理
+	mainAgent, err := agent.NewAgent(ctx, cm,
+		agent.WithMemoryManager(memoryManager),
+		agent.WithTools(tools.GetKnowledgeTools(databaseDB, routerRetriever, &retriever.Options{
+			TopK:           utils.ValueToPtr(10),
+			ScoreThreshold: utils.ValueToPtr(0.1), // 默认相似度阈值
+		})),
+		agent.WithSystemPrompt("你是一个技术专家助手。当用户询问技术问题时，你应该使用 load_documents 和 search_documents 工具来加载和搜索相关信息。"),
+	)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("创建 AI 代理失败: %v", err)
 	}
 
-	for _, result := range results {
-		log.Printf("找到文档: %s (相似度: %.2f)", result.Document.Content, result.Score)
+	// 6. 使用 AI 代理进行对话
+	userID := utils.GetUUIDNoDash()
+	sessionID := utils.GetUUIDNoDash()
+
+	// 用户可以通过对话要求 AI 加载文档和搜索
+	response, err := mainAgent.Generate(ctx, []*schema.Message{
+		schema.UserMessage("请加载一些关于Go语言的文档，然后告诉我Go语言的特点。"),
+	}, agent.WithChatUserID(userID), agent.WithChatSessionID(sessionID))
+
+	if err != nil {
+		log.Fatalf("生成回答失败: %v", err)
 	}
+
+	log.Printf("AI助手: %s", response.Content)
 }
 ```
 
-### 创建智能代理
+### 知识库工具详解
+
+AGGO 提供了两个核心知识库工具：
+
+#### 1. load_documents 工具
+
+用于将文档加载到知识库中，支持多种数据源：
+
+**支持的文档来源**：
+
+- `file`: 本地文件
+- `url`: 网络URL
+
+**使用示例**：
+
+```go
+// AI 可以通过自然语言调用此工具
+response, err := agent.Generate(ctx, []*schema.Message{
+schema.UserMessage("请加载 https://example.com/doc.pdf 这个文档到知识库"),
+})
+```
+
+#### 2. search_documents 工具
+
+用于在知识库中搜索相关文档：
+
+**搜索配置**：
+
+- **TopK**: 返回最相关的前K个结果（默认10个）
+- **ScoreThreshold**: 相似度阈值（默认0.1）
+- **支持向量相似度搜索**
+
+**使用示例**：
+
+```go
+// AI 可以通过自然语言调用此工具
+response, err := agent.Generate(ctx, []*schema.Message{
+schema.UserMessage("搜索关于Go语言特性的文档"),
+})
+```
+
+#### 工具配置选项
+
+```go
+// 创建知识库工具时可以自定义配置
+tools.GetKnowledgeTools(databaseDB, routerRetriever, &retriever.Options{
+TopK:           utils.ValueToPtr(10), // 搜索结果数量
+ScoreThreshold: utils.ValueToPtr(0.1), // 相似度阈值
+})
+```
+
+### 基本代理创建示例
 
 ```go
 import (
+"context"
 "github.com/CoolBanHub/aggo/agent"
 "github.com/CoolBanHub/aggo/model"
+"github.com/CoolBanHub/aggo/memory"
+memoryStorage "github.com/CoolBanHub/aggo/memory/storage"
 )
 
-func createAgent() (*agent.Agent, error) {
+func createBasicAgent() (*agent.Agent, error) {
 ctx := context.Background()
 
 // 创建聊天模型
@@ -208,10 +278,20 @@ if err != nil {
 return nil, err
 }
 
-// 创建带知识库的代理
+// 创建记忆存储
+memoryStore := memoryStorage.NewMemoryStore()
+memoryManager, err := memory.NewMemoryManager(cm, memoryStore, &memory.MemoryConfig{
+MemoryLimit: 10,
+Retrieval:   memory.RetrievalLastN,
+})
+if err != nil {
+return nil, err
+}
+
+// 创建基本代理
 return agent.NewAgent(ctx, cm,
-agent.WithKnowledgeManager(knowledgeManager),
-agent.WithSystemPrompt("你是一个技术专家助手，能够搜索和分析相关技术信息。"),
+agent.WithMemoryManager(memoryManager),
+agent.WithSystemPrompt("你是一个乐于助人的AI助手。"),
 )
 }
 ```
@@ -223,16 +303,16 @@ agent.WithSystemPrompt("你是一个技术专家助手，能够搜索和分析�
 系统统一使用**1024维度**向量：
 
 ```go
-// Azure OpenAI嵌入配置
-dimensions := 1024
-config := &embopenai.EmbeddingConfig{
-Model:      "text-embedding-3-large",
-Dimensions: &dimensions, // 限制输出维度为1024
-}
+// 嵌入模型配置
+em, err := model.NewEmbModel(
+model.WithModel("text-embedding-3-large"),
+model.WithDimensions(1024), // 限制输出维度为1024
+)
 
 // Milvus配置
-vectorConfig := vectordb.MilvusConfig{
+milvusConfig := milvus.MilvusConfig{
 EmbeddingDim: 1024, // 匹配嵌入维度
+Embedding:    em,
 }
 ```
 
@@ -253,25 +333,32 @@ storage, err := storage.NewMySQLStorage("localhost", 3306, "aggo", "user", "pass
 #### 向量数据库配置
 
 **Milvus向量数据库:**
+
 ```go
-vectorDB, err := vectordb.NewMilvusVectorDB(vectordb.MilvusConfig{
-	Address:        "127.0.0.1:19530",
-	EmbeddingDim:   1024,
-	DBName:         "", // 空字符串使用默认数据库
-	CollectionName: "aggo",
+// 创建 Milvus 客户端
+client, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+Address: "127.0.0.1:19530",
+DBName:  "", // 空字符串使用默认数据库
+})
+
+// 创建 Milvus 数据库实例
+milvusDB, err := milvus.NewMilvus(milvus.MilvusConfig{
+Client:         client,
+CollectionName: "aggo_knowledge_vectors",
+EmbeddingDim:   1024,
+Embedding:      em, // 嵌入模型实例
 })
 ```
 
 **PostgreSQL向量数据库:**
+
 ```go
-vectorDB, err := vectordb.NewPostgresVectorDB(vectordb.PostgresConfig{
-	Host:         "localhost",
-	Port:         5432,
-	User:         "user",
-	Password:     "password",
-	DBName:       "vectordb",
-	EmbeddingDim: 1024,
-	TableName:    "embeddings",
+// 创建 PostgreSQL 数据库实例
+postgresDB, err := postgres.NewPostgres(postgres.PostgresConfig{
+Client:          gormDB, // GORM 数据库实例
+CollectionName:  "aggo_knowledge_vectors",
+VectorDimension: 1024,
+Embedding:       em, // 嵌入模型实例
 })
 ```
 
@@ -356,6 +443,7 @@ go run example/sse/main.go
 **错误信息**: `relation "public.embeddings" does not exist`
 
 **解决方案**: 确保PostgreSQL已安装并启用pgvector扩展：
+
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
