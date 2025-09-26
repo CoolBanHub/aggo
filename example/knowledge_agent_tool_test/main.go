@@ -94,6 +94,9 @@ func main() {
 	chunkDocs, err := recursive.NewSplitter(ctx, &recursive.Config{
 		ChunkSize:   1024,
 		OverlapSize: 200,
+		IDGenerator: func(_ context.Context, _ string, _ int) string {
+			return utils.GetUUIDNoDash()
+		},
 	})
 
 	if err != nil {
