@@ -10,32 +10,30 @@ import (
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/state"
 	"github.com/CoolBanHub/aggo/utils"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/flow/agent"
-	"github.com/cloudwego/eino/flow/agent/multiagent/host"
-	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 )
 
 type Agent struct {
-	systemPrompt string
-	cm           model.ToolCallingChatModel
+	// adk.Agent实例 - 核心agent
+	agent adk.Agent
 
+	// 内存管理器
 	memoryManager *memory.MemoryManager
 
-	//作为子agent的时候必须传
-	name        string
-	description string
+	// 基本信息（用于创建agent时使用）
+	name         string
+	description  string
+	systemPrompt string
+	cm           model.ToolCallingChatModel
+	tools        []tool.BaseTool
+	maxStep      int
 
-	tools   []tool.BaseTool //只支持单agent的模式下使用
-	agent   *react.Agent
-	maxStep int
-
-	//多agent的时候 使用
-	multiAgent *host.MultiAgent
-	specialist []*host.Specialist
+	// 子agents（用于多agent场景）
+	subAgents []adk.Agent
 }
 
 func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*Agent, error) {
@@ -47,118 +45,221 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 		cm: cm,
 	}
 
+	// 应用选项配置
 	for _, opt := range opts {
 		if opt != nil {
 			opt(this)
 		}
 	}
 
-	if len(this.specialist) > 0 {
-		h := &host.Host{
-			ToolCallingModel: cm,
-			SystemPrompt:     this.systemPrompt,
-		}
-		multiAgent, err := host.NewMultiAgent(ctx, &host.MultiAgentConfig{
-			Name:        this.name,
-			Host:        *h,
-			Specialists: this.specialist,
-		})
-		if err != nil {
-			return nil, err
-		}
-		this.multiAgent = multiAgent
-	} else {
-		reactAgent, err := react.NewAgent(ctx, &react.AgentConfig{
-			ToolCallingModel: cm,
-			ToolsConfig: compose.ToolsNodeConfig{
+	// 创建adk.Agent实例
+	mainAgent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+		Name:        this.name,
+		Description: this.description,
+		Instruction: this.systemPrompt,
+		Model:       cm,
+		ToolsConfig: adk.ToolsConfig{
+			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: this.tools,
 			},
-			ToolReturnDirectly: map[string]struct{}{},
-			MessageModifier: func(ctx context.Context, input []*schema.Message) []*schema.Message {
-				return input
-			},
-		})
+		},
+		MaxIterations: this.maxStep,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	this.agent = mainAgent
+
+	// 如果有子agents，设置它们
+	if len(this.subAgents) > 0 {
+		this.agent, err = adk.SetSubAgents(ctx, mainAgent, this.subAgents)
 		if err != nil {
 			return nil, err
 		}
-
-		this.agent = reactAgent
 	}
 
 	return this, nil
 }
 
 func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.Message, error) {
-	ctx, _input, agentOpts, err := this.chatPreHandler(ctx, input, opts...)
+	ctx, _input, chatOpts, err := this.chatPreHandler(ctx, input, opts...)
 	if err != nil {
 		return nil, err
 	}
+	_ = chatOpts
+
+	// 创建Runner，禁用流式输出
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{
+		EnableStreaming: false,
+		Agent:           this.agent,
+	})
+
+	// 运行Agent
+
+	adkOpts := []adk.AgentRunOption{
+		adk.WithSkipTransferMessages(),
+	}
+
+	iter := runner.Run(ctx, _input, adkOpts...)
 
 	var response *schema.Message
-	if this.multiAgent != nil {
-		response, err = this.multiAgent.Generate(ctx, _input, agentOpts)
-	} else {
-		response, err = this.agent.Generate(ctx, _input, agentOpts)
-	}
-	if err != nil {
-		return nil, err
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil {
+			return nil, event.Err
+		}
+
+		// 处理输出事件
+		if event.Output != nil && event.Output.MessageOutput != nil {
+			mv := event.Output.MessageOutput
+			if mv.Role == schema.Assistant {
+				// 获取完整消息（对于非流式输出，这里直接返回Message）
+				msg, err := mv.GetMessage()
+				if err != nil {
+					return nil, err
+				}
+				response = msg
+			}
+		}
+
+		// 处理退出事件
+		if event.Action != nil && event.Action.Exit {
+			break
+		}
 	}
 
+	// 存储响应消息
 	this.handleMessageStorage(ctx, response)
 	return response, nil
 }
 
-func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
-	ctx, _input, agentOpts, err := this.chatPreHandler(ctx, input, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	var response *schema.StreamReader[*schema.Message]
-	if this.multiAgent != nil {
-		response, err = this.multiAgent.Stream(ctx, _input, agentOpts)
-	} else {
-		response, err = this.agent.Stream(ctx, _input, agentOpts)
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	if this.hasMemoryManager() {
-		go this.handleStreamMessageStorage(ctx, response)
-	}
-
-	return response, nil
+func (this *Agent) Name(ctx context.Context) string {
+	return this.name
 }
 
-func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, opts ...ChatOption) (context.Context, []*schema.Message, agent.AgentOption, error) {
+func (this *Agent) Description(ctx context.Context) string {
+	return this.description
+}
+
+func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
+	return this.agent.Run(ctx, input, options...)
+}
+
+func (this *Agent) GetAdkAgent() adk.Agent {
+	return this
+}
+
+func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
+	ctx, _input, chatOpts, err := this.chatPreHandler(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	_ = chatOpts
+	// 创建Runner，启用流式输出
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{
+		EnableStreaming: true,
+		Agent:           this.agent,
+	})
+
+	adkOpts := []adk.AgentRunOption{
+		adk.WithSkipTransferMessages(),
+	}
+
+	// 运行Agent并获取事件迭代器
+	iter := runner.Run(ctx, _input, adkOpts...)
+
+	// 创建流式读取器
+	streamReader, streamWriter := schema.Pipe[*schema.Message](10)
+
+	// 开启协程处理流式事件
+	go func() {
+		defer streamWriter.Close()
+
+		var fullContent strings.Builder
+
+		for {
+			event, ok := iter.Next()
+			if !ok {
+				break
+			}
+			if event.Err != nil {
+				streamWriter.Send(&schema.Message{}, event.Err)
+				return
+			}
+
+			// 处理流式输出事件
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				mv := event.Output.MessageOutput
+				if mv.Role == schema.Assistant && mv.IsStreaming {
+					// 处理流式数据
+					for {
+						chunk, streamErr := mv.MessageStream.Recv()
+						if streamErr == io.EOF {
+							break
+						}
+						if streamErr != nil {
+							streamWriter.Send(&schema.Message{}, streamErr)
+							return
+						}
+
+						// 发送流式数据块
+						streamWriter.Send(chunk, nil)
+						fullContent.WriteString(chunk.Content)
+					}
+				} else if mv.Role == schema.Assistant && !mv.IsStreaming {
+					// 非流式输出，直接发送
+					streamWriter.Send(mv.Message, nil)
+					fullContent.WriteString(mv.Message.Content)
+				}
+			}
+
+			// 处理退出事件
+			if event.Action != nil && event.Action.Exit {
+				break
+			}
+		}
+
+		// 存储完整的响应消息
+		if this.hasMemoryManager() && fullContent.Len() > 0 {
+			responseMsg := &schema.Message{
+				Role:    schema.Assistant,
+				Content: fullContent.String(),
+			}
+			this.handleMessageStorage(ctx, responseMsg)
+		}
+	}()
+
+	return streamReader, nil
+}
+
+func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, opts ...ChatOption) (context.Context, []*schema.Message, *chatOptions, error) {
 	chatOpts := this.buildChatOptions(opts...)
-	agentOpts := agent.WithComposeOptions(chatOpts.composeOptions...)
 
 	_input, err := this.inputMessageModifier(ctx, input, chatOpts)
 	if err != nil {
-		return nil, nil, agentOpts, err
+		return nil, nil, nil, err
 	}
 
 	if !this.hasMemoryManager() {
-		return ctx, _input, agentOpts, nil
+		return ctx, _input, chatOpts, nil
 	}
 
 	ctx = this.setupChatContext(ctx, _input, chatOpts)
 
 	// 存储用户消息,必须是最原始的input，不是_input
 	if err := this.storeUserMessage(ctx, input, chatOpts); err != nil {
-		return nil, nil, agentOpts, err
+		return nil, nil, nil, err
 	}
 
-	return ctx, _input, agentOpts, nil
+	return ctx, _input, chatOpts, nil
 }
 
 func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) ([]*schema.Message, error) {
 	_input := this.buildBaseMessages(ctx, input, chatOpts)
-
-	// 添加系统提示词到最前面
-	this.addSystemPrompt(&_input)
 
 	return _input, nil
 }
@@ -232,17 +333,6 @@ func (this *Agent) addSessionSummary(ctx context.Context, _input []*schema.Messa
 	return append([]*schema.Message{summaryMessage}, _input...)
 }
 
-// addSystemPrompt 添加系统提示词
-func (this *Agent) addSystemPrompt(_input *[]*schema.Message) {
-	if this.agent != nil && this.systemPrompt != "" {
-		systemMessage := &schema.Message{
-			Role:    schema.System,
-			Content: this.systemPrompt,
-		}
-		*_input = append([]*schema.Message{systemMessage}, *_input...)
-	}
-}
-
 // buildChatOptions 构建聊天选项
 func (this *Agent) buildChatOptions(opts ...ChatOption) *chatOptions {
 	chatOpts := &chatOptions{}
@@ -292,26 +382,6 @@ func (this *Agent) handleMessageStorage(ctx context.Context, response *schema.Me
 	this.storeAssistantMessage(ctx, response)
 }
 
-// handleStreamMessageStorage 处理流式消息存储
-func (this *Agent) handleStreamMessageStorage(ctx context.Context, response *schema.StreamReader[*schema.Message]) {
-	var content strings.Builder
-	for {
-		chunk, err := response.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			log.Printf("读取流式消息失败: %v", err)
-			return
-		}
-		content.WriteString(chunk.Content)
-	}
-
-	if content.Len() > 0 {
-		this.storeAssistantMessage(ctx, &schema.Message{Role: schema.Assistant, Content: content.String()})
-	}
-}
-
 // storeAssistantMessage 存储助手消息,在callback统一处理
 func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.Message) {
 	if !this.hasMemoryManager() || response == nil {
@@ -345,31 +415,98 @@ func (this *Agent) formatUserMemories(memories []*memory.UserMemory) string {
 	return builder.String()
 }
 
-func (this *Agent) NewSpecialist() *host.Specialist {
-	// 创建一个专门用于specialist的agent副本，避免修改原始实例
-	specialistAgent := &Agent{
-		systemPrompt:  this.systemPrompt,
-		cm:            this.cm,
-		memoryManager: nil, // 作为子agent时不使用memory manager
-		name:          this.name,
-		description:   this.description,
-		tools:         this.tools,
-		agent:         this.agent,
-		maxStep:       this.maxStep,
-		multiAgent:    this.multiAgent,
-		specialist:    this.specialist,
-	}
-
-	return &host.Specialist{
-		AgentMeta: host.AgentMeta{
-			Name:        specialistAgent.name,
-			IntendedUse: specialistAgent.description,
-		},
-		Invokable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.Message, err error) {
-			return specialistAgent.Generate(ctx, input)
-		},
-		Streamable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.StreamReader[*schema.Message], err error) {
-			return specialistAgent.Stream(ctx, input)
-		},
-	}
-}
+//func (this *Agent) NewSpecialist() *host.Specialist {
+//	return &host.Specialist{
+//		AgentMeta: host.AgentMeta{
+//			Name:        this.name,
+//			IntendedUse: this.description,
+//		},
+//		Invokable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.Message, err error) {
+//			// 直接使用底层adk.Agent，不使用内存管理
+//			runner := adk.NewRunner(ctx, adk.RunnerConfig{
+//				EnableStreaming: false,
+//				Agent:           this.agent,
+//			})
+//
+//			iter := runner.Run(ctx, input)
+//			var response *schema.Message
+//
+//			for {
+//				event, ok := iter.Next()
+//				if !ok {
+//					break
+//				}
+//				if event.Err != nil {
+//					return nil, event.Err
+//				}
+//
+//				if event.Output != nil && event.Output.MessageOutput != nil {
+//					mv := event.Output.MessageOutput
+//					if mv.Role == schema.Assistant {
+//						msg, err := mv.GetMessage()
+//						if err != nil {
+//							return nil, err
+//						}
+//						response = msg
+//					}
+//				}
+//
+//				if event.Action != nil && event.Action.Exit {
+//					break
+//				}
+//			}
+//
+//			return response, nil
+//		},
+//		Streamable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.StreamReader[*schema.Message], err error) {
+//			// 直接使用底层adk.Agent进行流式处理
+//			runner := adk.NewRunner(ctx, adk.RunnerConfig{
+//				EnableStreaming: true,
+//				Agent:           this.agent,
+//			})
+//
+//			iter := runner.Run(ctx, input)
+//			streamReader, streamWriter := schema.Pipe[*schema.Message](10)
+//
+//			go func() {
+//				defer streamWriter.Close()
+//
+//				for {
+//					event, ok := iter.Next()
+//					if !ok {
+//						break
+//					}
+//					if event.Err != nil {
+//						streamWriter.Send(&schema.Message{}, event.Err)
+//						return
+//					}
+//
+//					if event.Output != nil && event.Output.MessageOutput != nil {
+//						mv := event.Output.MessageOutput
+//						if mv.Role == schema.Assistant && mv.IsStreaming {
+//							for {
+//								chunk, streamErr := mv.MessageStream.Recv()
+//								if streamErr == io.EOF {
+//									break
+//								}
+//								if streamErr != nil {
+//									streamWriter.Send(&schema.Message{}, streamErr)
+//									return
+//								}
+//								streamWriter.Send(chunk, nil)
+//							}
+//						} else if mv.Role == schema.Assistant && !mv.IsStreaming {
+//							streamWriter.Send(mv.Message, nil)
+//						}
+//					}
+//
+//					if event.Action != nil && event.Action.Exit {
+//						break
+//					}
+//				}
+//			}()
+//
+//			return streamReader, nil
+//		},
+//	}
+//}

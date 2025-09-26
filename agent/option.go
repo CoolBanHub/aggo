@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/CoolBanHub/aggo/memory"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/flow/agent/multiagent/host"
 )
 
 type Option func(*Agent)
@@ -42,9 +42,9 @@ func WithSystemPrompt(systemPrompt string) Option {
 	}
 }
 
-func WithSpecialists(specialist []*host.Specialist) Option {
+func WithSubAgent(agents []adk.Agent) Option {
 	return func(agent *Agent) {
-		agent.specialist = specialist
+		agent.subAgents = agents
 	}
 }
 
@@ -58,12 +58,14 @@ type chatOptions struct {
 	composeOptions []compose.Option
 	userID         string
 	sessionID      string
+	tools          []tool.BaseTool
 }
 
 type ChatOption func(*chatOptions)
 
 func WithChatTools(tools []tool.BaseTool) ChatOption {
 	return func(co *chatOptions) {
+		co.tools = tools
 		toolInfos, _ := genToolInfos(context.Background(), tools)
 		co.composeOptions = append(co.composeOptions,
 			compose.WithToolsNodeOption(compose.WithToolList(tools...)),
