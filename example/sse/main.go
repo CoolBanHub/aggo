@@ -470,7 +470,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := req.SessionID
 	if sessionID == "" {
-		sessionID = utils.GetUUIDNoDash()
+		sessionID = utils.GetULID()
 	}
 
 	ctx := r.Context()
