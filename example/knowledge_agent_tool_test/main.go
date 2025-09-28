@@ -62,7 +62,7 @@ func main() {
 	// 4. 加载示例文档到知识库（模拟一些技术文档）
 	docs := []*schema.Document{
 		{
-			ID:      utils.GetUUIDNoDash(),
+			ID:      utils.GetULID(),
 			Content: "Go语言是由Google开发的开源编程语言，以其简洁性和高效性著称。它特别适用于系统编程、网络服务和云计算应用。",
 			MetaData: map[string]interface{}{
 				"title":  "Go语言介绍",
@@ -71,7 +71,7 @@ func main() {
 			},
 		},
 		{
-			ID:      utils.GetUUIDNoDash(),
+			ID:      utils.GetULID(),
 			Content: "微服务架构是一种将单一应用程序开发为一套小服务的方法，每个服务运行在自己的进程中，服务间通过HTTP API进行通信。",
 			MetaData: map[string]interface{}{
 				"title":  "微服务架构",
@@ -80,7 +80,7 @@ func main() {
 			},
 		},
 		{
-			ID:      utils.GetUUIDNoDash(),
+			ID:      utils.GetULID(),
 			Content: "Docker是一个开源的应用容器引擎，让开发者可以打包他们的应用以及依赖包到一个可移植的镜像中，然后发布到任何Linux或Windows机器上。",
 			MetaData: map[string]interface{}{
 				"title":  "Docker容器技术",
@@ -95,7 +95,7 @@ func main() {
 		ChunkSize:   1024,
 		OverlapSize: 200,
 		IDGenerator: func(_ context.Context, _ string, _ int) string {
-			return utils.GetUUIDNoDash()
+			return utils.GetULID()
 		},
 	})
 
@@ -174,8 +174,8 @@ func main() {
 		"Docker是什么？有什么用途？",
 		"Go语言适合用来开发哪些类型的应用？",
 	}
-	userID := utils.GetUUIDNoDash()
-	sessionId := utils.GetUUIDNoDash()
+	userID := utils.GetULID()
+	sessionId := utils.GetULID()
 	for i, question := range testQuestions {
 		log.Printf("\n=== 测试问题 %d ===", i+1)
 		log.Printf("用户: %s", question)

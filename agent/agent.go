@@ -250,7 +250,7 @@ func (this *Agent) buildChatOptions(opts ...ChatOption) *chatOptions {
 		opt(chatOpts)
 	}
 	if chatOpts.sessionID == "" {
-		chatOpts.sessionID = utils.GetUUIDNoDash()
+		chatOpts.sessionID = utils.GetULID()
 	}
 	if chatOpts.userID == "" {
 		chatOpts.userID = chatOpts.sessionID
