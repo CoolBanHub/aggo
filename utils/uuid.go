@@ -7,5 +7,6 @@ import (
 )
 
 func GetUUIDNoDash() string {
-	return strings.Replace(uuid.New().String(), "-", "", -1)
+	id, _ := uuid.NewV7()
+	return strings.Replace(id.String(), "-", "", -1)
 }
