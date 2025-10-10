@@ -52,10 +52,20 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 		}
 	}
 
+	name := this.name
+	description := this.description
+	if name == "" {
+		name = "adk agent"
+	}
+
+	if description == "" {
+		description = "adk agent"
+	}
+
 	// 创建adk.Agent实例
 	mainAgent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:        this.name,
-		Description: this.description,
+		Name:        name,
+		Description: description,
 		Instruction: this.systemPrompt,
 		Model:       cm,
 		ToolsConfig: adk.ToolsConfig{
@@ -414,99 +424,3 @@ func (this *Agent) formatUserMemories(memories []*memory.UserMemory) string {
 
 	return builder.String()
 }
-
-//func (this *Agent) NewSpecialist() *host.Specialist {
-//	return &host.Specialist{
-//		AgentMeta: host.AgentMeta{
-//			Name:        this.name,
-//			IntendedUse: this.description,
-//		},
-//		Invokable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.Message, err error) {
-//			// 直接使用底层adk.Agent，不使用内存管理
-//			runner := adk.NewRunner(ctx, adk.RunnerConfig{
-//				EnableStreaming: false,
-//				Agent:           this.agent,
-//			})
-//
-//			iter := runner.Run(ctx, input)
-//			var response *schema.Message
-//
-//			for {
-//				event, ok := iter.Next()
-//				if !ok {
-//					break
-//				}
-//				if event.Err != nil {
-//					return nil, event.Err
-//				}
-//
-//				if event.Output != nil && event.Output.MessageOutput != nil {
-//					mv := event.Output.MessageOutput
-//					if mv.Role == schema.Assistant {
-//						msg, err := mv.GetMessage()
-//						if err != nil {
-//							return nil, err
-//						}
-//						response = msg
-//					}
-//				}
-//
-//				if event.Action != nil && event.Action.Exit {
-//					break
-//				}
-//			}
-//
-//			return response, nil
-//		},
-//		Streamable: func(ctx context.Context, input []*schema.Message, opts ...agent.AgentOption) (output *schema.StreamReader[*schema.Message], err error) {
-//			// 直接使用底层adk.Agent进行流式处理
-//			runner := adk.NewRunner(ctx, adk.RunnerConfig{
-//				EnableStreaming: true,
-//				Agent:           this.agent,
-//			})
-//
-//			iter := runner.Run(ctx, input)
-//			streamReader, streamWriter := schema.Pipe[*schema.Message](10)
-//
-//			go func() {
-//				defer streamWriter.Close()
-//
-//				for {
-//					event, ok := iter.Next()
-//					if !ok {
-//						break
-//					}
-//					if event.Err != nil {
-//						streamWriter.Send(&schema.Message{}, event.Err)
-//						return
-//					}
-//
-//					if event.Output != nil && event.Output.MessageOutput != nil {
-//						mv := event.Output.MessageOutput
-//						if mv.Role == schema.Assistant && mv.IsStreaming {
-//							for {
-//								chunk, streamErr := mv.MessageStream.Recv()
-//								if streamErr == io.EOF {
-//									break
-//								}
-//								if streamErr != nil {
-//									streamWriter.Send(&schema.Message{}, streamErr)
-//									return
-//								}
-//								streamWriter.Send(chunk, nil)
-//							}
-//						} else if mv.Role == schema.Assistant && !mv.IsStreaming {
-//							streamWriter.Send(mv.Message, nil)
-//						}
-//					}
-//
-//					if event.Action != nil && event.Action.Exit {
-//						break
-//					}
-//				}
-//			}()
-//
-//			return streamReader, nil
-//		},
-//	}
-//}

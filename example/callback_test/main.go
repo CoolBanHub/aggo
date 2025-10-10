@@ -28,6 +28,8 @@ func main() {
 	callbacks.AppendGlobalHandlers(NewChatModelCallback())
 
 	bot, err := agent.NewAgent(ctx, cm,
+		agent.WithName("linux大师"),
+		agent.WithDescription("我是一个linux大师，请勿使用此工具进行非法操作"),
 		agent.WithSystemPrompt("你是一个linux大师"))
 	if err != nil {
 		log.Fatalf("new agent fail,err:%s", err)
