@@ -91,7 +91,8 @@ func (this *ChatModelCallback) OnError(ctx context.Context, runInfo *callbacks.R
 
 func (this *ChatModelCallback) OnStartWithStreamInput(ctx context.Context, info *callbacks.RunInfo,
 	input *schema.StreamReader[callbacks.CallbackInput]) context.Context {
-	return nil
+	log.Printf("input: %+v, runinfo: %+v", input, info)
+	return ctx
 }
 func (this *ChatModelCallback) OnEndWithStreamOutput(ctx context.Context, runInfo *callbacks.RunInfo, output *schema.StreamReader[callbacks.CallbackOutput]) context.Context {
 	go func() {
