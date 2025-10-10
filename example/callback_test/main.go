@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"os"
+	"runtime/debug"
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/cloudwego/eino/callbacks"
+	model2 "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -21,9 +25,14 @@ func main() {
 		return
 	}
 
+	callbacks.AppendGlobalHandlers(NewChatModelCallback())
+
 	bot, err := agent.NewAgent(ctx, cm,
 		agent.WithSystemPrompt("你是一个linux大师"))
-
+	if err != nil {
+		log.Fatalf("new agent fail,err:%s", err)
+		return
+	}
 	conversations := []string{
 		"你好，我是Alice",
 		"我是一名软件工程师，专门做后端开发",
@@ -57,4 +66,55 @@ func main() {
 			log.Printf("AI:%s", o.Content)
 		}
 	}
+}
+
+type ChatModelCallback struct {
+}
+
+func NewChatModelCallback() *ChatModelCallback {
+	return &ChatModelCallback{}
+}
+
+func (this *ChatModelCallback) OnStart(ctx context.Context, runInfo *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
+	log.Printf("input: %+v, runinfo: %+v", input, runInfo)
+	return ctx
+}
+
+func (this *ChatModelCallback) OnEnd(ctx context.Context, runInfo *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
+	log.Printf("output: %+v, runinfo: %+v", output, runInfo)
+	return ctx
+}
+func (this *ChatModelCallback) OnError(ctx context.Context, runInfo *callbacks.RunInfo, err error) context.Context {
+	log.Printf("error: %s, runinfo: %+v, stack: %s", err, runInfo, string(debug.Stack()))
+	return ctx
+}
+
+func (this *ChatModelCallback) OnStartWithStreamInput(ctx context.Context, info *callbacks.RunInfo,
+	input *schema.StreamReader[callbacks.CallbackInput]) context.Context {
+	return nil
+}
+func (this *ChatModelCallback) OnEndWithStreamOutput(ctx context.Context, runInfo *callbacks.RunInfo, output *schema.StreamReader[callbacks.CallbackOutput]) context.Context {
+	go func() {
+		defer func() {
+			e := recover()
+			if e != nil {
+				log.Printf("recover update langfuse span panic: %v, runinfo: %+v, stack: %s", e, runInfo, string(debug.Stack()))
+			}
+			output.Close()
+		}()
+		var outs []callbacks.CallbackOutput
+		content := ""
+		for {
+			chunk, err := output.Recv()
+			if err == io.EOF {
+				break
+			}
+			outs = append(outs, chunk)
+			_chunk := chunk.(*model2.CallbackOutput)
+			content += _chunk.Message.Content
+		}
+		log.Printf("content: %s", content)
+	}()
+
+	return ctx
 }
