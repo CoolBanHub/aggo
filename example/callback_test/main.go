@@ -12,9 +12,17 @@ import (
 	"github.com/cloudwego/eino/callbacks"
 	model2 "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+
+	// 加载 .env 文件
+	if err := godotenv.Load(); err != nil {
+		log.Printf("警告: 无法加载 .env 文件: %v", err)
+		log.Println("将尝试从系统环境变量读取配置")
+	}
+
 	ctx := context.Background()
 	cm, err := model.NewChatModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
 		model.WithAPIKey(os.Getenv("APIKey")),

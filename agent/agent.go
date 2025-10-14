@@ -92,6 +92,27 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 	return this, nil
 }
 
+// NewAgentFromADK 从已存在的adk.Agent创建Agent实例
+// 适用于已经通过adk包创建的Agent
+func NewAgentFromADK(adkAgent adk.Agent, opts ...Option) (*Agent, error) {
+	if adkAgent == nil {
+		return nil, fmt.Errorf("adk agent不能为空")
+	}
+
+	this := &Agent{
+		agent: adkAgent,
+	}
+
+	// 应用选项配置（主要用于配置内存管理器等增强功能）
+	for _, opt := range opts {
+		if opt != nil {
+			opt(this)
+		}
+	}
+
+	return this, nil
+}
+
 func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.Message, error) {
 	ctx, _input, chatOpts, err := this.chatPreHandler(ctx, input, opts...)
 	if err != nil {
@@ -148,11 +169,11 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 }
 
 func (this *Agent) Name(ctx context.Context) string {
-	return this.name
+	return this.agent.Name(ctx)
 }
 
 func (this *Agent) Description(ctx context.Context) string {
-	return this.description
+	return this.agent.Description(ctx)
 }
 
 func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
@@ -393,7 +414,7 @@ func (this *Agent) setupChatContext(ctx context.Context, _input []*schema.Messag
 		UserID:    chatOpts.userID,
 	}
 	if this.agent != nil && this.systemPrompt != "" {
-		chatState.Input = _input[1:]
+		chatState.Input = _input[1:] // TODO 需要去掉？
 	}
 	return state.SetChatChatSate(ctx, chatState)
 }

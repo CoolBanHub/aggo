@@ -6,11 +6,11 @@ import (
 	"log"
 	"os"
 
+	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools"
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/adk/prebuilt/supervisor"
 	"github.com/cloudwego/eino/callbacks"
 	einoModel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
@@ -90,20 +90,18 @@ func main() {
 	}
 
 	// 3. 将子 Agent 注册到主 Agent
-	//routerAgent, err := adk.SetSubAgents(ctx, mainAgent, []adk.Agent{
-	//	mathAgent,
-	//	weatherAgent,
-	//	timeAgent,
-	//})
-
-	// 3. 组合 Supervisor 与子 Agent
-	routerAgent, err := supervisor.New(ctx, &supervisor.Config{
-		Supervisor: mainAgent,
-		SubAgents:  []adk.Agent{mathAgent, weatherAgent, timeAgent},
+	routerAgent, err := adk.SetSubAgents(ctx, mainAgent, []adk.Agent{
+		mathAgent,
+		weatherAgent,
+		timeAgent,
 	})
-
 	if err != nil {
 		log.Fatalf("设置子 Agent 失败: %v", err)
+	}
+
+	bot, err := agent.NewAgentFromADK(routerAgent)
+	if err != nil {
+		log.Fatalf("创建 Agent 失败: %v", err)
 	}
 
 	// 4. 测试不同类型的问题，主 Agent 会自动路由到对应的子 Agent
@@ -125,44 +123,15 @@ func main() {
 		ctx = langfuse.SetTrace(context.Background(), langfuse.WithID(uuid.NewString()))
 
 		// 直接调用 Agent 运行
-		iter := routerAgent.Run(ctx, &adk.AgentInput{
-			Messages: []*schema.Message{
-				{Role: schema.User, Content: question},
-			},
+		out, err := bot.Generate(ctx, []*schema.Message{
+			{Role: schema.User, Content: question},
 		})
-
-		// 处理结果
-		var response string
-		for {
-			event, ok := iter.Next()
-			if !ok {
-				break
-			}
-			if event.Err != nil {
-				log.Printf("执行失败: %v\n", event.Err)
-				break
-			}
-
-			// 获取输出
-			if event.Output != nil && event.Output.MessageOutput != nil {
-				mv := event.Output.MessageOutput
-				if mv.Role == schema.Assistant {
-					msg, err := mv.GetMessage()
-					if err != nil {
-						log.Printf("获取消息失败: %v\n", err)
-						continue
-					}
-					response = msg.Content
-				}
-			}
-
-			// 退出事件
-			if event.Action != nil && event.Action.Exit {
-				break
-			}
+		if err != nil {
+			log.Printf("生成失败: %v", err)
 		}
 
-		fmt.Printf("【回答】: %s\n", response)
+		fmt.Printf("【回答】: %s\n", out.Content)
+		break
 	}
 
 	fmt.Println("\n=== 测试完成 ===")
