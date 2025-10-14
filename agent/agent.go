@@ -249,41 +249,36 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, opts ...ChatOption) (context.Context, []*schema.Message, *chatOptions, error) {
 	chatOpts := this.buildChatOptions(opts...)
 
-	_input, err := this.inputMessageModifier(ctx, input, chatOpts)
-	if err != nil {
-		return nil, nil, nil, err
+	// 处理消息输入（如果有内存管理器则增强消息）
+	processedInput := input
+	if this.hasMemoryManager() {
+		enhancedInput, err := this.inputMessageModifier(ctx, input, chatOpts)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		processedInput = enhancedInput
+
+		// 存储用户消息（必须使用原始input，不是增强后的）
+		if err := this.storeUserMessage(ctx, input, chatOpts); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
-	if !this.hasMemoryManager() {
-		return ctx, _input, chatOpts, nil
-	}
+	// 在最后添加用户消息后缀（不影响历史消息和存储）
+	processedInput = this.applyUserMessageSuffix(processedInput, chatOpts)
 
-	ctx = this.setupChatContext(ctx, _input, chatOpts)
+	// 设置聊天上下文
+	ctx = this.setupChatContext(ctx, processedInput, chatOpts)
 
-	// 存储用户消息,必须是最原始的input，不是_input
-	if err := this.storeUserMessage(ctx, input, chatOpts); err != nil {
-		return nil, nil, nil, err
-	}
-
-	return ctx, _input, chatOpts, nil
+	return ctx, processedInput, chatOpts, nil
 }
 
 func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) ([]*schema.Message, error) {
-	_input := this.buildBaseMessages(ctx, input, chatOpts)
-
-	return _input, nil
-}
-
-// buildBaseMessages 构建基础消息序列
-func (this *Agent) buildBaseMessages(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) []*schema.Message {
-	if !this.hasMemoryManager() {
-		return input
-	}
 
 	_input := this.buildMessagesWithHistory(ctx, input, chatOpts)
 	_input = this.addUserMemories(ctx, _input, chatOpts)
 	_input = this.addSessionSummary(ctx, _input, chatOpts)
-	return _input
+	return _input, nil
 }
 
 // buildMessagesWithHistory 构建包含历史消息的序列
@@ -341,6 +336,38 @@ func (this *Agent) addSessionSummary(ctx context.Context, _input []*schema.Messa
 		Content: fmt.Sprintf("会话背景: %s", sessionSummary.Summary),
 	}
 	return append([]*schema.Message{summaryMessage}, _input...)
+}
+
+// applyUserMessageSuffix 将后缀添加到最后一条用户消息
+func (this *Agent) applyUserMessageSuffix(input []*schema.Message, chatOpts *chatOptions) []*schema.Message {
+	if chatOpts.userMessageSuffix == "" || len(input) == 0 {
+		return input
+	}
+
+	// 找到最后一条用户消息
+	lastUserMsgIdx := -1
+	for i := len(input) - 1; i >= 0; i-- {
+		if input[i].Role == schema.User {
+			lastUserMsgIdx = i
+			break
+		}
+	}
+
+	// 如果没有用户消息，直接返回
+	if lastUserMsgIdx == -1 {
+		return input
+	}
+
+	// 复制消息列表，避免修改原始输入
+	result := make([]*schema.Message, len(input))
+	copy(result, input)
+
+	// 拼接后缀到最后一条用户消息 - 创建新的消息对象
+	lastUserMsg := *result[lastUserMsgIdx]
+	lastUserMsg.Content = lastUserMsg.Content + chatOpts.userMessageSuffix
+	result[lastUserMsgIdx] = &lastUserMsg
+
+	return result
 }
 
 // buildChatOptions 构建聊天选项

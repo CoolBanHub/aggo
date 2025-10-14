@@ -55,10 +55,11 @@ func WithMaxStep(maxStep int) Option {
 }
 
 type chatOptions struct {
-	composeOptions []compose.Option
-	userID         string
-	sessionID      string
-	tools          []tool.BaseTool
+	composeOptions    []compose.Option
+	userID            string
+	sessionID         string
+	tools             []tool.BaseTool
+	userMessageSuffix string
 }
 
 type ChatOption func(*chatOptions)
@@ -83,6 +84,13 @@ func WithChatUserID(userID string) ChatOption {
 func WithChatSessionID(sessionID string) ChatOption {
 	return func(co *chatOptions) {
 		co.sessionID = sessionID
+	}
+}
+
+// WithUserMessageSuffix 添加用户消息后缀
+func WithUserMessageSuffix(suffix string) ChatOption {
+	return func(co *chatOptions) {
+		co.userMessageSuffix = suffix
 	}
 }
 
