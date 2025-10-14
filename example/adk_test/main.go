@@ -10,6 +10,7 @@ import (
 	"github.com/CoolBanHub/aggo/tools"
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/adk/prebuilt/supervisor"
 	"github.com/cloudwego/eino/callbacks"
 	einoModel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
@@ -89,11 +90,18 @@ func main() {
 	}
 
 	// 3. 将子 Agent 注册到主 Agent
-	routerAgent, err := adk.SetSubAgents(ctx, mainAgent, []adk.Agent{
-		mathAgent,
-		weatherAgent,
-		timeAgent,
+	//routerAgent, err := adk.SetSubAgents(ctx, mainAgent, []adk.Agent{
+	//	mathAgent,
+	//	weatherAgent,
+	//	timeAgent,
+	//})
+
+	// 3. 组合 Supervisor 与子 Agent
+	routerAgent, err := supervisor.New(ctx, &supervisor.Config{
+		Supervisor: mainAgent,
+		SubAgents:  []adk.Agent{mathAgent, weatherAgent, timeAgent},
 	})
+
 	if err != nil {
 		log.Fatalf("设置子 Agent 失败: %v", err)
 	}

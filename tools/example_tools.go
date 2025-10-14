@@ -11,7 +11,7 @@ import (
 
 // 场景1：数学计算工具
 type CalculatorParams struct {
-	Operation string  `json:"operation" jsonschema:"description=运算类型: add(加法)\, subtract(减法)\, multiply(乘法)\, divide(除法),required,enum=add,enum=subtract,enum=multiply,enum=divide"`
+	Operation string  `json:"operation" jsonschema:"description=运算类型: add(加法)，subtract(减法)，multiply(乘法)，divide(除法),required,enum=add,enum=subtract,enum=multiply,enum=divide"`
 	A         float64 `json:"a" jsonschema:"description=第一个数字,required"`
 	B         float64 `json:"b" jsonschema:"description=第二个数字,required"`
 }
