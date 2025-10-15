@@ -177,7 +177,88 @@ func (this *Agent) Description(ctx context.Context) string {
 }
 
 func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
-	return this.agent.Run(ctx, input, options...)
+	// 预处理输入消息
+	ctx, processedInput, chatOpts, err := this.chatPreHandler(ctx, input.Messages)
+	if err != nil {
+		iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+		generator.Send(&adk.AgentEvent{Err: err})
+		generator.Close()
+		return iterator
+	}
+
+	// 创建新的 AgentInput 使用处理后的消息
+	processedAgentInput := &adk.AgentInput{
+		Messages:        processedInput,
+		EnableStreaming: input.EnableStreaming,
+	}
+
+	// 调用底层 adk.Agent 的 Run 方法
+	iter := this.agent.Run(ctx, processedAgentInput, options...)
+
+	// 包装迭代器以处理消息存储
+	wrappedIterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+
+	go func() {
+		defer generator.Close()
+
+		var fullContent strings.Builder
+
+		for {
+			event, ok := iter.Next()
+			if !ok {
+				break
+			}
+
+			// 转发事件
+			generator.Send(event)
+
+			if event.Err != nil {
+				continue
+			}
+
+			// 收集助手消息内容用于存储
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				mv := event.Output.MessageOutput
+				if mv.Role == schema.Assistant {
+					if mv.IsStreaming && mv.MessageStream != nil {
+						// 流式输出：读取所有块
+						for {
+							chunk, streamErr := mv.MessageStream.Recv()
+							if streamErr == io.EOF {
+								break
+							}
+							if streamErr != nil {
+								break
+							}
+							fullContent.WriteString(chunk.Content)
+						}
+					} else if mv.Message != nil {
+						// 非流式输出
+						fullContent.WriteString(mv.Message.Content)
+					}
+				}
+			}
+
+			// 检查是否退出
+			if event.Action != nil && event.Action.Exit {
+				break
+			}
+		}
+
+		// 存储助手消息
+		if this.hasMemoryManager() && fullContent.Len() > 0 {
+			responseMsg := &schema.Message{
+				Role:    schema.Assistant,
+				Content: fullContent.String(),
+			}
+			this.handleMessageStorage(ctx, responseMsg)
+		}
+	}()
+
+	// 需要保存 chatOpts 以便后续使用，这里先忽略未使用的变量警告
+	_ = chatOpts
+
+	return wrappedIterator
 }
 
 func (this *Agent) GetAdkAgent() adk.Agent {
@@ -196,12 +277,8 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 		Agent:           this.agent,
 	})
 
-	adkOpts := []adk.AgentRunOption{
-		adk.WithSkipTransferMessages(),
-	}
-
 	// 运行Agent并获取事件迭代器
-	iter := runner.Run(ctx, _input, adkOpts...)
+	iter := runner.Run(ctx, _input, chatOpts.adkAgentRunOptions...)
 
 	// 创建流式读取器
 	streamReader, streamWriter := schema.Pipe[*schema.Message](10)

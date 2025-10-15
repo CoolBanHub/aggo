@@ -55,11 +55,12 @@ func WithMaxStep(maxStep int) Option {
 }
 
 type chatOptions struct {
-	composeOptions    []compose.Option
-	userID            string
-	sessionID         string
-	tools             []tool.BaseTool
-	userMessageSuffix string
+	composeOptions     []compose.Option
+	userID             string
+	sessionID          string
+	tools              []tool.BaseTool
+	userMessageSuffix  string
+	adkAgentRunOptions []adk.AgentRunOption
 }
 
 type ChatOption func(*chatOptions)
@@ -84,6 +85,12 @@ func WithChatUserID(userID string) ChatOption {
 func WithChatSessionID(sessionID string) ChatOption {
 	return func(co *chatOptions) {
 		co.sessionID = sessionID
+	}
+}
+
+func WithChatAdkAgentRunOptions(options []adk.AgentRunOption) ChatOption {
+	return func(co *chatOptions) {
+		co.adkAgentRunOptions = options
 	}
 }
 
