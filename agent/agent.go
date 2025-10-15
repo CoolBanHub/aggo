@@ -177,6 +177,9 @@ func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...ad
 		EnableStreaming: input.EnableStreaming,
 	}
 
+	// 默认去掉TransferMessages
+	options = append(options, adk.WithSkipTransferMessages())
+
 	// 调用底层 adk.Agent 的 Run 方法
 	iter := this.agent.Run(ctx, processedAgentInput, options...)
 
