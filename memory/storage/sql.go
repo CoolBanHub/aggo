@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/CoolBanHub/aggo/memory"
+	"github.com/CoolBanHub/aggo/utils"
 	"gorm.io/gorm"
 )
 
@@ -74,7 +75,7 @@ func (s *SQLStore) SaveUserMemory(ctx context.Context, memory *memory.UserMemory
 
 	// 如果没有ID，生成一个
 	if memory.ID == "" {
-		memory.ID = fmt.Sprintf("mem_%d_%s", time.Now().UnixNano(), memory.UserID[:min(8, len(memory.UserID))])
+		memory.ID = utils.GetULID()
 	}
 
 	// 设置时间戳
@@ -382,7 +383,7 @@ func (s *SQLStore) SaveMessage(ctx context.Context, message *memory.Conversation
 
 	// 如果没有ID，生成一个
 	if message.ID == "" {
-		message.ID = fmt.Sprintf("%s_%d", message.UserID[:min(8, len(message.UserID))], time.Now().UnixNano())
+		message.ID = utils.GetULID()
 	}
 
 	// 设置时间戳

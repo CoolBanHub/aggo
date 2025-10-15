@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/CoolBanHub/aggo/memory"
+	"github.com/CoolBanHub/aggo/utils"
 )
 
 // MemoryStore 内存存储实现
@@ -72,7 +73,7 @@ func (m *MemoryStore) SaveUserMemory(ctx context.Context, userMemory *memory.Use
 
 	// 如果没有ID，生成一个
 	if userMemory.ID == "" {
-		userMemory.ID = fmt.Sprintf("mem_%d", time.Now().UnixNano())
+		userMemory.ID = utils.GetULID()
 	}
 
 	// 设置时间戳
@@ -394,7 +395,7 @@ func (m *MemoryStore) SaveMessage(ctx context.Context, message *memory.Conversat
 
 	// 如果没有ID，生成一个
 	if message.ID == "" {
-		message.ID = fmt.Sprintf("msg_%d", time.Now().UnixNano())
+		message.ID = utils.GetULID()
 	}
 
 	// 设置时间戳
