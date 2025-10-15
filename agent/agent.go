@@ -449,9 +449,6 @@ func (this *Agent) setupChatContext(ctx context.Context, _input []*schema.Messag
 		SessionID: chatOpts.sessionID,
 		UserID:    chatOpts.userID,
 	}
-	if this.agent != nil && this.systemPrompt != "" {
-		chatState.Input = _input[1:] // TODO 需要去掉？
-	}
 	return state.SetChatChatSate(ctx, chatState)
 }
 
