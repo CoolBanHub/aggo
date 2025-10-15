@@ -88,12 +88,6 @@ func WithChatSessionID(sessionID string) ChatOption {
 	}
 }
 
-func WithChatAdkAgentRunOptions(options []adk.AgentRunOption) ChatOption {
-	return func(co *chatOptions) {
-		co.adkAgentRunOptions = options
-	}
-}
-
 // WithUserMessageSuffix 添加用户消息后缀
 func WithUserMessageSuffix(suffix string) ChatOption {
 	return func(co *chatOptions) {
@@ -105,4 +99,13 @@ func WithChatComposeOptions(composeOptions []compose.Option) ChatOption {
 	return func(co *chatOptions) {
 		co.composeOptions = append(co.composeOptions, composeOptions...)
 	}
+}
+
+func WithChatOptions(chatOpts []ChatOption) adk.AgentRunOption {
+	return adk.WrapImplSpecificOptFn(func(t *chatOptions) {
+		for _, opt := range chatOpts {
+			opt(t)
+		}
+		return
+	})
 }

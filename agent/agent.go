@@ -114,16 +114,14 @@ func NewAgentFromADK(adkAgent adk.Agent, opts ...Option) (*Agent, error) {
 }
 
 func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.Message, error) {
-	chatOpts := this.buildChatOptions(opts...)
 
 	// 创建 AgentInput
 	agentInput := &adk.AgentInput{
 		Messages:        input,
 		EnableStreaming: false,
 	}
-
 	// 调用 Run 方法
-	iter := this.Run(ctx, agentInput, chatOpts.adkAgentRunOptions...)
+	iter := this.Run(ctx, agentInput, WithChatOptions(opts))
 
 	var response *schema.Message
 	for {
@@ -161,8 +159,11 @@ func (this *Agent) Description(ctx context.Context) string {
 }
 
 func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
+	chatOpts := &chatOptions{}
+	chatOpts = adk.GetImplSpecificOptions(chatOpts, options...)
+
 	// 预处理输入消息
-	ctx, processedInput, chatOpts, err := this.chatPreHandler(ctx, input.Messages)
+	ctx, processedInput, chatOpts, err := this.chatPreHandler(ctx, input.Messages, chatOpts)
 	if err != nil {
 		iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 		generator.Send(&adk.AgentEvent{Err: err})
@@ -250,7 +251,6 @@ func (this *Agent) GetAdkAgent() adk.Agent {
 }
 
 func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
-	chatOpts := this.buildChatOptions(opts...)
 
 	// 创建 AgentInput
 	agentInput := &adk.AgentInput{
@@ -259,7 +259,7 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 	}
 
 	// 调用 Run 方法
-	iter := this.Run(ctx, agentInput, chatOpts.adkAgentRunOptions...)
+	iter := this.Run(ctx, agentInput, WithChatOptions(opts))
 
 	// 创建流式读取器
 	streamReader, streamWriter := schema.Pipe[*schema.Message](10)
@@ -314,9 +314,13 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 	return streamReader, nil
 }
 
-func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, opts ...ChatOption) (context.Context, []*schema.Message, *chatOptions, error) {
-	chatOpts := this.buildChatOptions(opts...)
-
+func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) (context.Context, []*schema.Message, *chatOptions, error) {
+	if chatOpts.sessionID == "" {
+		chatOpts.sessionID = utils.GetULID()
+	}
+	if chatOpts.userID == "" {
+		chatOpts.userID = chatOpts.sessionID
+	}
 	// 处理消息输入（如果有内存管理器则增强消息）
 	processedInput := input
 	if this.hasMemoryManager() {
@@ -436,21 +440,6 @@ func (this *Agent) applyUserMessageSuffix(input []*schema.Message, chatOpts *cha
 	result[lastUserMsgIdx] = &lastUserMsg
 
 	return result
-}
-
-// buildChatOptions 构建聊天选项
-func (this *Agent) buildChatOptions(opts ...ChatOption) *chatOptions {
-	chatOpts := &chatOptions{}
-	for _, opt := range opts {
-		opt(chatOpts)
-	}
-	if chatOpts.sessionID == "" {
-		chatOpts.sessionID = utils.GetULID()
-	}
-	if chatOpts.userID == "" {
-		chatOpts.userID = chatOpts.sessionID
-	}
-	return chatOpts
 }
 
 // setupChatContext 设置聊天上下文状态
