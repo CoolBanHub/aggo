@@ -114,25 +114,16 @@ func NewAgentFromADK(adkAgent adk.Agent, opts ...Option) (*Agent, error) {
 }
 
 func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.Message, error) {
-	ctx, _input, chatOpts, err := this.chatPreHandler(ctx, input, opts...)
-	if err != nil {
-		return nil, err
-	}
-	_ = chatOpts
+	chatOpts := this.buildChatOptions(opts...)
 
-	// 创建Runner，禁用流式输出
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{
+	// 创建 AgentInput
+	agentInput := &adk.AgentInput{
+		Messages:        input,
 		EnableStreaming: false,
-		Agent:           this.agent,
-	})
-
-	// 运行Agent
-
-	adkOpts := []adk.AgentRunOption{
-		adk.WithSkipTransferMessages(),
 	}
 
-	iter := runner.Run(ctx, _input, adkOpts...)
+	// 调用 Run 方法
+	iter := this.Run(ctx, agentInput, chatOpts.adkAgentRunOptions...)
 
 	var response *schema.Message
 	for {
@@ -147,13 +138,8 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 		// 处理输出事件
 		if event.Output != nil && event.Output.MessageOutput != nil {
 			mv := event.Output.MessageOutput
-			if mv.Role == schema.Assistant {
-				// 获取完整消息（对于非流式输出，这里直接返回Message）
-				msg, err := mv.GetMessage()
-				if err != nil {
-					return nil, err
-				}
-				response = msg
+			if mv.Role == schema.Assistant && mv.Message != nil {
+				response = mv.Message
 			}
 		}
 
@@ -163,8 +149,6 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 		}
 	}
 
-	// 存储响应消息
-	this.handleMessageStorage(ctx, response)
 	return response, nil
 }
 
@@ -266,19 +250,16 @@ func (this *Agent) GetAdkAgent() adk.Agent {
 }
 
 func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
-	ctx, _input, chatOpts, err := this.chatPreHandler(ctx, input, opts...)
-	if err != nil {
-		return nil, err
-	}
-	_ = chatOpts
-	// 创建Runner，启用流式输出
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{
-		EnableStreaming: true,
-		Agent:           this.agent,
-	})
+	chatOpts := this.buildChatOptions(opts...)
 
-	// 运行Agent并获取事件迭代器
-	iter := runner.Run(ctx, _input, chatOpts.adkAgentRunOptions...)
+	// 创建 AgentInput
+	agentInput := &adk.AgentInput{
+		Messages:        input,
+		EnableStreaming: true,
+	}
+
+	// 调用 Run 方法
+	iter := this.Run(ctx, agentInput, chatOpts.adkAgentRunOptions...)
 
 	// 创建流式读取器
 	streamReader, streamWriter := schema.Pipe[*schema.Message](10)
@@ -286,8 +267,6 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 	// 开启协程处理流式事件
 	go func() {
 		defer streamWriter.Close()
-
-		var fullContent strings.Builder
 
 		for {
 			event, ok := iter.Next()
@@ -302,26 +281,26 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 			// 处理流式输出事件
 			if event.Output != nil && event.Output.MessageOutput != nil {
 				mv := event.Output.MessageOutput
-				if mv.Role == schema.Assistant && mv.IsStreaming {
-					// 处理流式数据
-					for {
-						chunk, streamErr := mv.MessageStream.Recv()
-						if streamErr == io.EOF {
-							break
-						}
-						if streamErr != nil {
-							streamWriter.Send(&schema.Message{}, streamErr)
-							return
-						}
+				if mv.Role == schema.Assistant {
+					if mv.IsStreaming && mv.MessageStream != nil {
+						// 处理流式数据
+						for {
+							chunk, streamErr := mv.MessageStream.Recv()
+							if streamErr == io.EOF {
+								break
+							}
+							if streamErr != nil {
+								streamWriter.Send(&schema.Message{}, streamErr)
+								return
+							}
 
-						// 发送流式数据块
-						streamWriter.Send(chunk, nil)
-						fullContent.WriteString(chunk.Content)
+							// 发送流式数据块
+							streamWriter.Send(chunk, nil)
+						}
+					} else if mv.Message != nil {
+						// 非流式输出，直接发送
+						streamWriter.Send(mv.Message, nil)
 					}
-				} else if mv.Role == schema.Assistant && !mv.IsStreaming {
-					// 非流式输出，直接发送
-					streamWriter.Send(mv.Message, nil)
-					fullContent.WriteString(mv.Message.Content)
 				}
 			}
 
@@ -329,15 +308,6 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 			if event.Action != nil && event.Action.Exit {
 				break
 			}
-		}
-
-		// 存储完整的响应消息
-		if this.hasMemoryManager() && fullContent.Len() > 0 {
-			responseMsg := &schema.Message{
-				Role:    schema.Assistant,
-				Content: fullContent.String(),
-			}
-			this.handleMessageStorage(ctx, responseMsg)
 		}
 	}()
 
