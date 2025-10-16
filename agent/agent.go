@@ -147,6 +147,10 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 		}
 	}
 
+	if response == nil {
+		return nil, fmt.Errorf("generate response is nil")
+	}
+
 	return response, nil
 }
 
