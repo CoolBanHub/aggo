@@ -91,9 +91,9 @@ func main() {
 
 	// 3. 将子 Agent 注册到主 Agent
 	routerAgent, err := adk.SetSubAgents(ctx, mainAgent, []adk.Agent{
-		mathAgent,
-		weatherAgent,
-		timeAgent,
+		adk.AgentWithOptions(ctx, mathAgent, adk.WithDisallowTransferToParent()),
+		adk.AgentWithOptions(ctx, weatherAgent, adk.WithDisallowTransferToParent()),
+		adk.AgentWithOptions(ctx, timeAgent, adk.WithDisallowTransferToParent()),
 	})
 	if err != nil {
 		log.Fatalf("设置子 Agent 失败: %v", err)
