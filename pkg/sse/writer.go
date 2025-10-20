@@ -169,7 +169,7 @@ func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema
 		if newChunk == nil {
 			continue
 		}
-		b, err := sonic.Marshal(fn(chunk))
+		b, err := sonic.Marshal(newChunk)
 		if err != nil {
 			return err
 		}
