@@ -20,9 +20,14 @@ func getChatByOpenai(o *Option) (model.ToolCallingChatModel, error) {
 	_model := o.Model
 
 	param := &openai.ChatModelConfig{
-		APIKey:  o.APIKey, // OpenAI API 密钥
-		BaseURL: o.BaseUrl,
-		Model:   _model, // 使用的模型版本
+		APIKey:          o.APIKey, // OpenAI API 密钥
+		BaseURL:         o.BaseUrl,
+		Model:           _model, // 使用的模型版本
+		ReasoningEffort: o.ReasoningEffortLevel,
+	}
+
+	if o.ReasoningEffortLevel != "" {
+		param.ReasoningEffort = o.ReasoningEffortLevel
 	}
 
 	if o.MaxTokens > 0 {

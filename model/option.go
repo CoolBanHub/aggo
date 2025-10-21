@@ -1,5 +1,7 @@
 package model
 
+import "github.com/cloudwego/eino-ext/components/model/openai"
+
 type Option struct {
 	Platform   string
 	Model      string
@@ -7,6 +9,9 @@ type Option struct {
 	APIKey     string `json:"apiKey"`
 	Dimensions int
 	MaxTokens  int
+
+	//openai参数
+	ReasoningEffortLevel openai.ReasoningEffortLevel
 }
 
 type OptionFunc func(option *Option)
@@ -44,5 +49,10 @@ func WithMaxTokens(maxTokens int) OptionFunc {
 func WithDimensions(dimensions int) OptionFunc {
 	return func(option *Option) {
 		option.Dimensions = dimensions
+	}
+}
+func WithReasoningEffortLevel(reasoningEffortLevel openai.ReasoningEffortLevel) OptionFunc {
+	return func(option *Option) {
+		option.ReasoningEffortLevel = reasoningEffortLevel
 	}
 }
