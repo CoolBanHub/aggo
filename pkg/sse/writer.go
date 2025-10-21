@@ -156,7 +156,7 @@ func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema
 		chunk, err := stream.Recv()
 		if err != nil {
 			if err == io.EOF {
-				return nil // 正常结束
+				return w.WriteDone() // 正常结束
 			}
 			return err
 		}
@@ -178,5 +178,4 @@ func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema
 			return err
 		}
 	}
-	return w.WriteDone()
 }
