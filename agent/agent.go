@@ -166,6 +166,7 @@ func (this *Agent) Description(ctx context.Context) string {
 	return this.agent.Description(ctx)
 }
 
+// Run adk的Run入口
 func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
 	// 预处理并获取迭代器
 	ctx, iter, err := this.runAgentWithPreprocess(ctx, input.Messages, input.EnableStreaming, options...)
@@ -215,10 +216,7 @@ func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...ad
 	return wrappedIterator
 }
 
-func (this *Agent) GetAdkAgent() adk.Agent {
-	return this
-}
-
+// Stream 流式输出，如果需要输出具体的agent流转详情等，建议使用Run方法
 func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
 	// 预处理并获取迭代器
 	ctx, iter, err := this.runAgentWithPreprocess(ctx, input, true, WithChatOptions(opts))
@@ -286,6 +284,10 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 	}()
 
 	return streamReader, nil
+}
+
+func (this *Agent) GetAdkAgent() adk.Agent {
+	return this
 }
 
 // collectAssistantContent 从事件中收集助手消息内容

@@ -1,365 +1,349 @@
-# AGGO - AI智能代理框架
+# AGGO - AI Agent Go Framework
 
-AGGO是一个基于Go语言构建的智能AI代理框架，集成了对话AI、知识管理、记忆系统和工具调用等功能，基于CloudWeGo Eino框架开发。
+[![Go Version](https://img.shields.io/badge/Go-%3E%3D%201.24-blue)](https://golang.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![CloudWeGo Eino](https://img.shields.io/badge/powered%20by-CloudWeGo%20Eino-orange)](https://github.com/cloudwego/eino)
 
-## 🚀 核心特性
+AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架构建的企业级 AI Agent 框架，提供完整的对话 AI、知识管理、记忆系统和工具调用能力。
 
-- **智能对话代理**: 基于React模式的AI代理，支持工具调用和多轮对话
-- **知识库管理**: 双重存储架构，结合传统数据库和向量数据库实现高效的语义搜索
-- **记忆系统**: 会话级记忆管理，支持长期记忆存储和智能摘要
-- **工具集成**: 丰富的工具生态，包括知识库操作、系统命令执行、数据库操作等
-- **多数据库支持**: 支持SQLite、MySQL、PostgreSQL等多种数据库
-- **向量搜索**: 支持Milvus和PostgreSQL向量数据库的语义相似度搜索
-- **实时通信**: 支持Server-Sent Events (SSE) 流式响应
-- **可观测性**: 集成Langfuse进行AI应用监控和追踪
+## ✨ 核心特性
+
+### 🤖 智能代理系统
+- **React 模式代理**: 基于 CloudWeGo Eino ADK 的 ReAct (Reasoning + Acting) 模式实现
+- **工具调用**: 原生支持多种工具集成，包括知识库、数据库、Shell 命令等
+- **多轮对话**: 上下文感知的多轮对话能力
+- **流式响应**: 基于 SSE (Server-Sent Events) 的实时流式输出
+
+### 🧠 记忆管理系统
+- **会话记忆**: 自动管理会话级别的对话历史
+- **长期记忆**: 支持用户级别的长期记忆存储
+- **智能摘要**: 自动生成会话摘要，优化上下文长度
+- **多种检索策略**: 支持 LastN、全部、摘要等多种记忆检索模式
+- **灵活存储**: 支持内存存储和 SQL 存储（MySQL、PostgreSQL、SQLite）
+
+### 📚 向量数据库集成
+- **Milvus**: 企业级向量数据库支持，适合大规模生产环境
+- **PostgreSQL + pgvector**: 轻量级向量搜索方案
+- **统一接口**: 提供一致的向量存储和检索 API
+
+### 🛠️ 丰富的工具生态
+- **知识库工具**: 文档加载、语义搜索、向量检索
+- **数据库工具**: MySQL、PostgreSQL 操作工具
+- **Shell 工具**: 安全的系统命令执行
+- **可扩展**: 易于集成自定义工具
+
+### 📊 可观测性
+- **Langfuse 集成**: AI 应用监控和追踪
+- **日志管理**: 结构化日志记录
+- **性能监控**: 支持 OpenTelemetry 追踪
 
 ## 🏗️ 系统架构
 
-### 核心组件
-
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Agent系统     │    │   知识管理系统   │    │   记忆系统      │
-│                 │    │                 │    │                 │
-│ • 对话代理      │    │ • 文档处理      │    │ • 会话记忆      │
-│ • 工具调用      │◄───┤ • 向量搜索      │    │ • 长期记忆      │
-│ • React模式     │    │ • 语义检索      │    │ • 智能摘要      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        AGGO Framework                             │
+│                                                                   │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
+│  │   Agent Layer   │  │  Memory Layer   │  │   Tool Layer    │  │
+│  │                 │  │                 │  │                 │  │
+│  │ • ReAct Agent   │◄─┤ • Session Mem   │  │ • Knowledge     │  │
+│  │ • Multi-turn    │  │ • Long-term Mem │  │ • Database      │  │
+│  │ • Streaming     │  │ • Auto Summary  │  │ • Shell Exec    │  │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  │
+│           │                    │                    │            │
+│           └────────────────────┼────────────────────┘            │
+│                                │                                 │
+│           ┌────────────────────┴────────────────────┐            │
+│           │         Storage & Vector Layer          │            │
+│           │                                          │            │
+│           │  ┌──────────────┐  ┌─────────────────┐  │            │
+│           │  │   Vector DB  │  │  Memory Store   │  │            │
+│           │  │              │  │                 │  │            │
+│           │  │ • Milvus     │  │ • In-Memory     │  │            │
+│           │  │ • PostgreSQL │  │ • SQL (GORM)    │  │            │
+│           │  └──────────────┘  └─────────────────┘  │            │
+│           └──────────────────────────────────────────┘            │
+│                                                                   │
+│           ┌──────────────────────────────────────────┐            │
+│           │         Model & Embedding Layer          │            │
+│           │                                          │            │
+│           │  • OpenAI Compatible Chat Models         │            │
+│           │  • OpenAI Compatible Embedding Models    │            │
+│           │  • Support Reasoning Parameters          │            │
+│           └──────────────────────────────────────────┘            │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
                                  │
-                    ┌─────────────────┐
-                    │   存储层        │
-                    │                 │
-                    │ • GORM (元数据) │
-                    │ • Milvus (向量) │
-                    │ • Azure OpenAI │
-                    └─────────────────┘
+                    ┌────────────┴────────────┐
+                    │   Observability Layer   │
+                    │                         │
+                    │  • Langfuse Tracing     │
+                    │  • Structured Logging   │
+                    │  • SSE Event Streaming  │
+                    └─────────────────────────┘
 ```
 
-### 双重存储架构
+## 📦 安装
 
-- **存储层 (Storage)**: 使用GORM管理文档元数据、内容和时间戳
-- **向量层 (VectorDB)**: 使用Milvus存储和搜索1024维度的向量数据
-- **知识管理器**: 协调两个存储层，提供统一的知识库管理接口
+### 前置要求
 
-## 📦 安装依赖
+- **Go**: >= 1.24.0
+- **向量数据库** (二选一):
+  - [Milvus](https://milvus.io/) >= 2.6 (推荐用于生产环境)
+  - [PostgreSQL](https://www.postgresql.org/) >= 14 + [pgvector](https://github.com/pgvector/pgvector) 扩展
+- **AI 模型服务**:
+  - OpenAI API 兼容的服务 (OpenAI, Azure OpenAI, 或其他兼容服务)
+- **可选依赖**:
+  - [Langfuse](https://langfuse.com/) - AI 应用监控和追踪
+
+### 安装框架
+
+```bash
+go get github.com/CoolBanHub/aggo
+```
+
+### 安装依赖
 
 ```bash
 go mod download
 ```
 
-### 外部依赖
-
-- **向量数据库**: Milvus或PostgreSQL with pgvector扩展
-- **关系型数据库**: MySQL、PostgreSQL或SQLite（可选其一）
-- **AI服务**: Azure OpenAI用于聊天和嵌入向量生成
-- **监控服务**: Langfuse（可选，用于AI应用监控）
-
 ## 🚀 快速开始
 
-### 1. 基础知识库代理示例
+### 1. 基础 AI 代理示例
 
-```bash
-go run example/knowledge_agent_tool_test/main.go
-```
-
-### 2. 记忆系统测试
-
-```bash
-go run example/mem_agent_test/main.go
-```
-
-### 3. SSE流式响应示例
-
-```bash
-go run example/sse/main.go
-```
-
-## 💡 使用示例
-
-### 创建带知识库工具的AI代理
+创建一个简单的对话代理：
 
 ```go
 package main
 
 import (
-	"context"
-	"log"
-	"os"
+    "context"
+    "log"
 
-	"github.com/CoolBanHub/aggo/agent"
-	"github.com/CoolBanHub/aggo/database/milvus"
-	"github.com/CoolBanHub/aggo/memory"
-	memoryStorage "github.com/CoolBanHub/aggo/memory/storage"
-	"github.com/CoolBanHub/aggo/model"
-	"github.com/CoolBanHub/aggo/tools"
-	"github.com/CoolBanHub/aggo/utils"
-	"github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive"
-	"github.com/cloudwego/eino/components/retriever"
-	"github.com/cloudwego/eino/flow/retriever/router"
-	"github.com/cloudwego/eino/schema"
-	"github.com/milvus-io/milvus/client/v2/milvusclient"
+    "github.com/CoolBanHub/aggo/agent"
+    "github.com/CoolBanHub/aggo/model"
+    "github.com/CoolBanHub/aggo/memory"
+    memoryStorage "github.com/CoolBanHub/aggo/memory/storage"
+    "github.com/cloudwego/eino/schema"
 )
 
 func main() {
-	ctx := context.Background()
+    ctx := context.Background()
 
-	// 1. 创建聊天模型和嵌入模型
-	cm, err := model.NewChatModel(
-		model.WithBaseUrl(os.Getenv("BaseUrl")),
-		model.WithAPIKey(os.Getenv("APIKey")),
-		model.WithModel("gpt-4o-mini"),
-	)
-	if err != nil {
-		log.Fatalf("创建聊天模型失败: %v", err)
-	}
+    // 创建聊天模型
+    cm, _ := model.NewChatModel(
+        model.WithBaseUrl("https://api.openai.com/v1"),
+        model.WithAPIKey("your-api-key"),
+        model.WithModel("gpt-4"),
+    )
 
-	em, err := model.NewEmbModel(
-		model.WithBaseUrl(os.Getenv("BaseUrl")),
-		model.WithAPIKey(os.Getenv("APIKey")),
-		model.WithModel("text-embedding-3-large"),
-		model.WithDimensions(1024),
-	)
-	if err != nil {
-		log.Fatalf("创建嵌入模型失败: %v", err)
-	}
+    // 创建记忆管理器
+    memoryStore := memoryStorage.NewMemoryStore()
+    memoryManager, _ := memory.NewMemoryManager(cm, memoryStore, &memory.MemoryConfig{
+        MemoryLimit: 10,
+        Retrieval:   memory.RetrievalLastN,
+    })
 
-	// 2. 创建 Milvus 向量数据库
-	client, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
-		Address: "127.0.0.1:19530",
-		DBName:  "", // 使用默认数据库
-	})
-	if err != nil {
-		log.Fatalf("创建 Milvus 客户端失败: %v", err)
-	}
+    // 创建代理
+    agent, _ := agent.NewAgent(ctx, cm,
+        agent.WithMemoryManager(memoryManager),
+        agent.WithSystemPrompt("你是一个友好的 AI 助手"),
+    )
 
-	databaseDB, err := milvus.NewMilvus(milvus.MilvusConfig{
-		Client:         client,
-		CollectionName: "aggo_knowledge_vectors",
-		EmbeddingDim:   1024,
-		Embedding:      em,
-	})
-	if err != nil {
-		log.Fatalf("创建数据库失败: %v", err)
-	}
+    // 进行对话
+    response, _ := agent.Generate(ctx, []*schema.Message{
+        schema.UserMessage("你好，介绍一下你自己"),
+    })
 
-	// 3. 创建记忆管理器
-	memoryStore := memoryStorage.NewMemoryStore()
-	memoryManager, err := memory.NewMemoryManager(cm, memoryStore, &memory.MemoryConfig{
-		EnableSessionSummary: false,
-		EnableUserMemories:   false,
-		MemoryLimit:          8,
-		Retrieval:            memory.RetrievalLastN,
-	})
-	if err != nil {
-		log.Fatalf("创建记忆管理器失败: %v", err)
-	}
-	defer memoryManager.Close()
-
-	// 4. 创建检索路由器
-	routerRetriever, err := router.NewRetriever(ctx, &router.Config{
-		Retrievers: map[string]retriever.Retriever{
-			"vector": databaseDB,
-		},
-		Router: func(ctx context.Context, query string) ([]string, error) {
-			return []string{"vector"}, nil
-		},
-		FusionFunc: func(ctx context.Context, result map[string][]*schema.Document) ([]*schema.Document, error) {
-			docsList := make([]*schema.Document, 0)
-			for _, v := range result {
-				docsList = append(docsList, v...)
-			}
-			return docsList, nil
-		},
-	})
-	if err != nil {
-		log.Fatalf("创建检索路由器失败: %v", err)
-	}
-
-	// 5. 创建带知识库工具的 AI 代理
-	mainAgent, err := agent.NewAgent(ctx, cm,
-		agent.WithMemoryManager(memoryManager),
-		agent.WithTools(tools.GetKnowledgeTools(databaseDB, routerRetriever, &retriever.Options{
-			TopK:           utils.ValueToPtr(10),
-			ScoreThreshold: utils.ValueToPtr(0.1), // 默认相似度阈值
-		})),
-		agent.WithSystemPrompt("你是一个技术专家助手。当用户询问技术问题时，你应该使用 load_documents 和 search_documents 工具来加载和搜索相关信息。"),
-	)
-	if err != nil {
-		log.Fatalf("创建 AI 代理失败: %v", err)
-	}
-
-	// 6. 使用 AI 代理进行对话
-	userID := utils.GetUUIDNoDash()
-	sessionID := utils.GetUUIDNoDash()
-
-	// 用户可以通过对话要求 AI 加载文档和搜索
-	response, err := mainAgent.Generate(ctx, []*schema.Message{
-		schema.UserMessage("请加载一些关于Go语言的文档，然后告诉我Go语言的特点。"),
-	}, agent.WithChatUserID(userID), agent.WithChatSessionID(sessionID))
-
-	if err != nil {
-		log.Fatalf("生成回答失败: %v", err)
-	}
-
-	log.Printf("AI助手: %s", response.Content)
+    log.Printf("AI: %s", response.Content)
 }
 ```
 
-### 知识库工具详解
+### 2. 运行示例程序
 
-AGGO 提供了两个核心知识库工具：
+```bash
+# 知识库代理示例
+go run example/knowledge_agent_tool_test/main.go
 
-#### 1. load_documents 工具
+# 记忆系统示例
+go run example/mem_agent_test/main.go
 
-用于将文档加载到知识库中，支持多种数据源：
+# SSE 流式响应示例
+go run example/sse/main.go
 
-**支持的文档来源**：
-
-- `file`: 本地文件
-- `url`: 网络URL
-
-**使用示例**：
-
-```go
-// AI 可以通过自然语言调用此工具
-response, err := agent.Generate(ctx, []*schema.Message{
-schema.UserMessage("请加载 https://example.com/doc.pdf 这个文档到知识库"),
-})
+# ADK 使用示例
+go run example/adk_test/main.go
 ```
 
-#### 2. search_documents 工具
+## 💡 核心功能详解
 
-用于在知识库中搜索相关文档：
+### 代理配置选项
 
-**搜索配置**：
-
-- **TopK**: 返回最相关的前K个结果（默认10个）
-- **ScoreThreshold**: 相似度阈值（默认0.1）
-- **支持向量相似度搜索**
-
-**使用示例**：
+AGGO 提供了灵活的代理配置选项：
 
 ```go
-// AI 可以通过自然语言调用此工具
-response, err := agent.Generate(ctx, []*schema.Message{
-schema.UserMessage("搜索关于Go语言特性的文档"),
-})
+agent, err := agent.NewAgent(ctx, chatModel,
+    agent.WithMemoryManager(memoryManager),       // 设置记忆管理器
+    agent.WithSystemPrompt("你是一个AI助手"),      // 设置系统提示词
+    agent.WithTools(tools...),                    // 添加工具
+    agent.WithMaxStep(10),                         // 设置最大推理步数
+)
 ```
 
-#### 工具配置选项
+### 记忆管理配置
 
 ```go
-// 创建知识库工具时可以自定义配置
-tools.GetKnowledgeTools(databaseDB, routerRetriever, &retriever.Options{
-TopK:           utils.ValueToPtr(10), // 搜索结果数量
-ScoreThreshold: utils.ValueToPtr(0.1), // 相似度阈值
-})
+memoryConfig := &memory.MemoryConfig{
+    EnableSessionSummary: true,              // 启用会话摘要
+    EnableUserMemories:   true,              // 启用用户长期记忆
+    MemoryLimit:          10,                // 记忆条数限制
+    Retrieval:            memory.RetrievalLastN,  // 检索策略
+}
+
+memoryManager, err := memory.NewMemoryManager(
+    chatModel,
+    memoryStore,
+    memoryConfig,
+)
 ```
 
-### 基本代理创建示例
+**记忆检索策略**:
+- `RetrievalLastN`: 返回最近 N 条记忆
+- `RetrievalAll`: 返回所有记忆
+- `RetrievalSummary`: 仅返回摘要
+
+### 向量数据库集成
+
+#### Milvus 配置
 
 ```go
 import (
-"context"
-"github.com/CoolBanHub/aggo/agent"
-"github.com/CoolBanHub/aggo/model"
-"github.com/CoolBanHub/aggo/memory"
-memoryStorage "github.com/CoolBanHub/aggo/memory/storage"
+    "github.com/CoolBanHub/aggo/database/milvus"
+    "github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
-func createBasicAgent() (*agent.Agent, error) {
-ctx := context.Background()
-
-// 创建聊天模型
-cm, err := model.NewChatModel()
-if err != nil {
-return nil, err
-}
-
-// 创建记忆存储
-memoryStore := memoryStorage.NewMemoryStore()
-memoryManager, err := memory.NewMemoryManager(cm, memoryStore, &memory.MemoryConfig{
-MemoryLimit: 10,
-Retrieval:   memory.RetrievalLastN,
-})
-if err != nil {
-return nil, err
-}
-
-// 创建基本代理
-return agent.NewAgent(ctx, cm,
-agent.WithMemoryManager(memoryManager),
-agent.WithSystemPrompt("你是一个乐于助人的AI助手。"),
-)
-}
-```
-
-## 🔧 配置说明
-
-### 向量维度配置
-
-系统统一使用**1024维度**向量：
-
-```go
-// 嵌入模型配置
-em, err := model.NewEmbModel(
-model.WithModel("text-embedding-3-large"),
-model.WithDimensions(1024), // 限制输出维度为1024
-)
-
-// Milvus配置
-milvusConfig := milvus.MilvusConfig{
-EmbeddingDim: 1024, // 匹配嵌入维度
-Embedding:    em,
-}
-```
-
-### 数据库配置
-
-#### SQLite (开发环境)
-
-```go
-storage, err := storage.NewSQLiteStorage("knowledge.db")
-```
-
-#### MySQL (生产环境)
-
-```go
-storage, err := storage.NewMySQLStorage("localhost", 3306, "aggo", "user", "password")
-```
-
-#### 向量数据库配置
-
-**Milvus向量数据库:**
-
-```go
 // 创建 Milvus 客户端
-client, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
-Address: "127.0.0.1:19530",
-DBName:  "", // 空字符串使用默认数据库
+client, _ := milvusclient.New(ctx, &milvusclient.ClientConfig{
+    Address: "127.0.0.1:19530",
+    DBName:  "",  // 使用默认数据库
 })
 
-// 创建 Milvus 数据库实例
-milvusDB, err := milvus.NewMilvus(milvus.MilvusConfig{
-Client:         client,
-CollectionName: "aggo_knowledge_vectors",
-EmbeddingDim:   1024,
-Embedding:      em, // 嵌入模型实例
+// 创建向量数据库实例
+vectorDB, _ := milvus.NewMilvus(milvus.MilvusConfig{
+    Client:         client,
+    CollectionName: "knowledge_vectors",
+    EmbeddingDim:   1024,
+    Embedding:      embeddingModel,
 })
 ```
 
-**PostgreSQL向量数据库:**
+#### PostgreSQL + pgvector 配置
 
 ```go
-// 创建 PostgreSQL 数据库实例
-postgresDB, err := postgres.NewPostgres(postgres.PostgresConfig{
-Client:          gormDB, // GORM 数据库实例
-CollectionName:  "aggo_knowledge_vectors",
-VectorDimension: 1024,
-Embedding:       em, // 嵌入模型实例
+import "github.com/CoolBanHub/aggo/database/postgres"
+
+vectorDB, _ := postgres.NewPostgres(postgres.PostgresConfig{
+    Client:          gormDB,  // GORM 数据库实例
+    CollectionName:  "knowledge_vectors",
+    VectorDimension: 1024,
+    Embedding:       embeddingModel,
 })
+```
+
+### 模型配置
+
+#### 聊天模型
+
+```go
+import "github.com/CoolBanHub/aggo/model"
+
+chatModel, _ := model.NewChatModel(
+    model.WithBaseUrl("https://api.openai.com/v1"),
+    model.WithAPIKey("your-api-key"),
+    model.WithModel("gpt-4"),
+    model.WithReasoningEffort("medium"),  // 推理强度: low, medium, high
+)
+```
+
+#### 嵌入模型
+
+```go
+embeddingModel, _ := model.NewEmbModel(
+    model.WithBaseUrl("https://api.openai.com/v1"),
+    model.WithAPIKey("your-api-key"),
+    model.WithModel("text-embedding-3-large"),
+    model.WithDimensions(1024),
+)
+```
+
+### 工具集成
+
+#### 知识库工具
+
+```go
+import "github.com/CoolBanHub/aggo/tools"
+
+knowledgeTools := tools.GetKnowledgeTools(vectorDB, retriever, &retriever.Options{
+    TopK:           utils.ValueToPtr(10),
+    ScoreThreshold: utils.ValueToPtr(0.1),
+})
+```
+
+**功能**:
+- 文档加载 (支持文件和 URL)
+- 语义搜索
+- 向量检索
+
+#### 数据库工具
+
+```go
+// MySQL 工具
+mysqlTool := tools.GetMySQLTool(mysqlDB)
+
+// PostgreSQL 工具
+postgresTool := tools.GetPostgresTool(postgresDB)
+```
+
+#### Shell 工具
+
+```go
+shellTool := tools.GetShellTool()  // 安全的系统命令执行
+```
+
+### SSE 流式响应
+
+```go
+import "github.com/CoolBanHub/aggo/pkg/sse"
+
+// 创建 SSE 写入器
+writer := sse.NewSSEWriter(w, r)
+defer writer.WriteDone()
+
+// 流式生成
+agent.Stream(ctx, messages,
+    agent.WithStreamCallback(func(chunk string) {
+        writer.WriteData(chunk)
+    }),
+)
+```
+
+## 🔧 环境变量配置
+
+创建 `.env` 文件配置必要的环境变量：
+
+```bash
+# OpenAI API 配置
+OPENAI_API_KEY=your-api-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+
+# Milvus 配置
+MILVUS_ADDRESS=127.0.0.1:19530
+
+# Langfuse 配置 (可选)
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
 ## 🛠️ 开发指南
@@ -368,94 +352,180 @@ Embedding:       em, // 嵌入模型实例
 
 ```
 aggo/
-├── agent/              # AI代理系统
-│   ├── agent.go           # 主代理实现 (已重构消息处理与内存管理)
-│   ├── knowledge_agent.go # 知识型代理
-│   └── option.go          # 配置选项
-├── knowledge/          # 知识管理系统
-│   ├── manager.go         # 知识库管理器
-│   ├── interfaces.go      # 接口定义
-│   ├── storage/           # 存储层
-│   ├── vectordb/          # 向量数据库
-│   └── readers/           # 文档读取器
-├── memory/             # 记忆系统
-├── model/              # AI模型封装
-│   ├── chat.go            # 聊天模型
-│   └── embedding.go       # 嵌入模型
-├── tools/              # 工具集
-│   ├── knowledge_tool.go      # 知识管理工具 (已更新相似度阈值)
-│   ├── knowledge_reasoning_tools.go # 知识推理工具
-│   ├── mysql_tool.go          # MySQL数据库工具
-│   ├── postgres_tool.go       # PostgreSQL数据库工具
-│   └── shell_tool.go          # 系统命令工具
-├── pkg/                # 公共包
-│   ├── sse/               # Server-Sent Events支持
-│   └── langfuse/          # Langfuse监控集成
-└── example/            # 示例代码
+├── agent/                      # AI 代理系统
+│   ├── agent.go                   # ReAct 代理实现
+│   ├── option.go                  # 代理配置选项
+│   └── utils.go                   # 工具函数
+│
+├── memory/                     # 记忆管理系统
+│   ├── manager.go                 # 记忆管理器
+│   ├── storage.go                 # 存储接口
+│   ├── types.go                   # 类型定义
+│   ├── session_summary_generator.go  # 会话摘要生成器
+│   ├── summary_trigger_manager.go    # 摘要触发管理器
+│   ├── user_memory_analyzer.go       # 用户记忆分析器
+│   └── storage/                   # 存储实现
+│       ├── memory.go                 # 内存存储
+│       ├── sql.go                    # SQL 存储 (GORM)
+│       └── sql_models.go             # 数据模型
+│
+├── database/                   # 向量数据库
+│   ├── database.go                # 数据库接口
+│   ├── milvus/                    # Milvus 实现
+│   │   ├── milvus.go                 # Milvus 客户端
+│   │   ├── option.go                 # 配置选项
+│   │   └── utils.go                  # 工具函数
+│   └── postgres/                  # PostgreSQL + pgvector 实现
+│       ├── postgres.go               # PostgreSQL 客户端
+│       ├── option.go                 # 配置选项
+│       └── utils.go                  # 工具函数
+│
+├── model/                      # AI 模型封装
+│   ├── chat.go                    # 聊天模型 (支持推理强度参数)
+│   ├── embedding.go               # 嵌入模型
+│   └── option.go                  # 模型配置选项
+│
+├── tools/                      # 工具集
+│   ├── knowledge_tool.go             # 知识库操作工具
+│   ├── knowledge_reasoning_tools.go  # 知识推理工具
+│   ├── mysql_tool.go                 # MySQL 数据库工具
+│   ├── postgres_tool.go              # PostgreSQL 数据库工具
+│   ├── shell_tool.go                 # Shell 命令执行工具
+│   └── example_tools.go              # 示例工具
+│
+├── pkg/                        # 公共包
+│   ├── sse/                       # Server-Sent Events
+│   │   ├── sse.go                    # SSE 核心实现
+│   │   ├── event.go                  # 事件定义
+│   │   └── writer.go                 # SSE 写入器
+│   └── langfuse/                  # Langfuse 可观测性
+│       └── langfuse.go               # Langfuse 客户端
+│
+├── utils/                      # 工具函数
+│   ├── utils.go                   # 通用工具
+│   ├── uuid.go                    # UUID 生成
+│   ├── ulid.go                    # ULID 生成
+│   ├── float.go                   # 浮点数处理
+│   └── convert.go                 # 类型转换
+│
+├── state/                      # 状态管理
+│   └── chat.go                    # 聊天状态
+│
+├── config/                     # 配置管理
+│   └── config.go                  # 配置定义
+│
+└── example/                    # 示例代码
+    ├── knowledge_agent_tool_test/ # 知识库代理示例
+    ├── mem_agent_test/            # 记忆系统示例
+    ├── sse/                       # SSE 流式响应示例
+    ├── adk_test/                  # ADK 使用示例
+    ├── callback_test/             # 回调示例
+    └── tool_test/                 # 工具测试示例
 ```
 
 ### 构建和测试
 
 ```bash
-# 构建所有包
+# 构建项目
 go build ./...
 
-# 运行所有测试
+# 运行测试
 go test ./...
 
-# 运行特定模块测试
-go test -v ./knowledge/...
+# 运行特定包测试
 go test -v ./agent/...
+go test -v ./memory/...
+go test -v ./database/...
 
 # 运行示例
 go run example/knowledge_agent_tool_test/main.go
-
-# 运行SSE示例
+go run example/mem_agent_test/main.go
 go run example/sse/main.go
 ```
 
-## 🐛 常见问题
+## 🐛 故障排除
 
-### 向量维度不匹配错误
+### 向量维度不匹配
 
-**错误信息**: `the num_rows (N) of field (vector) is not equal to passed num_rows (M)`
+**问题**: 向量维度不匹配导致插入失败
 
 **解决方案**:
+- 确保嵌入模型配置的 `Dimensions` 与向量数据库的 `EmbeddingDim` 一致
+- 推荐统一使用 1024 维度 (`text-embedding-3-large` 模型)
 
-1. 确保Azure OpenAI配置中设置了正确的维度限制
-2. 检查Milvus的`EmbeddingDim`配置是否与实际嵌入维度匹配
-3. 临时禁用文档分块功能进行调试: `EnableChunking: false`
+### Milvus 连接失败
 
-### Milvus连接错误
+**问题**: 无法连接到 Milvus 服务
 
-**错误信息**: `database not found[database=xxx]`
+**解决方案**:
+- 检查 Milvus 服务是否正常运行: `docker ps`
+- 使用 `DBName: ""` 连接默认数据库
+- 确认端口 19530 未被占用
 
-**解决方案**: 使用空字符串连接默认数据库: `DBName: ""`
+### PostgreSQL pgvector 扩展未安装
 
-### GORM日志错误
+**问题**: `extension "vector" does not exist`
 
-**错误信息**: `nil pointer dereference`
-
-**解决方案**: 使用`logger.Default.LogMode()`而不是`config.Logger.LogMode()`
-
-### PostgreSQL向量数据库连接错误
-
-**错误信息**: `relation "public.embeddings" does not exist`
-
-**解决方案**: 确保PostgreSQL已安装并启用pgvector扩展：
-
+**解决方案**:
 ```sql
+-- 安装 pgvector 扩展
 CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 验证安装
+\dx vector
 ```
 
-## 📄 许可证
+### 记忆管理器未正常关闭
 
-本项目采用 MIT 许可证。详情请参见 [LICENSE](LICENSE) 文件。
+**问题**: 程序退出时资源未释放
+
+**解决方案**:
+```go
+defer memoryManager.Close()  // 确保在创建后立即添加 defer
+```
 
 ## 🤝 贡献
 
-欢迎提交问题报告和功能请求。如果您想为项目做出贡献，请先开issue讨论您想要实现的更改。
+我们欢迎各种形式的贡献！
+
+### 如何贡献
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+### 贡献指南
+
+- 代码需遵循 Go 语言规范
+- 添加必要的单元测试
+- 更新相关文档
+- 保持提交信息清晰明了
+
+## 📄 许可证
+
+本项目采用 [MIT License](LICENSE) 开源许可证。
+
+## 🙏 致谢
+
+- [CloudWeGo Eino](https://github.com/cloudwego/eino) - 强大的 AI Agent 开发框架
+- [Milvus](https://milvus.io/) - 高性能向量数据库
+- [Langfuse](https://langfuse.com/) - AI 应用可观测性平台
+
+## 📧 联系方式
+
+- 问题反馈: [GitHub Issues](https://github.com/CoolBanHub/aggo/issues)
+- 讨论交流: [GitHub Discussions](https://github.com/CoolBanHub/aggo/discussions)
 
 ---
 
-**AGGO** - 让AI更智能，让开发更简单 🚀
+<div align="center">
+
+**AGGO** - 构建智能 AI Agent 的 Go 语言框架
+
+[开始使用](#-快速开始) · [查看示例](./example) · [贡献代码](#-贡献)
+
+Made with ❤️ by the AGGO Team
+
+</div>
