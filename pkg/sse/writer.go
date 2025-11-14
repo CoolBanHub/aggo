@@ -135,13 +135,14 @@ func (w *Writer) WriteDone() error {
 	return nil
 }
 
-func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema.Message], fn func(output *schema.Message) any) error {
+func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema.Message], fn func(output *schema.Message, index int) any) error {
 	if fn == nil {
-		fn = func(output *schema.Message) any {
+		fn = func(output *schema.Message, index int) any {
 			return output
 		}
 	}
 
+	index := 0
 	for {
 		// 检查上下文是否被取消或 Writer 是否已关闭
 		select {
@@ -165,10 +166,11 @@ func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema
 		if chunk == nil || chunk.Content == "" {
 			continue
 		}
-		newChunk := fn(chunk)
+		newChunk := fn(chunk, index)
 		if newChunk == nil {
 			continue
 		}
+		index++
 		b, err := sonic.Marshal(newChunk)
 		if err != nil {
 			return err

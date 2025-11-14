@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
+	"github.com/gookit/slog"
 	"github.com/joho/godotenv"
 )
 
@@ -115,22 +117,88 @@ func main() {
 	}
 
 	fmt.Println("开始测试多 Agent 路由功能...")
-
+	stream := true
 	for i, question := range testQuestions {
 		fmt.Printf("\n【问题 %d】: %s\n", i+1, question)
-
-		// 为每个问题创建独立的 trace，主动生成id避免多个agent的执行被分在多条trace
-		ctx = langfuse.SetTrace(context.Background(), langfuse.WithID(uuid.NewString()))
-
-		// 直接调用 Agent 运行
-		out, err := bot.Generate(ctx, []*schema.Message{
-			{Role: schema.User, Content: question},
-		})
-		if err != nil {
-			log.Printf("生成失败: %v", err)
+		ctx1 := context.Background()
+		if langfuseHost != "" {
+			// 为每个问题创建独立的 trace，主动生成id避免多个agent的执行被分在多条trace
+			ctx1 = langfuse.SetTrace(context.Background(), langfuse.WithID(uuid.NewString()))
 		}
 
-		fmt.Printf("【回答】: %s\n", out.Content)
+		// 直接调用 Agent 运行
+
+		out := bot.Run(ctx1, &adk.AgentInput{
+			Messages: []adk.Message{
+				{Role: schema.User, Content: question},
+			},
+			EnableStreaming: stream,
+		})
+		idx := 0
+		for {
+			event, ok := out.Next()
+			if !ok {
+				break
+			}
+
+			if event.Err != nil {
+				slog.Error(event.Err)
+				continue
+			}
+			// 检查是否退出
+			if event.Action != nil && event.Action.Exit {
+				break
+			}
+
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				if stream {
+					// 流式模式：处理 MessageStream
+					if event.Output.MessageOutput.MessageStream != nil {
+						for {
+							msg, err := event.Output.MessageOutput.MessageStream.Recv()
+							if err != nil {
+								break
+							}
+							result := model.OutStreamMessageEinoToOpenai(msg, idx)
+							respJSON, _ := json.Marshal(result)
+							slog.Infof("stream chunk %d: %s", idx, string(respJSON))
+							idx++
+						}
+					} else if event.Output.MessageOutput.Message != nil {
+						// 单个消息，转换为流式格式
+						result := model.OutStreamMessageEinoToOpenai(event.Output.MessageOutput.Message, idx)
+						j, _ := json.Marshal(result)
+						slog.Infof("stream message: %s", string(j))
+						idx++
+					}
+				} else {
+					// 非流式模式：直接转换 Message
+					if event.Output.MessageOutput.Message != nil {
+						result := model.OutMessageEinoToOpenai(event.Output.MessageOutput.Message)
+						j, _ := json.Marshal(result)
+						slog.Infof("response: %s", string(j))
+					} else if event.Output.MessageOutput.MessageStream != nil {
+						// 流式消息，转换为单条消息
+						msg, err := event.Output.MessageOutput.MessageStream.Recv()
+						if err != nil {
+							continue
+						}
+						result := model.OutMessageEinoToOpenai(msg)
+						j, _ := json.Marshal(result)
+						slog.Infof("response: %s", string(j))
+					}
+				}
+			}
+		}
+
+		//out, err := bot.Generate(ctx, []*schema.Message{
+		//	{Role: schema.User, Content: question},
+		//})
+		//if err != nil {
+		//	log.Printf("生成失败: %v", err)
+		//}
+		//
+		//fmt.Printf("【回答】: %s\n", out.Content)
 		break
 	}
 

@@ -4,11 +4,11 @@ go 1.24.4
 
 require (
 	github.com/bytedance/sonic v1.14.1
-	github.com/cloudwego/eino v0.5.9-0.20251022144157-87edeb10a211
+	github.com/cloudwego/eino v0.5.14
 	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20251022132018-bd847322c2bb
 	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20251022132018-bd847322c2bb
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20251022132018-bd847322c2bb
-	github.com/cloudwego/eino-ext/components/model/openai v0.1.3-0.20251022132018-bd847322c2bb
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.4
 	github.com/google/uuid v1.6.0
 	github.com/gookit/slog v0.6.0
 	github.com/milvus-io/milvus/client/v2 v2.6.0
@@ -31,8 +31,10 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20251111090228-91a10bbc864f // indirect
 	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20251022132018-bd847322c2bb // indirect
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.1-0.20251022132018-bd847322c2bb // indirect
+	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b // indirect
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.1 // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
@@ -42,7 +44,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/eino-contrib/jsonschema v1.0.1 // indirect
+	github.com/eino-contrib/jsonschema v1.0.2 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
 	github.com/getkin/kin-openapi v0.118.0 // indirect
@@ -69,6 +71,7 @@ require (
 	github.com/invopop/yaml v0.1.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
