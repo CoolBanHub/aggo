@@ -88,6 +88,18 @@ type MemoryConfig struct {
 	SummaryTrigger SummaryTriggerConfig `json:"summaryTrigger"`
 
 	TablePre string `json:"tablePre"`
+
+	// 清理配置
+	// 会话状态清理间隔（小时），默认24小时
+	SessionCleanupInterval int `json:"sessionCleanupInterval"`
+	// 会话状态保留时间（小时），默认168小时（7天）
+	SessionRetentionTime int `json:"sessionRetentionTime"`
+	// 消息历史保留数量限制，默认1000条
+	MessageHistoryLimit int `json:"messageHistoryLimit"`
+	// 消息历史保留时间（小时），默认720小时（30天）
+	MessageRetentionTime int `json:"messageRetentionTime"`
+	// 定期清理间隔（小时），默认12小时
+	CleanupInterval int `json:"cleanupInterval"`
 }
 
 // SummaryTriggerConfig 摘要触发配置
@@ -130,3 +142,19 @@ const (
 	//UserMemoryAnalyzerOpDelete 删除
 	UserMemoryAnalyzerOpDelete = "del"
 )
+
+// TaskQueueStats 异步任务队列统计
+type TaskQueueStats struct {
+	// 队列大小
+	QueueSize int `json:"queueSize"`
+	// 队列容量
+	QueueCapacity int `json:"queueCapacity"`
+	// 已处理任务数
+	ProcessedTasks int64 `json:"processedTasks"`
+	// 丢弃任务数
+	DroppedTasks int64 `json:"droppedTasks"`
+	// 当前工作goroutine数
+	ActiveWorkers int `json:"activeWorkers"`
+	// 队列使用率
+	QueueUtilization float64 `json:"queueUtilization"`
+}

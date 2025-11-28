@@ -1,6 +1,9 @@
 package memory
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // MemoryStorage 记忆存储接口
 // 定义了记忆存储的基本操作，可以有多种实现（内存、SQL、NoSQL等）
@@ -71,6 +74,17 @@ type MemoryStorage interface {
 
 	// Health 检查存储健康状态
 	Health(ctx context.Context) error
+
+	// 清理操作
+
+	// CleanupOldMessages 清理指定时间之前的消息
+	CleanupOldMessages(ctx context.Context, userID string, before time.Time) error
+
+	// CleanupMessagesByLimit 按数量限制清理消息，保留最新的N条
+	CleanupMessagesByLimit(ctx context.Context, userID, sessionID string, keepLimit int) error
+
+	// GetMessageCount 获取消息总数
+	GetMessageCount(ctx context.Context, userID, sessionID string) (int, error)
 }
 
 // MemoryQuery 记忆查询条件

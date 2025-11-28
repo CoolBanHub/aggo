@@ -11,6 +11,7 @@ import (
 
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/utils"
+	"github.com/gookit/slog"
 )
 
 // MemoryStore 内存存储实现
@@ -465,4 +466,105 @@ func (m *MemoryStore) Close() error {
 func (m *MemoryStore) Health(ctx context.Context) error {
 	// 内存存储总是健康的
 	return nil
+}
+
+// CleanupOldMessages 清理指定时间之前的消息
+func (m *MemoryStore) CleanupOldMessages(ctx context.Context, userID string, before time.Time) error {
+	if userID == "" {
+		return errors.New("用户ID不能为空")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cleanedCount := 0
+	for sessionKey, messages := range m.messages {
+		// 检查是否属于指定用户
+		sessionUserID := strings.Split(sessionKey, ":")[1]
+		if sessionUserID != userID {
+			continue
+		}
+
+		// 过滤掉旧消息
+		var validMessages []*memory.ConversationMessage
+		for _, msg := range messages {
+			if msg.CreatedAt.After(before) {
+				validMessages = append(validMessages, msg)
+			} else {
+				cleanedCount++
+			}
+		}
+
+		if len(validMessages) == 0 {
+			// 如果没有有效消息了，删除整个条目
+			delete(m.messages, sessionKey)
+		} else {
+			m.messages[sessionKey] = validMessages
+		}
+	}
+
+	if cleanedCount > 0 {
+		slog.Infof("清理了 %d 条旧消息，用户: %s", cleanedCount, userID)
+	}
+	return nil
+}
+
+// CleanupMessagesByLimit 按数量限制清理消息，保留最新的N条
+func (m *MemoryStore) CleanupMessagesByLimit(ctx context.Context, userID, sessionID string, keepLimit int) error {
+	if userID == "" {
+		return errors.New("用户ID不能为空")
+	}
+	if sessionID == "" {
+		return errors.New("会话ID不能为空")
+	}
+	if keepLimit <= 0 {
+		return errors.New("保留数量必须大于0")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := m.generateKey(sessionID, userID)
+	messages, exists := m.messages[key]
+	if !exists {
+		return nil // 没有消息需要清理
+	}
+
+	// 按时间排序（最新的在后面）
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].CreatedAt.Before(messages[j].CreatedAt)
+	})
+
+	if len(messages) <= keepLimit {
+		return nil // 消息数量在限制内，无需清理
+	}
+
+	// 保留最新的N条消息
+	validMessages := messages[len(messages)-keepLimit:]
+	cleanedCount := len(messages) - keepLimit
+	m.messages[key] = validMessages
+
+	slog.Infof("按限制清理了 %d 条旧消息，会话: %s, 用户: %s", cleanedCount, sessionID, userID)
+	return nil
+}
+
+// GetMessageCount 获取消息总数
+func (m *MemoryStore) GetMessageCount(ctx context.Context, userID, sessionID string) (int, error) {
+	if userID == "" {
+		return 0, errors.New("用户ID不能为空")
+	}
+	if sessionID == "" {
+		return 0, errors.New("会话ID不能为空")
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	key := m.generateKey(sessionID, userID)
+	messages, exists := m.messages[key]
+	if !exists {
+		return 0, nil
+	}
+
+	return len(messages), nil
 }
