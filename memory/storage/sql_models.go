@@ -1,12 +1,46 @@
 package storage
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"time"
 
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/cloudwego/eino/schema"
 )
+
+// MessageParts 自定义 GORM 类型，用于处理 []schema.MessageInputPart 的序列化
+type MessageParts []schema.MessageInputPart
+
+// Value 实现 driver.Valuer 接口，用于将数据存入数据库
+func (mp MessageParts) Value() (driver.Value, error) {
+	if mp == nil {
+		return nil, nil
+	}
+	return json.Marshal(mp)
+}
+
+// Scan 实现 sql.Scanner 接口，用于从数据库读取数据
+func (mp *MessageParts) Scan(value interface{}) error {
+	if value == nil {
+		*mp = MessageParts{}
+		return nil
+	}
+
+	switch v := value.(type) {
+	case []byte:
+		return json.Unmarshal(v, mp)
+	case string:
+		return json.Unmarshal([]byte(v), mp)
+	default:
+		return nil
+	}
+}
+
+// GormValue 为 GORM 提供特定的数据类型支持
+func (mp MessageParts) GormDataType() string {
+	return "text"
+}
 
 // UserMemoryModel GORM模型 - 用户记忆表
 type UserMemoryModel struct {
@@ -35,10 +69,9 @@ type ConversationMessageModel struct {
 	Role      string `gorm:"size:50;not null" json:"role"`
 	// 保留Content字段用于向后兼容
 	Content string `gorm:"type:text" json:"content,omitempty"`
-	// 多部分内容，以JSON字符串形式存储（使用text类型兼容更多数据库）
-	PartsJSON string                    `gorm:"type:text" json:"-"`       // 不直接暴露
-	Parts     []schema.MessageInputPart `gorm:"-" json:"parts,omitempty"` // 用于业务逻辑
-	CreatedAt time.Time                 `gorm:"autoCreateTime" json:"createdAt"`
+	// 多部分内容，使用自定义类型直接存储
+	Parts     MessageParts `gorm:"type:text" json:"parts,omitempty"`
+	CreatedAt time.Time    `gorm:"autoCreateTime" json:"createdAt"`
 }
 
 // 模型转换函数
@@ -91,21 +124,9 @@ func (m *SessionSummaryModel) FromSessionSummary(sessionSummary *memory.SessionS
 
 // ToConversationMessage 将数据库模型转换为业务模型
 func (m *ConversationMessageModel) ToConversationMessage() *memory.ConversationMessage {
-	var parts []schema.MessageInputPart
+	// Parts 现在是自定义类型，可以直接转换为 []schema.MessageInputPart
+	parts := []schema.MessageInputPart(m.Parts)
 	content := m.Content
-
-	// 检查PartsJSON字段
-	if m.PartsJSON != "" {
-		// 有多部分内容，反序列化Parts
-		if err := json.Unmarshal([]byte(m.PartsJSON), &parts); err != nil {
-			// 反序列化失败，使用空数组
-			parts = []schema.MessageInputPart{}
-		}
-		content = "" // 有Parts时清空Content，避免重复
-	} else {
-		// 没有多部分内容，使用Content字段
-		parts = []schema.MessageInputPart{} // 空的Parts数组
-	}
 
 	return &memory.ConversationMessage{
 		ID:        m.ID,
@@ -124,24 +145,7 @@ func (m *ConversationMessageModel) FromConversationMessage(message *memory.Conve
 	m.SessionID = message.SessionID
 	m.UserID = message.UserID
 	m.Role = message.Role
-
-	// 根据消息内容决定存储方式：
-	// 1. 如果有多部分内容（Parts），优先使用PartsJSON存储，Content为空
-	// 2. 如果只有简单文本内容，使用Content存储，PartsJSON为null
-	if len(message.Parts) > 0 {
-		// 有多部分内容，序列化Parts为JSON
-		m.Content = "" // 清空Content，避免数据冗余
-		if partsBytes, err := json.Marshal(message.Parts); err != nil {
-			// 序列化失败，设置为null
-			m.PartsJSON = ""
-		} else {
-			m.PartsJSON = string(partsBytes)
-		}
-	} else {
-		// 只有简单文本内容，使用Content字段
-		m.Content = message.Content
-		m.PartsJSON = "" // 表示没有多部分内容
-	}
-
+	m.Content = message.Content
+	m.Parts = message.Parts
 	m.CreatedAt = message.CreatedAt
 }
