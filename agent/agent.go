@@ -494,7 +494,7 @@ func (this *Agent) storeUserMessage(ctx context.Context, input []*schema.Message
 	if chatOpts == nil || chatOpts.sessionID == "" || !this.hasMemoryManager() || len(input) == 0 {
 		return nil
 	}
-	return this.memoryManager.ProcessUserMessage(ctx, chatOpts.userID, chatOpts.sessionID, input[0].Content)
+	return this.memoryManager.ProcessUserMessage(ctx, chatOpts.userID, chatOpts.sessionID, input[0].Content, input[0].UserInputMultiContent)
 }
 
 // hasMemoryManager 检查是否有内存管理器

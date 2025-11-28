@@ -22,20 +22,17 @@ func NewUserMemoryAnalyzer(cm model.ToolCallingChatModel) *UserMemoryAnalyzer {
 	}
 }
 
-// ShouldUpdateMemory determines if a message should be added to memory
-func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, input string, userMemoryList []*UserMemory) ([]UserMemoryAnalyzerParam, error) {
+// ShouldUpdateMemoryWithParts determines if a message with multi-part content should be added to memory
+func (u *UserMemoryAnalyzer) ShouldUpdateMemoryWithParts(ctx context.Context, content string, parts []schema.MessageInputPart, userMemoryList []*UserMemory) ([]UserMemoryAnalyzerParam, error) {
 
-	messages := []*schema.Message{
-		{
-			Role: schema.System,
-			Content: `# 用户记忆分析任务
+	systemPrompt := `# 用户记忆分析任务
 
 ## 目标
 分析用户输入，判断是否包含值得长期记忆的个性化信息，并对现有记忆进行相应操作。
 
 ## 值得记忆的信息类型
 - **个人基础信息**：姓名、年龄、职业、学历、所在地等
-- **兴趣偏好**：爱好、喜好、厌恶、品味、习惯等  
+- **兴趣偏好**：爱好、喜好、厌恶、品味、习惯等
 - **重要经历**：工作经历、教育背景、生活事件等
 - **关系网络**：家庭成员、朋友、同事等重要人际关系
 - **目标计划**：短期计划、长期目标、正在进行的项目等
@@ -45,7 +42,7 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, input strin
 
 ## 操作类型
 - **create**: 创建新记忆（发现新信息时）
-- **update**: 更新现有记忆（信息有变化或需要补充时）  
+- **update**: 更新现有记忆（信息有变化或需要补充时）
 - **del**: 删除记忆（信息过时或错误时）
 
 ## 输出格式
@@ -63,10 +60,16 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, input strin
 3. 记忆内容应简洁明确，去除冗余信息
 4. 一次输入可能需要多个操作，全部放入数组中
 5. 删除明确过时或矛盾的记忆
+6. 对于图片、音频、视频等多媒体内容，请仔细分析其内容和意义
 
 ## 示例
 用户说"我叫张三，今年换了新工作"，且已有记忆"姓名：张三"：
-[{"op":"create","memory":"最近换了新工作"}]`,
+[{"op":"create","memory":"最近换了新工作"}]`
+
+	messages := []*schema.Message{
+		{
+			Role:    schema.System,
+			Content: systemPrompt,
 		},
 	}
 
@@ -85,10 +88,19 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, input strin
 		})
 	}
 
-	messages = append(messages, &schema.Message{
-		Role:    schema.User,
-		Content: input,
-	})
+	// 构建用户消息，支持多部分内容
+	userMessage := &schema.Message{
+		Role: schema.User,
+	}
+	userMessage.Content = content
+	// 如果有多部分内容，使用UserInputMultiContent
+	if len(parts) > 0 {
+		multiContent := make([]schema.MessageInputPart, 0, len(parts))
+		multiContent = append(multiContent, parts...)
+		userMessage.UserInputMultiContent = multiContent
+	}
+
+	messages = append(messages, userMessage)
 
 	response, err := u.cm.Generate(ctx, messages)
 	if err != nil {

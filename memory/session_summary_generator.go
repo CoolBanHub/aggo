@@ -27,16 +27,6 @@ func (s *SessionSummaryGenerator) GenerateSummary(ctx context.Context, messages 
 		return existingSummary, nil
 	}
 
-	// 构建对话历史字符串
-	var conversationHistory strings.Builder
-	for _, msg := range messages {
-		role := "用户"
-		if msg.Role == "assistant" {
-			role = "助手"
-		}
-		conversationHistory.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
-	}
-
 	// 构建提示消息
 	systemPrompt := `# 会话摘要生成任务
 
@@ -63,7 +53,8 @@ func (s *SessionSummaryGenerator) GenerateSummary(ctx context.Context, messages 
 - 保持客观中立的语调
 - 避免重复已有摘要中的信息（如果提供了现有摘要）
 - 重点关注最新的对话内容
-- 如果是延续性对话，应与之前的摘要形成连贯的整体`
+- 如果是延续性对话，应与之前的摘要形成连贯的整体
+- 对于图片、音频、视频等多媒体内容，请仔细分析其内容和对对话的意义`
 
 	promptMessages := []*schema.Message{
 		{
@@ -80,11 +71,9 @@ func (s *SessionSummaryGenerator) GenerateSummary(ctx context.Context, messages 
 		})
 	}
 
-	// 添加对话历史
-	promptMessages = append(promptMessages, &schema.Message{
-		Role:    schema.User,
-		Content: fmt.Sprintf("## 对话历史\n%s\n请为以上对话生成摘要。", conversationHistory.String()),
-	})
+	// 将对话消息转换为多部分内容格式
+	schemaMessages := s.convertConversationMessages(messages)
+	promptMessages = append(promptMessages, schemaMessages...)
 
 	// 生成摘要
 	response, err := s.cm.Generate(ctx, promptMessages)
@@ -112,16 +101,6 @@ func (s *SessionSummaryGenerator) GenerateIncrementalSummary(ctx context.Context
 		return s.GenerateSummary(ctx, recentMessages, "")
 	}
 
-	// 构建最新对话内容
-	var recentContent strings.Builder
-	for _, msg := range recentMessages {
-		role := "用户"
-		if msg.Role == "assistant" {
-			role = "助手"
-		}
-		recentContent.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
-	}
-
 	systemPrompt := `# 增量摘要更新任务
 
 ## 目标
@@ -132,6 +111,7 @@ func (s *SessionSummaryGenerator) GenerateIncrementalSummary(ctx context.Context
 2. **整合信息**: 将新对话的关键信息融入现有摘要
 3. **避免重复**: 不要重复现有摘要中已包含的信息
 4. **突出重点**: 重点关注新对话中的重要进展或变化
+5. **多媒体分析**: 对于图片、音频、视频等内容，请仔细分析其含义并整合到摘要中
 
 ## 输出要求
 直接输出更新后的完整摘要，保持在150-400字之间。`
@@ -145,11 +125,17 @@ func (s *SessionSummaryGenerator) GenerateIncrementalSummary(ctx context.Context
 			Role:    schema.System,
 			Content: fmt.Sprintf("## 现有摘要\n%s", existingSummary),
 		},
-		{
-			Role:    schema.User,
-			Content: fmt.Sprintf("## 最新对话内容\n%s\n请更新摘要以包含最新的对话信息。", recentContent.String()),
-		},
 	}
+
+	// 将最新对话消息转换为多部分内容格式
+	schemaMessages := s.convertConversationMessages(recentMessages)
+	promptMessages = append(promptMessages, schemaMessages...)
+
+	// 添加更新指令
+	promptMessages = append(promptMessages, &schema.Message{
+		Role:    schema.User,
+		Content: "请基于以上最新对话内容，更新摘要以包含新的信息。",
+	})
 
 	response, err := s.cm.Generate(ctx, promptMessages)
 	if err != nil {
@@ -162,4 +148,24 @@ func (s *SessionSummaryGenerator) GenerateIncrementalSummary(ctx context.Context
 	}
 
 	return summary, nil
+}
+
+// convertConversationMessages 将ConversationMessage转换为schema.Message，支持多部分内容
+func (s *SessionSummaryGenerator) convertConversationMessages(messages []*ConversationMessage) []*schema.Message {
+	schemaMessages := make([]*schema.Message, 0, len(messages))
+
+	for _, msg := range messages {
+		schemaMsg := &schema.Message{
+			Role: schema.RoleType(msg.Role),
+		}
+		schemaMsg.Content = msg.Content
+		if len(msg.Parts) > 0 {
+			multiContent := make([]schema.MessageInputPart, 0, len(msg.Parts))
+			multiContent = append(multiContent, msg.Parts...)
+			schemaMsg.UserInputMultiContent = multiContent
+		}
+		schemaMessages = append(schemaMessages, schemaMsg)
+	}
+
+	return schemaMessages
 }

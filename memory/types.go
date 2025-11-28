@@ -2,6 +2,8 @@ package memory
 
 import (
 	"time"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // UserMemory 用户记忆结构
@@ -47,8 +49,10 @@ type ConversationMessage struct {
 	UserID string `json:"userId"`
 	// 角色 (user/assistant/system)
 	Role string `json:"role"`
-	// 消息内容
-	Content string `json:"content"`
+	// 消息内容（简单文本消息）
+	Content string `json:"content,omitempty"`
+	// 多部分内容，支持文本、图片、音频、视频、文件等
+	Parts []schema.MessageInputPart `json:"parts,omitempty"`
 	// 创建时间
 	CreatedAt time.Time `json:"createdAt"`
 }

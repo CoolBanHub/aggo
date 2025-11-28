@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	github.com/bytedance/sonic v1.14.1
-	github.com/cloudwego/eino v0.6.1
+	github.com/cloudwego/eino v0.7.3
 	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20251117090452-bd6375a0b3cf
 	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20251117090452-bd6375a0b3cf
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20251117090452-bd6375a0b3cf
@@ -43,7 +43,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/eino-contrib/jsonschema v1.0.2 // indirect
+	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
 	github.com/getsentry/sentry-go v0.12.0 // indirect

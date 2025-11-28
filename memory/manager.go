@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,7 @@ type asyncTask struct {
 	userID    string
 	sessionID string
 	message   string
+	parts     []schema.MessageInputPart
 }
 
 // NewMemoryManager 创建新的记忆管理器
@@ -128,7 +130,7 @@ func (m *MemoryManager) processAsyncTask(task asyncTask) {
 		// 创建新的context用于异步操作，避免超时
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // 30秒超时
 		defer cancel()
-		m.analyzeAndCreateUserMemory(ctx, task.userID, task.message)
+		m.analyzeAndCreateUserMemory(ctx, task.userID, task.message, task.parts)
 	case "summary":
 		// 创建新的context用于异步操作
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // 30秒超时
@@ -143,17 +145,17 @@ func (m *MemoryManager) processAsyncTask(task asyncTask) {
 	}
 }
 
-// ProcessUserMessage 处理用户消息
+// ProcessUserMessage 处理包含多部分内容的用户消息
 // 根据配置决定是否创建用户记忆、更新会话摘要等
-func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionID, userMessage string) error {
+func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionID, content string, parts []schema.MessageInputPart) error {
 	if userID == "" {
 		return errors.New("用户ID不能为空")
 	}
 	if sessionID == "" {
 		return errors.New("会话ID不能为空")
 	}
-	if userMessage == "" {
-		return errors.New("用户消息不能为空")
+	if content == "" && len(parts) == 0 {
+		return errors.New("用户消息内容不能为空")
 	}
 
 	// 保存用户消息到对话历史
@@ -161,7 +163,8 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 		SessionID: sessionID,
 		UserID:    userID,
 		Role:      "user",
-		Content:   userMessage,
+		Content:   content,
+		Parts:     parts,
 	})
 	if err != nil {
 		return fmt.Errorf("保存用户消息失败: %v", err)
@@ -175,7 +178,8 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 			case m.taskChannel <- asyncTask{
 				taskType: "memory",
 				userID:   userID,
-				message:  userMessage,
+				message:  content,
+				parts:    parts,
 			}:
 				// 任务已提交到队列
 			default:
@@ -184,7 +188,7 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 			}
 		} else {
 			// 同步处理
-			m.analyzeAndCreateUserMemory(ctx, userID, userMessage)
+			m.analyzeAndCreateUserMemory(ctx, userID, content, parts)
 		}
 	}
 
@@ -250,9 +254,7 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 }
 
 // analyzeAndCreateUserMemory 分析用户消息并创建记忆
-// 这是一个简化的实现，实际项目中可能需要使用AI模型来判断
-func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, message string) {
-	// 简单的规则判断是否需要创建记忆
+func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, content string, parts []schema.MessageInputPart) {
 	userMemoryList, err := m.storage.GetUserMemories(ctx, userID, 0, m.config.Retrieval)
 	if err != nil {
 		// 记忆创建失败不应该阻断主流程，只记录日志
@@ -260,7 +262,38 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 		return
 	}
 
-	classifierMemoryList, err := m.userMemoryAnalyzer.ShouldUpdateMemory(ctx, message, userMemoryList)
+	// 构建完整的消息内容用于保存
+	var fullContent strings.Builder
+	if content != "" {
+		fullContent.WriteString(content)
+	}
+	// 简单记录多媒体内容的存在
+	for _, part := range parts {
+		switch part.Type {
+		case schema.ChatMessagePartTypeImageURL:
+			fullContent.WriteString(fmt.Sprintf("[图片]"))
+			if part.Image.URL != nil {
+				fullContent.WriteString(fmt.Sprintf(",link:%s", *part.Image.URL))
+			}
+		case schema.ChatMessagePartTypeAudioURL:
+			fullContent.WriteString("[音频]")
+			if part.Audio.URL != nil {
+				fullContent.WriteString(fmt.Sprintf(",link:%s", *part.Audio.URL))
+			}
+		case schema.ChatMessagePartTypeVideoURL:
+			fullContent.WriteString("[视频]")
+			if part.Video.URL != nil {
+				fullContent.WriteString(fmt.Sprintf(",link:%s", *part.Video.URL))
+			}
+		case schema.ChatMessagePartTypeFileURL:
+			fullContent.WriteString("[文件]")
+			if part.File.URL != nil {
+				fullContent.WriteString(fmt.Sprintf(",link:%s", *part.File.URL))
+			}
+		}
+	}
+
+	classifierMemoryList, err := m.userMemoryAnalyzer.ShouldUpdateMemoryWithParts(ctx, content, parts, userMemoryList)
 	if err != nil {
 		// 记忆创建失败不应该阻断主流程，只记录日志
 		slog.Errorf("创建用户记忆失败: %v\n", err)
@@ -275,7 +308,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 			memory := &UserMemory{
 				UserID: userID,
 				Memory: v.Memory,
-				Input:  message,
+				Input:  fullContent.String(),
 			}
 			err = m.storage.SaveUserMemory(ctx, memory)
 			if err != nil {
@@ -283,14 +316,33 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 				slog.Errorf("创建用户记忆失败: %v\n", err)
 			}
 		} else if v.Op == UserMemoryAnalyzerOpUpdate {
-			err = m.storage.UpdateUserMemory(ctx, &UserMemory{
-				ID:     v.Id,
-				UserID: userID,
-				Memory: v.Memory,
-			})
+			// 从已获取的记忆列表中查找现有记忆以保留CreatedAt
+			var existingMemory *UserMemory
+			for _, mem := range userMemoryList {
+				if mem.ID == v.Id {
+					existingMemory = mem
+					break
+				}
+			}
+
+			if existingMemory != nil {
+				// 找到现有记忆，更新它，保留CreatedAt
+				existingMemory.Memory = v.Memory
+				existingMemory.Input = fullContent.String()
+				err = m.storage.UpdateUserMemory(ctx, existingMemory)
+			} else {
+				// 没有找到现有记忆，创建新记忆
+				memory := &UserMemory{
+					ID:     v.Id,
+					UserID: userID,
+					Memory: v.Memory,
+					Input:  fullContent.String(),
+				}
+				err = m.storage.SaveUserMemory(ctx, memory)
+			}
 			if err != nil {
-				// 记忆创建失败不应该阻断主流程，只记录日志
-				slog.Errorf("创建用户记忆失败: %v\n", err)
+				// 记忆更新失败不应该阻断主流程，只记录日志
+				slog.Errorf("更新用户记忆失败: %v\n", err)
 			}
 		}
 	}
@@ -428,10 +480,16 @@ func (m *MemoryManager) GetMessages(ctx context.Context, sessionID, userID strin
 
 	list := make([]*schema.Message, len(messages))
 	for i, v := range messages {
-		list[i] = &schema.Message{
-			Role:    schema.RoleType(v.Role),
-			Content: v.Content,
+		schemaMsg := &schema.Message{
+			Role: schema.RoleType(v.Role),
 		}
+		schemaMsg.Content = v.Content
+		if len(v.Parts) > 0 {
+			multiContent := make([]schema.MessageInputPart, 0, len(v.Parts))
+			multiContent = append(multiContent, v.Parts...)
+			schemaMsg.UserInputMultiContent = multiContent
+		}
+		list[i] = schemaMsg
 	}
 	return list, nil
 }
