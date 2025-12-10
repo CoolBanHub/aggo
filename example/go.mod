@@ -10,16 +10,21 @@ require (
 	github.com/cloudwego/eino v0.7.3
 	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20251111090228-91a10bbc864f
 	github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20251011073417-75b93b87b8a9
+	github.com/cloudwego/eino-ext/components/model/gemini v0.1.17
 	github.com/google/uuid v1.6.0
 	github.com/gookit/slog v0.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/milvus-io/milvus/client/v2 v2.6.1
+	google.golang.org/genai v1.36.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.0
 )
 
 require (
+	cloud.google.com/go v0.118.3 // indirect
+	cloud.google.com/go/auth v0.15.0 // indirect
+	cloud.google.com/go/compute/metadata v0.6.0 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/PuerkitoBio/goquery v1.8.1 // indirect
 	github.com/andybalholm/cascadia v1.3.1 // indirect
@@ -52,6 +57,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
+	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/getsentry/sentry-go v0.12.0 // indirect
@@ -63,12 +69,16 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.2 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
+	github.com/google/s2a-go v0.1.9 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.5 // indirect
+	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
 	github.com/gookit/color v1.6.0 // indirect
 	github.com/gookit/goutil v0.7.1 // indirect
 	github.com/gookit/gsr v0.1.1 // indirect
 	github.com/goph/emperror v0.17.2 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
-	github.com/gorilla/websocket v1.5.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
@@ -142,6 +152,7 @@ require (
 	go.etcd.io/etcd/server/v3 v3.5.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.59.0 // indirect
 	go.opentelemetry.io/otel v1.34.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.20.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.20.0 // indirect
