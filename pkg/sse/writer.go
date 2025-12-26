@@ -133,8 +133,12 @@ func (w *Writer) WriteKeepAlive() error {
 func (w *Writer) WriteDone() error {
 
 	if w.Done != nil {
-		defer w.flusher.Flush()
-		return w.Done(w.w)
+		err := w.Done(w.w)
+		if err != nil {
+			return err
+		}
+		w.flusher.Flush()
+		return nil
 	}
 
 	_, err := fmt.Fprintf(w.w, "data: [DONE]\n\n")
