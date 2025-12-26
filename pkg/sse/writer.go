@@ -15,7 +15,7 @@ type Writer struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
 	closed  bool
-	Done    func() error
+	Done    func(http.ResponseWriter) error
 }
 
 func NewWriter(id string, w http.ResponseWriter) *Writer {
@@ -38,7 +38,7 @@ func NewWriter(id string, w http.ResponseWriter) *Writer {
 	}
 }
 
-func (w *Writer) SetDone(f func() error) {
+func (w *Writer) SetDone(f func(http.ResponseWriter) error) {
 	w.Done = f
 }
 
@@ -133,7 +133,8 @@ func (w *Writer) WriteKeepAlive() error {
 func (w *Writer) WriteDone() error {
 
 	if w.Done != nil {
-		return w.Done()
+		defer w.flusher.Flush()
+		return w.Done(w.w)
 	}
 
 	_, err := fmt.Fprintf(w.w, "data: [DONE]\n\n")
