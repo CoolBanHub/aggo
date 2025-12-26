@@ -126,14 +126,16 @@ func main() {
 			ctx1 = langfuse.SetTrace(context.Background(), langfuse.WithID(uuid.NewString()))
 		}
 
-		// 直接调用 Agent 运行
+		// 预先生成 messageID，这样可以在转换响应时使用
+		messageID := "1"
 
+		// 直接调用 Agent 运行
 		out := bot.Run(ctx1, &adk.AgentInput{
 			Messages: []adk.Message{
 				{Role: schema.User, Content: question},
 			},
 			EnableStreaming: stream,
-		})
+		}, agent.WithChatOptions([]agent.ChatOption{agent.WithMessageID(messageID)}))
 		idx := 0
 		for {
 			event, ok := out.Next()
@@ -159,14 +161,14 @@ func main() {
 							if err != nil {
 								break
 							}
-							result := model.OutStreamMessageEinoToOpenai(msg, idx)
+							result := model.OutStreamMessageEinoToOpenai(msg, idx, messageID)
 							respJSON, _ := json.Marshal(result)
 							slog.Infof("stream chunk %d: %s", idx, string(respJSON))
 							idx++
 						}
 					} else if event.Output.MessageOutput.Message != nil {
 						// 单个消息，转换为流式格式
-						result := model.OutStreamMessageEinoToOpenai(event.Output.MessageOutput.Message, idx)
+						result := model.OutStreamMessageEinoToOpenai(event.Output.MessageOutput.Message, idx, messageID)
 						j, _ := json.Marshal(result)
 						slog.Infof("stream message: %s", string(j))
 						idx++
@@ -174,7 +176,7 @@ func main() {
 				} else {
 					// 非流式模式：直接转换 Message
 					if event.Output.MessageOutput.Message != nil {
-						result := model.OutMessageEinoToOpenai(event.Output.MessageOutput.Message)
+						result := model.OutMessageEinoToOpenai(event.Output.MessageOutput.Message, messageID)
 						j, _ := json.Marshal(result)
 						slog.Infof("response: %s", string(j))
 					} else if event.Output.MessageOutput.MessageStream != nil {
@@ -183,7 +185,7 @@ func main() {
 						if err != nil {
 							continue
 						}
-						result := model.OutMessageEinoToOpenai(msg)
+						result := model.OutMessageEinoToOpenai(msg, messageID)
 						j, _ := json.Marshal(result)
 						slog.Infof("response: %s", string(j))
 					}

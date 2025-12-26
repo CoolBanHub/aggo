@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"strings"
 
 	"github.com/CoolBanHub/aggo/memory"
@@ -113,6 +112,8 @@ func NewAgentFromADK(adkAgent adk.Agent, opts ...Option) (*Agent, error) {
 	return this, nil
 }
 
+// Generate 生成完整响应（非流式）
+// 性能优化：预分配内存，异步存储消息
 func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.Message, error) {
 	// 预处理并获取迭代器
 	ctx, iter, err := this.runAgentWithPreprocess(ctx, input, false, WithChatOptions(opts))
@@ -121,7 +122,9 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 	}
 
 	var response *schema.Message
+	// 预分配 Builder 容量，减少内存分配
 	var fullContent strings.Builder
+	fullContent.Grow(1024)
 
 	for {
 		event, ok := iter.Next()
@@ -130,6 +133,11 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 		}
 		if event.Err != nil {
 			return nil, event.Err
+		}
+
+		// 优先处理退出事件
+		if event.Action != nil && event.Action.Exit {
+			break
 		}
 
 		// 处理输出事件
@@ -141,19 +149,16 @@ func (this *Agent) Generate(ctx context.Context, input []*schema.Message, opts .
 			// 收集内容
 			this.collectAssistantContent(&fullContent, mv)
 		}
-
-		// 处理退出事件
-		if event.Action != nil && event.Action.Exit {
-			break
-		}
 	}
 
 	if response == nil {
 		return nil, fmt.Errorf("generate response is nil")
 	}
 
-	// 存储助手消息
-	this.storeCollectedContent(ctx, &fullContent)
+	// 异步存储助手消息，不阻塞返回
+	if fullContent.Len() > 0 {
+		this.storeCollectedContentAsync(ctx, fullContent.String())
+	}
 
 	return response, nil
 }
@@ -167,6 +172,7 @@ func (this *Agent) Description(ctx context.Context) string {
 }
 
 // Run adk的Run入口
+// 性能优化：预分配内存，异步存储消息
 func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
 	// 预处理并获取迭代器
 	ctx, iter, err := this.runAgentWithPreprocess(ctx, input.Messages, input.EnableStreaming, options...)
@@ -183,7 +189,9 @@ func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...ad
 	go func() {
 		defer generator.Close()
 
+		// 预分配 Builder 容量，减少内存分配
 		var fullContent strings.Builder
+		fullContent.Grow(1024)
 
 		for {
 			event, ok := iter.Next()
@@ -191,32 +199,39 @@ func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...ad
 				break
 			}
 
-			// 转发事件
+			// 转发事件（优先发送，减少延迟）
 			generator.Send(event)
 
+			// 处理错误事件
 			if event.Err != nil {
 				continue
-			}
-
-			// 收集助手消息内容用于存储
-			if event.Output != nil && event.Output.MessageOutput != nil {
-				this.collectAssistantContent(&fullContent, event.Output.MessageOutput)
 			}
 
 			// 检查是否退出
 			if event.Action != nil && event.Action.Exit {
 				break
 			}
+
+			// 收集助手消息内容用于存储
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				this.collectAssistantContent(&fullContent, event.Output.MessageOutput)
+			}
 		}
 
-		// 存储助手消息
-		this.storeCollectedContent(ctx, &fullContent)
+		// 异步存储助手消息，不阻塞迭代器关闭
+		if fullContent.Len() > 0 {
+			this.storeCollectedContentAsync(ctx, fullContent.String())
+		}
 	}()
 
 	return wrappedIterator
 }
 
 // Stream 流式输出，如果需要输出具体的agent流转详情等，建议使用Run方法
+// 性能优化：
+// 1. 增大 Pipe 缓冲区减少阻塞
+// 2. 异步存储消息不阻塞流式输出
+// 3. 预分配内存减少 GC 压力
 func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
 	// 预处理并获取迭代器
 	ctx, iter, err := this.runAgentWithPreprocess(ctx, input, true, WithChatOptions(opts))
@@ -224,63 +239,72 @@ func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...
 		return nil, err
 	}
 
-	// 创建流式读取器
-	streamReader, streamWriter := schema.Pipe[*schema.Message](10)
+	// 创建流式读取器，增大缓冲区以减少阻塞
+	streamReader, streamWriter := schema.Pipe[*schema.Message](64)
 
 	// 开启协程处理流式事件
 	go func() {
 		defer streamWriter.Close()
 
+		// 预分配 Builder 容量，减少内存分配
 		var fullContent strings.Builder
+		fullContent.Grow(1024)
 
 		for {
 			event, ok := iter.Next()
 			if !ok {
 				break
 			}
+
+			// 优先处理错误和退出事件
 			if event.Err != nil {
 				streamWriter.Send(&schema.Message{}, event.Err)
 				return
 			}
 
-			// 处理流式输出事件
-			if event.Output != nil && event.Output.MessageOutput != nil {
-				mv := event.Output.MessageOutput
-				if mv.Role == schema.Assistant {
-					if mv.IsStreaming && mv.MessageStream != nil {
-						// 处理流式数据
-						for {
-							chunk, streamErr := mv.MessageStream.Recv()
-							if streamErr == io.EOF {
-								break
-							}
-							if streamErr != nil {
-								streamWriter.Send(&schema.Message{}, streamErr)
-								return
-							}
-
-							// 收集内容用于存储
-							fullContent.WriteString(chunk.Content)
-
-							// 发送流式数据块
-							streamWriter.Send(chunk, nil)
-						}
-					} else if mv.Message != nil {
-						// 非流式输出，直接发送
-						fullContent.WriteString(mv.Message.Content)
-						streamWriter.Send(mv.Message, nil)
-					}
-				}
-			}
-
-			// 处理退出事件
 			if event.Action != nil && event.Action.Exit {
 				break
 			}
+
+			// 跳过非输出事件
+			if event.Output == nil || event.Output.MessageOutput == nil {
+				continue
+			}
+
+			mv := event.Output.MessageOutput
+			if mv.Role != schema.Assistant {
+				continue
+			}
+
+			// 处理流式输出
+			if mv.IsStreaming && mv.MessageStream != nil {
+				for {
+					chunk, streamErr := mv.MessageStream.Recv()
+					if streamErr == io.EOF {
+						break
+					}
+					if streamErr != nil {
+						streamWriter.Send(&schema.Message{}, streamErr)
+						return
+					}
+
+					// 收集内容用于存储
+					fullContent.WriteString(chunk.Content)
+
+					// 发送流式数据块
+					streamWriter.Send(chunk, nil)
+				}
+			} else if mv.Message != nil {
+				// 非流式输出，直接发送
+				fullContent.WriteString(mv.Message.Content)
+				streamWriter.Send(mv.Message, nil)
+			}
 		}
 
-		// 存储助手消息
-		this.storeCollectedContent(ctx, &fullContent)
+		// 异步存储助手消息，不阻塞流式输出完成
+		if fullContent.Len() > 0 {
+			this.storeCollectedContentAsync(ctx, fullContent.String())
+		}
 	}()
 
 	return streamReader, nil
@@ -311,17 +335,6 @@ func (this *Agent) collectAssistantContent(fullContent *strings.Builder, mv *adk
 	} else if mv.Message != nil {
 		// 非流式输出
 		fullContent.WriteString(mv.Message.Content)
-	}
-}
-
-// storeCollectedContent 存储收集的助手消息内容
-func (this *Agent) storeCollectedContent(ctx context.Context, fullContent *strings.Builder) {
-	if this.hasMemoryManager() && fullContent.Len() > 0 {
-		responseMsg := &schema.Message{
-			Role:    schema.Assistant,
-			Content: fullContent.String(),
-		}
-		this.handleMessageStorage(ctx, responseMsg)
 	}
 }
 
@@ -358,6 +371,9 @@ func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, 
 	if chatOpts.userID == "" {
 		chatOpts.userID = chatOpts.sessionID
 	}
+	if chatOpts.messageID == "" {
+		chatOpts.messageID = utils.GetULID()
+	}
 	// 处理消息输入（如果有内存管理器则增强消息）
 	processedInput := input
 	if this.hasMemoryManager() {
@@ -380,71 +396,6 @@ func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, 
 	ctx = this.setupChatContext(ctx, processedInput, chatOpts)
 
 	return ctx, processedInput, chatOpts, nil
-}
-
-func (this *Agent) inputMessageModifier(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) ([]*schema.Message, error) {
-
-	_input := this.buildMessagesWithHistory(ctx, input, chatOpts)
-	_input = this.addUserMemories(ctx, _input, chatOpts)
-	_input = this.addSessionSummary(ctx, _input, chatOpts)
-	return _input, nil
-}
-
-// buildMessagesWithHistory 构建包含历史消息的序列
-func (this *Agent) buildMessagesWithHistory(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) []*schema.Message {
-	historyMessages, err := this.memoryManager.GetMessages(ctx, chatOpts.sessionID, chatOpts.userID, this.memoryManager.GetConfig().MemoryLimit)
-	if err != nil {
-		log.Printf("获取历史消息失败: %v", err)
-		return input
-	}
-	return append(historyMessages, input...)
-}
-
-// addUserMemories 添加用户记忆
-func (this *Agent) addUserMemories(ctx context.Context, _input []*schema.Message, chatOpts *chatOptions) []*schema.Message {
-	if !this.memoryManager.GetConfig().EnableUserMemories {
-		return _input
-	}
-
-	userMemories, err := this.memoryManager.GetUserMemories(ctx, chatOpts.userID)
-	if err != nil {
-		log.Printf("获取用户记忆失败: %v", err)
-		return _input
-	}
-
-	if len(userMemories) == 0 {
-		return _input
-	}
-
-	memoryContent := this.formatUserMemories(userMemories)
-	memoryMessage := &schema.Message{
-		Role:    schema.System,
-		Content: memoryContent,
-	}
-	return append([]*schema.Message{memoryMessage}, _input...)
-}
-
-// addSessionSummary 添加会话摘要
-func (this *Agent) addSessionSummary(ctx context.Context, _input []*schema.Message, chatOpts *chatOptions) []*schema.Message {
-	if !this.memoryManager.GetConfig().EnableSessionSummary {
-		return _input
-	}
-
-	sessionSummary, err := this.memoryManager.GetSessionSummary(ctx, chatOpts.sessionID, chatOpts.userID)
-	if err != nil {
-		log.Printf("获取会话摘要失败: %v", err)
-		return _input
-	}
-
-	if sessionSummary == nil || sessionSummary.Summary == "" {
-		return _input
-	}
-
-	summaryMessage := &schema.Message{
-		Role:    schema.System,
-		Content: fmt.Sprintf("会话背景: %s", sessionSummary.Summary),
-	}
-	return append([]*schema.Message{summaryMessage}, _input...)
 }
 
 // applyUserMessageSuffix 将后缀添加到最后一条用户消息
@@ -485,60 +436,7 @@ func (this *Agent) setupChatContext(ctx context.Context, _input []*schema.Messag
 		Input:     _input,
 		SessionID: chatOpts.sessionID,
 		UserID:    chatOpts.userID,
+		MessageID: chatOpts.messageID,
 	}
 	return state.SetChatChatSate(ctx, chatState)
-}
-
-// storeUserMessage 存储用户消息
-func (this *Agent) storeUserMessage(ctx context.Context, input []*schema.Message, chatOpts *chatOptions) error {
-	if chatOpts == nil || chatOpts.sessionID == "" || !this.hasMemoryManager() || len(input) == 0 {
-		return nil
-	}
-	return this.memoryManager.ProcessUserMessage(ctx, chatOpts.userID, chatOpts.sessionID, input[0].Content, input[0].UserInputMultiContent)
-}
-
-// hasMemoryManager 检查是否有内存管理器
-func (this *Agent) hasMemoryManager() bool {
-	return this.memoryManager != nil
-}
-
-// handleMessageStorage 处理消息存储的统一逻辑
-func (this *Agent) handleMessageStorage(ctx context.Context, response *schema.Message) {
-	if !this.hasMemoryManager() || response == nil {
-		return
-	}
-	this.storeAssistantMessage(ctx, response)
-}
-
-// storeAssistantMessage 存储助手消息,在callback统一处理
-func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.Message) {
-	if !this.hasMemoryManager() || response == nil {
-		return
-	}
-
-	chatState := state.GetChatChatSate(ctx)
-	if chatState == nil {
-		log.Println("storeAssistantMessage: chatState is nil")
-		return
-	}
-
-	if err := this.memoryManager.ProcessAssistantMessage(ctx, chatState.UserID, chatState.SessionID, response.Content); err != nil {
-		log.Printf("storeAssistantMessage failed: %v", err)
-	}
-}
-
-// formatUserMemories 格式化用户记忆为可读的上下文信息
-func (this *Agent) formatUserMemories(memories []*memory.UserMemory) string {
-	if len(memories) == 0 {
-		return ""
-	}
-
-	var builder strings.Builder
-	builder.WriteString("用户个人信息记忆（请在回复中考虑这些信息，提供个性化的响应）:\n")
-
-	for _, mem := range memories {
-		builder.WriteString(fmt.Sprintf("- %s\n", mem.Memory))
-	}
-
-	return builder.String()
 }

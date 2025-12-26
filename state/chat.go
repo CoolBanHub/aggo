@@ -9,6 +9,7 @@ import (
 type ChatSate struct {
 	UserID    string
 	SessionID string
+	MessageID string
 	Input     []*schema.Message
 }
 
@@ -23,4 +24,31 @@ func GetChatChatSate(ctx context.Context) *ChatSate {
 		return nil
 	}
 	return v.(*ChatSate)
+}
+
+// GetMessageID 从 context 中获取 messageID 的便捷方法
+func GetMessageID(ctx context.Context) string {
+	state := GetChatChatSate(ctx)
+	if state == nil {
+		return ""
+	}
+	return state.MessageID
+}
+
+// GetSessionID 从 context 中获取 sessionID 的便捷方法
+func GetSessionID(ctx context.Context) string {
+	state := GetChatChatSate(ctx)
+	if state == nil {
+		return ""
+	}
+	return state.SessionID
+}
+
+// GetUserID 从 context 中获取 userID 的便捷方法
+func GetUserID(ctx context.Context) string {
+	state := GetChatChatSate(ctx)
+	if state == nil {
+		return ""
+	}
+	return state.UserID
 }

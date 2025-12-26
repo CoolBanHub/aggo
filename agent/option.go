@@ -58,6 +58,7 @@ type chatOptions struct {
 	composeOptions     []compose.Option
 	userID             string
 	sessionID          string
+	messageID          string
 	tools              []tool.BaseTool
 	userMessageSuffix  string
 	adkAgentRunOptions []adk.AgentRunOption
@@ -101,11 +102,16 @@ func WithChatComposeOptions(composeOptions []compose.Option) ChatOption {
 	}
 }
 
+func WithMessageID(messageID string) ChatOption {
+	return func(co *chatOptions) {
+		co.messageID = messageID
+	}
+}
+
 func WithChatOptions(chatOpts []ChatOption) adk.AgentRunOption {
 	return adk.WrapImplSpecificOptFn(func(t *chatOptions) {
 		for _, opt := range chatOpts {
 			opt(t)
 		}
-		return
 	})
 }
