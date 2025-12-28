@@ -301,8 +301,7 @@ func (m *MemoryManager) processAsyncTask(task asyncTask) {
 
 // ProcessUserMessage 处理包含多部分内容的用户消息
 // 根据配置决定是否创建用户记忆、更新会话摘要等
-// messageID: 可选的消息ID，如果为空则自动生成
-func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionID, messageID, content string, parts []schema.MessageInputPart) error {
+func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionID, content string, parts []schema.MessageInputPart) error {
 	if userID == "" {
 		return errors.New("用户ID不能为空")
 	}
@@ -331,7 +330,6 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 
 	// 保存用户消息到对话历史
 	err := m.SaveMessage(ctx, &ConversationMessage{
-		ID:        messageID,
 		SessionID: sessionID,
 		UserID:    userID,
 		Role:      "user",
@@ -365,8 +363,7 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 }
 
 // ProcessAssistantMessage 处理助手回复消息
-// messageID: 可选的消息ID，如果为空则自动生成
-func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, sessionID, messageID, assistantMessage string) error {
+func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, sessionID, assistantMessage string) error {
 	if userID == "" {
 		return errors.New("用户ID不能为空")
 	}
@@ -379,7 +376,6 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 
 	// 保存助手消息到对话历史
 	err := m.SaveMessage(ctx, &ConversationMessage{
-		ID:        messageID,
 		SessionID: sessionID,
 		UserID:    userID,
 		Role:      string(schema.Assistant),

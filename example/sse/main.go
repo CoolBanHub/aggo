@@ -494,7 +494,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	defer writer.Close()
 
 	err = writer.Stream(ctx, stream, func(output *schema.Message, index int) any {
-		return model.OutStreamMessageEinoToOpenai(output, index, sessionID)
+		return model.OutStreamMessageEinoToOpenai(output, index)
 	})
 	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
 		log.Printf("Stream error: %v", err)

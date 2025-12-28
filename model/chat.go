@@ -44,11 +44,10 @@ func getChatByOpenai(o *Option) (model.ToolCallingChatModel, error) {
 // 该方法用于将模型返回的消息转换为 OpenAI API 格式的响应
 // 参数:
 //   - msg: Eino schema.Message 对象，包含模型返回的消息内容
-//   - messageID: 消息ID，用于设置响应的ID字段
 //
 // 返回:
 //   - *openai2.ChatCompletionResponse: OpenAI 格式的聊天完成响应对象
-func OutMessageEinoToOpenai(msg *schema.Message, messageID string) *openai2.ChatCompletionResponse {
+func OutMessageEinoToOpenai(msg *schema.Message) *openai2.ChatCompletionResponse {
 	if msg == nil {
 		return nil
 	}
@@ -103,10 +102,10 @@ func OutMessageEinoToOpenai(msg *schema.Message, messageID string) *openai2.Chat
 
 	// 构建最终的 ChatCompletionResponse
 	response := &openai2.ChatCompletionResponse{
-		ID:      messageID, // 使用传入的 messageID
+		ID:      "",
 		Object:  "chat.completion",
-		Created: 0,  // 可以使用当前时间戳
-		Model:   "", // 可以从 msg.Extra 中获取，如果有的话
+		Created: 0,
+		Model:   "",
 		Choices: []openai2.ChatCompletionChoice{choice},
 		Usage:   usage,
 	}
@@ -119,11 +118,10 @@ func OutMessageEinoToOpenai(msg *schema.Message, messageID string) *openai2.Chat
 // 参数:
 //   - msg: schema.Message 对象
 //   - index: 当前消息在流中的索引
-//   - messageID: 消息ID，用于设置响应的ID字段
 //
 // 返回:
 //   - *openai2.ChatCompletionStreamResponse: OpenAI 格式的流式响应块
-func OutStreamMessageEinoToOpenai(msg *schema.Message, index int, messageID string) *openai2.ChatCompletionStreamResponse {
+func OutStreamMessageEinoToOpenai(msg *schema.Message, index int) *openai2.ChatCompletionStreamResponse {
 	if msg == nil {
 		return nil
 	}
@@ -164,7 +162,7 @@ func OutStreamMessageEinoToOpenai(msg *schema.Message, index int, messageID stri
 
 	// 构建流式响应
 	response := &openai2.ChatCompletionStreamResponse{
-		ID:      messageID, // 使用传入的 messageID
+		ID:      "",
 		Object:  "chat.completion.chunk",
 		Created: 0,
 		Model:   "",

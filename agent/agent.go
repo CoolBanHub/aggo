@@ -371,9 +371,6 @@ func (this *Agent) chatPreHandler(ctx context.Context, input []*schema.Message, 
 	if chatOpts.userID == "" {
 		chatOpts.userID = chatOpts.sessionID
 	}
-	if chatOpts.messageID == "" {
-		chatOpts.messageID = utils.GetULID()
-	}
 	// 处理消息输入（如果有内存管理器则增强消息）
 	processedInput := input
 	if this.hasMemoryManager() {
@@ -436,7 +433,6 @@ func (this *Agent) setupChatContext(ctx context.Context, _input []*schema.Messag
 		Input:     _input,
 		SessionID: chatOpts.sessionID,
 		UserID:    chatOpts.userID,
-		MessageID: chatOpts.messageID,
 	}
 	return state.SetChatChatSate(ctx, chatState)
 }

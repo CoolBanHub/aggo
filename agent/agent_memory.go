@@ -100,7 +100,7 @@ func (this *Agent) storeUserMessage(ctx context.Context, input []*schema.Message
 	if chatOpts == nil || chatOpts.sessionID == "" || !this.hasMemoryManager() || len(input) == 0 {
 		return nil
 	}
-	return this.memoryManager.ProcessUserMessage(ctx, chatOpts.userID, chatOpts.sessionID, chatOpts.messageID, input[0].Content, input[0].UserInputMultiContent)
+	return this.memoryManager.ProcessUserMessage(ctx, chatOpts.userID, chatOpts.sessionID, input[0].Content, input[0].UserInputMultiContent)
 }
 
 // storeCollectedContent 存储收集的助手消息内容
@@ -148,7 +148,7 @@ func (this *Agent) storeAssistantMessage(ctx context.Context, response *schema.M
 		return
 	}
 
-	if err := this.memoryManager.ProcessAssistantMessage(ctx, chatState.UserID, chatState.SessionID, chatState.MessageID, response.Content); err != nil {
+	if err := this.memoryManager.ProcessAssistantMessage(ctx, chatState.UserID, chatState.SessionID, response.Content); err != nil {
 		log.Printf("storeAssistantMessage failed: %v", err)
 	}
 }

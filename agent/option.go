@@ -58,7 +58,6 @@ type chatOptions struct {
 	composeOptions     []compose.Option
 	userID             string
 	sessionID          string
-	messageID          string
 	tools              []tool.BaseTool
 	userMessageSuffix  string
 	adkAgentRunOptions []adk.AgentRunOption
@@ -99,12 +98,6 @@ func WithUserMessageSuffix(suffix string) ChatOption {
 func WithChatComposeOptions(composeOptions []compose.Option) ChatOption {
 	return func(co *chatOptions) {
 		co.composeOptions = append(co.composeOptions, composeOptions...)
-	}
-}
-
-func WithMessageID(messageID string) ChatOption {
-	return func(co *chatOptions) {
-		co.messageID = messageID
 	}
 }
 
