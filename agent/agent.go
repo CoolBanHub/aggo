@@ -228,10 +228,6 @@ func (this *Agent) Run(ctx context.Context, input *adk.AgentInput, options ...ad
 }
 
 // Stream 流式输出，如果需要输出具体的agent流转详情等，建议使用Run方法
-// 性能优化：
-// 1. 增大 Pipe 缓冲区减少阻塞
-// 2. 异步存储消息不阻塞流式输出
-// 3. 预分配内存减少 GC 压力
 func (this *Agent) Stream(ctx context.Context, input []*schema.Message, opts ...ChatOption) (*schema.StreamReader[*schema.Message], error) {
 	// 预处理并获取迭代器
 	ctx, iter, err := this.runAgentWithPreprocess(ctx, input, true, WithChatOptions(opts))

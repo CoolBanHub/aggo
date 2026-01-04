@@ -55,7 +55,6 @@ func main() {
 			},
 		},
 	}
-
 	msg, err := a.Generate(ctx, msgList)
 	if err != nil {
 		log.Fatalf("生成消息失败：%v", err)
