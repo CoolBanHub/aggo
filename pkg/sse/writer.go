@@ -178,7 +178,7 @@ func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema
 		}
 
 		// 如果 chunk 为空为空，则结束流
-		if chunk == nil || chunk.Content == "" {
+		if chunk == nil || (chunk.Content == "" && chunk.ReasoningContent == "") {
 			continue
 		}
 		newChunk := fn(chunk, index)
