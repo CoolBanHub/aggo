@@ -393,27 +393,32 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
                             if (data === '[DONE]') {
                                 break;
                             }
-                            
+
                             try {
                                 const parsed = JSON.parse(data);
-                                if (parsed.content) {
-                                    botMessage += parsed.content;
-                                    
+                                // 支持OpenAI格式: choices[0].delta.content
+                                const content = parsed.content || (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content);
+
+                                if (content) {
+                                    botMessage += content;
+
                                     if (!currentBotMessageDiv) {
                                         currentBotMessageDiv = document.createElement('div');
                                         currentBotMessageDiv.className = 'message bot-message';
                                         chatMessages.appendChild(currentBotMessageDiv);
                                     }
-                                    
+
                                     currentBotMessageDiv.textContent = botMessage;
                                     chatMessages.scrollTop = chatMessages.scrollHeight;
                                 }
-                                
-                                if (parsed.done) {
+
+                                // 检查是否完成
+                                const finishReason = parsed.choices && parsed.choices[0] && parsed.choices[0].finish_reason;
+                                if (parsed.done || finishReason) {
                                     sessionId = parsed.sessionId || sessionId;
                                 }
                             } catch (e) {
-                                console.error('Error parsing JSON:', e);
+                                console.error('Error parsing JSON:', e, 'Data:', data);
                             }
                         }
                     }
