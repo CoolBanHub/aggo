@@ -6,9 +6,12 @@
 //	import "github.com/CoolBanHub/aggo/tools/database/postgres"
 //	import "github.com/CoolBanHub/aggo/tools/knowledge"
 //	import "github.com/CoolBanHub/aggo/tools/shell"
+//	import "github.com/CoolBanHub/aggo/tools/cron"
 package tools
 
 import (
+	cronPkg "github.com/CoolBanHub/aggo/cron"
+	cronTool "github.com/CoolBanHub/aggo/tools/cron"
 	"github.com/CoolBanHub/aggo/tools/database/mysql"
 	"github.com/CoolBanHub/aggo/tools/database/postgres"
 	"github.com/CoolBanHub/aggo/tools/knowledge"
@@ -64,4 +67,13 @@ func GetSysInfoTools() []tool.BaseTool {
 // GetExecuteTools 获取命令执行工具
 func GetExecuteTools() []tool.BaseTool {
 	return shell.GetExecuteTools()
+}
+
+// ============================================================
+// Cron 定时任务工具
+// ============================================================
+
+// GetCronTools 获取定时任务工具
+func GetCronTools(service *cronPkg.CronService, opts ...cronTool.CronOption) []tool.BaseTool {
+	return cronTool.GetTools(service, opts...)
 }
