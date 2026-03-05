@@ -16,12 +16,14 @@ type JobHandler func(job *CronJob) (string, error)
 
 // CronService 定时调度服务
 type CronService struct {
-	store    Store
-	onJob    JobHandler
-	mu       sync.RWMutex
-	running  bool
-	stopChan chan struct{}
-	gronx    *gronx.Gronx
+	store          Store
+	onJob          JobHandler
+	mu             sync.RWMutex
+	running        bool
+	stopChan       chan struct{}
+	gronx          *gronx.Gronx
+	maxJobs        int // 任务数量上限，0 表示不限制
+	maxJobsPerUser int // 单用户任务数量上限，0 表示不限制
 }
 
 // NewCronService 创建定时调度服务
@@ -31,6 +33,20 @@ func NewCronService(store Store, onJob JobHandler) *CronService {
 		onJob: onJob,
 		gronx: gronx.New(),
 	}
+}
+
+// SetMaxJobs 设置最大任务数量限制，0 表示不限制
+func (cs *CronService) SetMaxJobs(max int) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.maxJobs = max
+}
+
+// SetMaxJobsPerUser 设置单用户最大任务数量限制，0 表示不限制
+func (cs *CronService) SetMaxJobsPerUser(max int) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.maxJobsPerUser = max
 }
 
 // Start 启动调度循环
@@ -231,15 +247,39 @@ func (cs *CronService) SetOnJob(handler JobHandler) {
 }
 
 // AddJob 添加定时任务
-func (cs *CronService) AddJob(name string, schedule CronSchedule, message string) (*CronJob, error) {
+func (cs *CronService) AddJob(name string, schedule CronSchedule, message string, userID string) (*CronJob, error) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+
+	// 检查任务数量上限
+	jobs, err := cs.store.List()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check job count: %w", err)
+	}
+
+	if cs.maxJobs > 0 && len(jobs) >= cs.maxJobs {
+		return nil, fmt.Errorf("已达到任务总数上限 (%d)，请先删除旧任务", cs.maxJobs)
+	}
+
+	// 检查单用户任务数量上限
+	if cs.maxJobsPerUser > 0 && userID != "" {
+		var userJobCount int
+		for _, j := range jobs {
+			if j.UserID == userID {
+				userJobCount++
+			}
+		}
+		if userJobCount >= cs.maxJobsPerUser {
+			return nil, fmt.Errorf("用户已达到任务数量上限 (%d)，请先删除旧任务", cs.maxJobsPerUser)
+		}
+	}
 
 	now := time.Now().UnixMilli()
 	deleteAfterRun := (schedule.Kind == "at")
 
 	job := &CronJob{
 		ID:       generateID(),
+		UserID:   userID,
 		Name:     name,
 		Enabled:  true,
 		Schedule: schedule,

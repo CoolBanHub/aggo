@@ -24,6 +24,7 @@ type CronJobState struct {
 // CronJob 表示一个定时任务
 type CronJob struct {
 	ID             string       `json:"id" gorm:"column:id;primaryKey;type:varchar(32)"`
+	UserID         string       `json:"userId,omitempty" gorm:"column:user_id;type:varchar(64);index"`
 	Name           string       `json:"name" gorm:"column:name;type:varchar(100)"`
 	Enabled        bool         `json:"enabled" gorm:"column:enabled"`
 	Schedule       CronSchedule `json:"schedule" gorm:"embedded"`

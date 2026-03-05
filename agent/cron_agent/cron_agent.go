@@ -3,23 +3,21 @@
 // CronAgent 是一个预配置的 Agent，内置了 cron 工具，可以直接用于管理定时任务。
 // 它封装了 CronService 的生命周期管理（Start/Stop），提供简单的创建和使用接口。
 //
+// 任务触发时，默认会将 job.Payload.Message 作为用户消息回送给 Agent 处理，
+// 使得 Agent 可以在任务触发时执行更多操作（如创建新的定时任务）。
+// 可通过 WithOnJobTriggered 覆盖此默认行为。
+//
+// 安全机制：
+//   - 单用户任务数上限（默认 10），防止单用户占用过多资源
+//   - 系统提示词禁止创建嵌套周期性任务
+//
 // 基本用法：
 //
-//	// 使用文件存储
 //	cronAgent, err := cron_agent.New(ctx, cm,
 //	    cron_agent.WithFileStore("/path/to/cron_jobs.json"),
 //	)
-//
-//	// 使用数据库存储
-//	cronAgent, err := cron_agent.New(ctx, cm,
-//	    cron_agent.WithGormStore(db),
-//	)
-//
-//	// 启动调度
 //	cronAgent.Start()
 //	defer cronAgent.Stop()
-//
-//	// 像普通 Agent 一样使用
 //	resp, err := cronAgent.Generate(ctx, messages)
 package cron_agent
 
@@ -32,7 +30,12 @@ import (
 	cronTool "github.com/CoolBanHub/aggo/tools/cron"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 	"gorm.io/gorm"
+)
+
+const (
+	defaultMaxJobsPerUser = 10 // 默认单用户最大任务数
 )
 
 // CronAgent 定时任务 Agent
@@ -47,8 +50,11 @@ type Option func(*config)
 type config struct {
 	store          cronPkg.Store
 	onJobTriggered func(job *cronPkg.CronJob)
+	onJobProcessed func(job *cronPkg.CronJob, response string, err error)
 	agentOpts      []agent.Option
 	extraTools     []tool.BaseTool
+	maxJobs        int // 任务总数上限，0 表示不限制（默认不限制）
+	maxJobsPerUser int // 单用户任务数上限
 }
 
 // WithFileStore 使用文件存储
@@ -76,10 +82,34 @@ func WithStore(store cronPkg.Store) Option {
 	}
 }
 
-// WithOnJobTriggered 设置任务触发回调
+// WithOnJobTriggered 设置自定义的任务触发回调。
+// 设置后将覆盖默认的自动回送 Agent 处理行为。
 func WithOnJobTriggered(fn func(job *cronPkg.CronJob)) Option {
 	return func(c *config) {
 		c.onJobTriggered = fn
+	}
+}
+
+// WithOnJobProcessed 设置任务被 Agent 自动处理后的回调。
+// 仅在使用默认自动处理（未设置 WithOnJobTriggered）时生效。
+// 可用于记录日志、发送通知等。
+func WithOnJobProcessed(fn func(job *cronPkg.CronJob, response string, err error)) Option {
+	return func(c *config) {
+		c.onJobProcessed = fn
+	}
+}
+
+// WithMaxJobs 设置最大任务总数限制。默认不限制。
+func WithMaxJobs(max int) Option {
+	return func(c *config) {
+		c.maxJobs = max
+	}
+}
+
+// WithMaxJobsPerUser 设置单用户最大任务数量限制。默认 10。
+func WithMaxJobsPerUser(max int) Option {
+	return func(c *config) {
+		c.maxJobsPerUser = max
 	}
 }
 
@@ -101,8 +131,13 @@ func WithExtraTools(tools ...tool.BaseTool) Option {
 //
 // 必须通过 WithFileStore、WithGormStore 或 WithStore 指定存储方式。
 // 创建后需调用 Start() 启动调度循环，Stop() 停止。
+//
+// 默认行为：任务触发时，将 message 回送给 Agent 处理（支持嵌套任务创建）。
+// 可通过 WithOnJobTriggered 覆盖为自定义处理逻辑。
 func New(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*CronAgent, error) {
-	cfg := &config{}
+	cfg := &config{
+		maxJobsPerUser: defaultMaxJobsPerUser,
+	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -114,12 +149,16 @@ func New(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*C
 	// 创建 CronService
 	service := cronPkg.NewCronService(cfg.store, nil)
 
-	// 构建 cron 工具
-	var cronOpts []cronTool.CronOption
-	if cfg.onJobTriggered != nil {
-		cronOpts = append(cronOpts, cronTool.WithOnJobTriggered(cfg.onJobTriggered))
+	// 设置任务数量上限
+	if cfg.maxJobs > 0 {
+		service.SetMaxJobs(cfg.maxJobs)
 	}
-	tools := cronTool.GetTools(service, cronOpts...)
+	if cfg.maxJobsPerUser > 0 {
+		service.SetMaxJobsPerUser(cfg.maxJobsPerUser)
+	}
+
+	// 构建 cron 工具（先不设置回调，在 agent 创建后再设置）
+	tools := cronTool.GetTools(service)
 
 	// 合并额外工具
 	if len(cfg.extraTools) > 0 {
@@ -139,10 +178,14 @@ func New(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*C
 				"当用户要求设置提醒或定时任务时，请使用 cron 工具。\n" +
 				"对于简单的提醒（如 '10分钟后提醒我'），使用 at_seconds。\n" +
 				"对于周期性任务（如 '每2小时提醒我'），使用 every_seconds。\n" +
-				"对于复杂调度（如 '每天早上9点'），使用 cron_expr。",
+				"对于复杂调度（如 '每天早上9点'），使用 cron_expr。\n\n" +
+				"【重要安全规则】\n" +
+				"禁止创建会自动生成新的周期性定时任务的定时任务，这会导致任务无限增长。\n" +
+				"例如：禁止 '每60秒创建一个每10秒执行的任务' 这种嵌套周期性任务。\n" +
+				"如果用户请求此类操作，请拒绝并解释风险。\n" +
+				"允许的模式：周期性任务创建一次性任务（如 '每60秒创建一个10秒后的提醒'）。",
 		),
 		agent.WithTools(tools),
-		agent.WithMaxStep(5),
 	}
 
 	// 用户的选项优先级更高，放在后面覆盖默认值
@@ -154,10 +197,41 @@ func New(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*C
 		return nil, fmt.Errorf("failed to create cron agent: %w", err)
 	}
 
-	return &CronAgent{
+	ca := &CronAgent{
 		Agent:   ag,
 		service: service,
-	}, nil
+	}
+
+	// 设置任务触发回调
+	if cfg.onJobTriggered != nil {
+		// 用户自定义回调
+		service.SetOnJob(func(job *cronPkg.CronJob) (string, error) {
+			cfg.onJobTriggered(job)
+			return "ok", nil
+		})
+	} else {
+		// 默认行为：将 message 回送给 Agent 处理
+		onProcessed := cfg.onJobProcessed
+		service.SetOnJob(func(job *cronPkg.CronJob) (string, error) {
+
+			resp, err := ca.Generate(context.Background(), []*schema.Message{
+				schema.UserMessage(job.Payload.Message),
+			})
+
+			var response string
+			if resp != nil {
+				response = resp.Content
+			}
+
+			if onProcessed != nil {
+				onProcessed(job, response, err)
+			}
+
+			return response, err
+		})
+	}
+
+	return ca, nil
 }
 
 // Start 启动定时调度服务

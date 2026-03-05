@@ -7,6 +7,7 @@ import (
 	"time"
 
 	cronPkg "github.com/CoolBanHub/aggo/cron"
+	"github.com/CoolBanHub/aggo/state"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 )
@@ -80,7 +81,7 @@ func GetTools(service *cronPkg.CronService, opts ...CronOption) []tool.BaseTool 
 func (ct *CronTool) execute(ctx context.Context, params CronParams) (interface{}, error) {
 	switch params.Action {
 	case "add":
-		return ct.addJob(params)
+		return ct.addJob(ctx, params)
 	case "list":
 		return ct.listJobs()
 	case "remove":
@@ -94,7 +95,7 @@ func (ct *CronTool) execute(ctx context.Context, params CronParams) (interface{}
 	}
 }
 
-func (ct *CronTool) addJob(params CronParams) (interface{}, error) {
+func (ct *CronTool) addJob(ctx context.Context, params CronParams) (interface{}, error) {
 	if params.Message == "" {
 		return nil, fmt.Errorf("message is required for add action")
 	}
@@ -123,13 +124,15 @@ func (ct *CronTool) addJob(params CronParams) (interface{}, error) {
 		return nil, fmt.Errorf("one of at_seconds, every_seconds, or cron_expr is required")
 	}
 
-	// 截断 message 作为任务名
+	// 截断 message 作为任务名（按字符而非字节截断，避免中文乱码）
 	name := params.Message
-	if len(name) > 30 {
-		name = name[:30] + "..."
+	nameRunes := []rune(name)
+	if len(nameRunes) > 30 {
+		name = string(nameRunes[:30]) + "..."
 	}
 
-	job, err := ct.service.AddJob(name, schedule, params.Message)
+	userID := state.GetUserID(ctx)
+	job, err := ct.service.AddJob(name, schedule, params.Message, userID)
 	if err != nil {
 		return nil, fmt.Errorf("error adding job: %w", err)
 	}

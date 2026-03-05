@@ -34,10 +34,15 @@ func main() {
 	}
 
 	// 创建 CronAgent（使用文件存储）
+	// 默认行为：任务触发时，将 message 回送给 Agent 处理（支持嵌套任务）
 	ca, err := cron_agent.New(ctx, cm,
 		cron_agent.WithFileStore("cron_jobs.json"),
-		cron_agent.WithOnJobTriggered(func(job *cronPkg.CronJob) {
-			fmt.Printf("\n🔔 [定时任务触发] %s: %s\n", job.Name, job.Payload.Message)
+		cron_agent.WithOnJobProcessed(func(job *cronPkg.CronJob, response string, err error) {
+			if err != nil {
+				fmt.Printf("\n❌ [任务处理失败] %s: %v\n", job.Name, err)
+			} else {
+				fmt.Printf("\n🔔 [任务处理完成] %s\n   Agent 回复: %s\n", job.Name, response)
+			}
 		}),
 	)
 	if err != nil {
