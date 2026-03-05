@@ -3,18 +3,19 @@ module github.com/CoolBanHub/aggo
 go 1.24.4
 
 require (
-	github.com/bytedance/sonic v1.14.1
-	github.com/cloudwego/eino v0.7.3
-	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20251117090452-bd6375a0b3cf
-	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20251117090452-bd6375a0b3cf
-	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20251117090452-bd6375a0b3cf
-	github.com/cloudwego/eino-ext/components/model/openai v0.1.5
+	github.com/bytedance/sonic v1.15.0
+	github.com/cloudwego/eino v0.7.37
+	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20260305011506-a75910204c1f
+	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20260305011506-a75910204c1f
+	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.8
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13
+	github.com/go-resty/resty/v2 v2.17.2
 	github.com/google/uuid v1.6.0
 	github.com/gookit/slog v0.6.0
-	github.com/meguminnnnnnnnn/go-openai v0.1.0
+	github.com/meguminnnnnnnnn/go-openai v0.1.1
 	github.com/milvus-io/milvus/client/v2 v2.6.0
 	github.com/oklog/ulid/v2 v2.1.1
-	gopkg.in/resty.v1 v1.12.0
 	gorm.io/gorm v1.30.2
 )
 
@@ -27,13 +28,12 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
-	github.com/bytedance/sonic/loader v0.3.0 // indirect
+	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20251117090452-bd6375a0b3cf // indirect
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.2 // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
@@ -99,7 +99,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/tidwall/gjson v1.17.1 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
@@ -136,14 +136,14 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/arch v0.15.0 // indirect
-	golang.org/x/crypto v0.39.0 // indirect
+	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
-	golang.org/x/net v0.41.0 // indirect
-	golang.org/x/sync v0.15.0 // indirect
-	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/term v0.32.0 // indirect
-	golang.org/x/text v0.26.0 // indirect
-	golang.org/x/time v0.5.0 // indirect
+	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/term v0.34.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
+	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto v0.0.0-20240624140628-dc46fd24d27d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240617180043-68d350f18fd4 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240730163845-b1a4ccb954bf // indirect

@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/go-resty/resty/v2"
 	"github.com/gookit/slog"
-	"gopkg.in/resty.v1"
 )
 
 type Langfuse struct {
