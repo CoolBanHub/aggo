@@ -1,4 +1,4 @@
-package tools
+package knowledge
 
 import (
 	"context"
@@ -11,8 +11,8 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// GetKnowledgeReasoningTools 获取知识推理工具集合
-func GetKnowledgeReasoningTools(retriever retriever.Retriever, retrieverOptions []retriever.Option) []tool.BaseTool {
+// GetReasoningTools 获取知识推理工具集合
+func GetReasoningTools(retriever retriever.Retriever, retrieverOptions []retriever.Option) []tool.BaseTool {
 	return []tool.BaseTool{
 		NewKnowledgeThinkTool(),
 		NewKnowledgeSearchTool(retriever, retrieverOptions),

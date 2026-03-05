@@ -9,11 +9,12 @@ import (
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
-	"github.com/CoolBanHub/aggo/tools"
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/callbacks"
 	einoModel "github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
+	toolUtils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
@@ -214,7 +215,7 @@ func createMathAgent(ctx context.Context, cm einoModel.ToolCallingChatModel) (ad
 		Model: cm,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: tools.GetCalculatorTool(),
+				Tools: getCalculatorTools(),
 			},
 		},
 		MaxIterations: 5,
@@ -231,7 +232,7 @@ func createWeatherAgent(ctx context.Context, cm einoModel.ToolCallingChatModel) 
 		Model: cm,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: tools.GetWeatherTool(),
+				Tools: getWeatherTools(),
 			},
 		},
 		MaxIterations: 5,
@@ -248,9 +249,68 @@ func createTimeAgent(ctx context.Context, cm einoModel.ToolCallingChatModel) (ad
 		Model: cm,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: tools.GetTimeTool(),
+				Tools: getTimeTools(),
 			},
 		},
 		MaxIterations: 5,
 	})
+}
+
+// ============================================================
+// 示例工具定义（仅用于本示例）
+// ============================================================
+
+type calculatorParams struct {
+	Operation string  `json:"operation" jsonschema:"description=运算类型,required,enum=add,enum=subtract,enum=multiply,enum=divide"`
+	A         float64 `json:"a" jsonschema:"description=第一个数字,required"`
+	B         float64 `json:"b" jsonschema:"description=第二个数字,required"`
+}
+
+type weatherParams struct {
+	City string `json:"city" jsonschema:"description=要查询的城市名称,required"`
+	Date string `json:"date,omitempty" jsonschema:"description=查询日期"`
+}
+
+type timeToolParams struct {
+	Operation string `json:"operation" jsonschema:"description=操作类型,required,enum=current,enum=format,enum=diff"`
+	Format    string `json:"format,omitempty" jsonschema:"description=时间格式"`
+	Time1     string `json:"time1,omitempty" jsonschema:"description=第一个时间点"`
+	Time2     string `json:"time2,omitempty" jsonschema:"description=第二个时间点"`
+}
+
+func getCalculatorTools() []tool.BaseTool {
+	t, _ := toolUtils.InferTool("calculator", "执行基本的数学运算", func(ctx context.Context, p calculatorParams) (interface{}, error) {
+		var result float64
+		switch p.Operation {
+		case "add":
+			result = p.A + p.B
+		case "subtract":
+			result = p.A - p.B
+		case "multiply":
+			result = p.A * p.B
+		case "divide":
+			if p.B == 0 {
+				return nil, fmt.Errorf("除数不能为0")
+			}
+			result = p.A / p.B
+		default:
+			return nil, fmt.Errorf("不支持的运算类型: %s", p.Operation)
+		}
+		return map[string]interface{}{"result": result}, nil
+	})
+	return []tool.BaseTool{t}
+}
+
+func getWeatherTools() []tool.BaseTool {
+	t, _ := toolUtils.InferTool("weather_query", "查询指定城市的天气", func(ctx context.Context, p weatherParams) (interface{}, error) {
+		return map[string]interface{}{"city": p.City, "weather": "晴", "temperature": "20-28°C"}, nil
+	})
+	return []tool.BaseTool{t}
+}
+
+func getTimeTools() []tool.BaseTool {
+	t, _ := toolUtils.InferTool("time_tool", "处理时间相关操作", func(ctx context.Context, p timeToolParams) (interface{}, error) {
+		return map[string]interface{}{"operation": p.Operation, "result": "2024-01-01 00:00:00"}, nil
+	})
+	return []tool.BaseTool{t}
 }

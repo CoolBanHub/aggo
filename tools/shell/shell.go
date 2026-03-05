@@ -1,4 +1,4 @@
-package tools
+package shell
 
 import (
 	"context"
@@ -16,7 +16,8 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-func GetSellTool() []tool.BaseTool {
+// GetTools 获取全部 Shell 工具
+func GetTools() []tool.BaseTool {
 	this := &ShellTool{}
 	return []tool.BaseTool{
 		this.newShellExecuteTool(),
@@ -26,14 +27,16 @@ func GetSellTool() []tool.BaseTool {
 	}
 }
 
-func GetSysInfoTool() []tool.BaseTool {
+// GetSysInfoTools 获取系统信息工具
+func GetSysInfoTools() []tool.BaseTool {
 	this := &ShellTool{}
 	return []tool.BaseTool{
 		this.newShellSystemInfoTool(),
 	}
 }
 
-func GetExecuteTool() []tool.BaseTool {
+// GetExecuteTools 获取命令执行工具
+func GetExecuteTools() []tool.BaseTool {
 	this := &ShellTool{}
 	return []tool.BaseTool{
 		this.newShellExecuteTool(),

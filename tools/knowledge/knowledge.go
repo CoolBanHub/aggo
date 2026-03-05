@@ -1,4 +1,4 @@
-package tools
+package knowledge
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 )
 
-func GetKnowledgeTools(indexer indexer.Indexer, retriever retriever.Retriever, retrieverOptions *retriever.Options) []tool.BaseTool {
+func GetTools(indexer indexer.Indexer, retriever retriever.Retriever, retrieverOptions *retriever.Options) []tool.BaseTool {
 	return []tool.BaseTool{
 		NewLoadDocumentsTool(indexer),
 		NewSearchDocumentsTool(retriever, retrieverOptions),

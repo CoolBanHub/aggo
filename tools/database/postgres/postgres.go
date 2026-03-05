@@ -1,4 +1,4 @@
-package tools
+package postgres
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// GetPostgresTools 获取PostgreSQL工具列表
-func GetPostgresTools(db *gorm.DB) []tool.BaseTool {
+// GetTools 获取PostgreSQL工具列表
+func GetTools(db *gorm.DB) []tool.BaseTool {
 	return []tool.BaseTool{
 		NewListDatabasesTool(db),
 		NewListTablesTool(db),

@@ -7,7 +7,7 @@ import (
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
-	"github.com/CoolBanHub/aggo/tools"
+	"github.com/CoolBanHub/aggo/tools/shell"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -24,7 +24,7 @@ func main() {
 
 	bot, err := agent.NewAgent(ctx, cm,
 		agent.WithSystemPrompt("你是一个linux大师"),
-		agent.WithTools(tools.GetExecuteTool()),
+		agent.WithTools(shell.GetExecuteTools()),
 	)
 	if err != nil {
 		log.Fatalf("new agent fail,err:%s", err)
@@ -40,7 +40,7 @@ func main() {
 		log.Printf("User: %s", conversation)
 		out, err := bot.Generate(ctx, []*schema.Message{
 			schema.UserMessage(conversation),
-		}, agent.WithChatTools(tools.GetSysInfoTool()))
+		}, agent.WithChatTools(shell.GetSysInfoTools()))
 		if err != nil {
 			log.Fatalf("generate fail,err:%s", err)
 			return

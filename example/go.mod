@@ -6,7 +6,7 @@ replace github.com/CoolBanHub/aggo => ../
 
 require (
 	github.com/CoolBanHub/aggo v0.0.0-00010101000000-000000000000
-	github.com/bytedance/sonic v1.14.1
+	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.7.37
 	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20251111090228-91a10bbc864f
 	github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20251011073417-75b93b87b8a9
@@ -34,18 +34,18 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
-	github.com/bytedance/sonic/loader v0.3.0 // indirect
+	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20251117090452-bd6375a0b3cf // indirect
-	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20251117090452-bd6375a0b3cf // indirect
+	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20260305011506-a75910204c1f // indirect
+	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20260305011506-a75910204c1f // indirect
 	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20251117090452-bd6375a0b3cf // indirect
-	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20251117090452-bd6375a0b3cf // indirect
-	github.com/cloudwego/eino-ext/components/model/openai v0.1.5 // indirect
+	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f // indirect
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.8 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b // indirect
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.2 // indirect
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
@@ -97,7 +97,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
-	github.com/meguminnnnnnnnn/go-openai v0.1.0 // indirect
+	github.com/meguminnnnnnnnn/go-openai v0.1.1 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.3 // indirect
 	github.com/milvus-io/milvus/pkg/v2 v2.6.3 // indirect
@@ -172,7 +172,7 @@ require (
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/term v0.34.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
-	golang.org/x/time v0.10.0 // indirect
+	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250227231956-55c901821b1e // indirect
