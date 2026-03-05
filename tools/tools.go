@@ -59,11 +59,6 @@ func GetShellTools() []tool.BaseTool {
 	return shell.GetTools()
 }
 
-// GetSysInfoTools 获取系统信息工具
-func GetSysInfoTools() []tool.BaseTool {
-	return shell.GetSysInfoTools()
-}
-
 // GetExecuteTools 获取命令执行工具
 func GetExecuteTools() []tool.BaseTool {
 	return shell.GetExecuteTools()
