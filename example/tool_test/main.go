@@ -9,13 +9,20 @@ import (
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools/shell"
 	"github.com/cloudwego/eino/schema"
+	"github.com/joho/godotenv"
 )
 
 func main() {
 	ctx := context.Background()
+
+	// 加载 .env 文件
+	if err := godotenv.Load(); err != nil {
+		log.Printf("警告: 无法加载 .env 文件: %v", err)
+	}
+
 	cm, err := model.NewChatModel(model.WithBaseUrl(os.Getenv("BaseUrl")),
 		model.WithAPIKey(os.Getenv("APIKey")),
-		model.WithModel("gpt-5-mini"),
+		model.WithModel(os.Getenv("Model")),
 	)
 	if err != nil {
 		log.Fatalf("new chat model fail,err:%s", err)
@@ -40,7 +47,7 @@ func main() {
 		log.Printf("User: %s", conversation)
 		out, err := bot.Generate(ctx, []*schema.Message{
 			schema.UserMessage(conversation),
-		}, agent.WithChatTools(shell.GetSysInfoTools()))
+		}, agent.WithChatTools(shell.GetTools()))
 		if err != nil {
 			log.Fatalf("generate fail,err:%s", err)
 			return
