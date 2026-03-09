@@ -106,6 +106,8 @@ github.com/cloudwego/eino-ext/components/model/gemini v0.1.17 h1:Za42IMOr1icFGrG
 github.com/cloudwego/eino-ext/components/model/gemini v0.1.17/go.mod h1:4Skg6VchrcbsGOJmyjmfXZu2m2pdMJ3VCw1AeBWfRso=
 github.com/cloudwego/eino-ext/components/model/openai v0.1.8 h1:uVCE8nNvbhD37xGFgdKESWjvChDSkCAMA+DodhFRBaM=
 github.com/cloudwego/eino-ext/components/model/openai v0.1.8/go.mod h1:K6g2VgULehhJC5dgFdPW3u7gZNZ1p6DhnfA5UhkRpNY=
+github.com/cloudwego/eino-ext/components/tool/httprequest v0.0.0-20260306073537-008f82264d85 h1:LASU6SpaND2VQXFfpwSMb/7KwLi3+VF0n0Yh0irw87I=
+github.com/cloudwego/eino-ext/components/tool/httprequest v0.0.0-20260306073537-008f82264d85/go.mod h1:4YHp/Tzdfu7dvEkZzxmJ70A4BUWuMvDWJq9UQvtQwmc=
 github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b h1:QGOp1e7tmQEUtznQ8fD8xUam2d/RECA8oJuPam2212s=
 github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b/go.mod h1:3U4sve/4FGASns5zXHUfBX4ZTruQEhT1t9F1cNb5czM=
 github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 h1:z0bI5TH3nE+uDQiRhxBQMvk2HswlDUM3xP38+VSgpSQ=

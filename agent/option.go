@@ -54,6 +54,12 @@ func WithMaxStep(maxStep int) Option {
 	}
 }
 
+func WithAdkAgentMiddlewares(adkMiddlewares []adk.AgentMiddleware) Option {
+	return func(agent *Agent) {
+		agent.adkMiddlewares = adkMiddlewares
+	}
+}
+
 type chatOptions struct {
 	composeOptions     []compose.Option
 	userID             string

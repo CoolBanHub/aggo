@@ -213,8 +213,8 @@ func New(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*C
 		// 默认行为：将 message 回送给 Agent 处理
 		onProcessed := cfg.onJobProcessed
 		service.SetOnJob(func(job *cronPkg.CronJob) (string, error) {
-
-			resp, err := ca.Generate(context.Background(), []*schema.Message{
+			resp, err := cm.Generate(context.Background(), []*schema.Message{
+				schema.SystemMessage("你是一个提醒助手。请将以下定时任务消息转换为简洁、友好的提醒通知。要求：直接输出一句话，不要解释、不要提供多个版本、不要询问用户偏好。格式：🔔 [提醒] {内容}"),
 				schema.UserMessage(job.Payload.Message),
 			})
 

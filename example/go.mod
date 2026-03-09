@@ -45,6 +45,7 @@ require (
 	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20251117090452-bd6375a0b3cf // indirect
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f // indirect
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8 // indirect
+	github.com/cloudwego/eino-ext/components/tool/httprequest v0.0.0-20260306073537-008f82264d85 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect

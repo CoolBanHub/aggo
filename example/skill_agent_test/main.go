@@ -1,20 +1,3 @@
-/*
- * Copyright 2025 CloudWeGo Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-// Package main demonstrates how to use the skill middleware with ChatModelAgent.
 package main
 
 import (
@@ -23,11 +6,12 @@ import (
 	"log"
 	"os"
 
+	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools/shell"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/skill"
-	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/schema"
 	"github.com/joho/godotenv"
 )
 
@@ -108,51 +92,43 @@ func main() {
 	// Step 5: 创建 ChatModelAgent
 	// ============================================================
 	// 合并所有工具: skill 工具 (由 middleware 自动添加) + shell 工具
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:        "skill-creator-assistant",
-		Description: "Skill 创建助手，可以帮助用户创建和更新 AgentSkills",
-		Instruction: `你是一个 Skill 创建助手。
+	systemPrompt := `你是一个 Skill 创建助手。
+	
+	## 工作流程
+	当用户请求创建或更新 skill 时，请按以下步骤操作：
+	
+	1. **加载 Skill**: 首先使用 skill 工具加载 "skill-creator" skill
+	2. **理解需求**: 根据 skill 创建指南，了解用户的具体需求
+	3. **创建 Skill**: 按照 skill-creator 中的指南，帮助用户创建或更新 skill
+	4. **返回结果**: 将创建的 skill 结构和内容清晰地返回给用户
+	
+	## 重要提示
+	- skill-creator skill 中包含了完整的 skill 创建流程和最佳实践
+	- 遵循渐进式披露原则，保持 SKILL.md 简洁
+	- 使用正确的 YAML frontmatter 格式`
 
-## 工作流程
-当用户请求创建或更新 skill 时，请按以下步骤操作：
+	opts := []agent.Option{
+		agent.WithName("skill-creator-assistant"),
+		agent.WithDescription("Skill 创建助手，可以帮助用户创建和更新 AgentSkills"),
+		agent.WithSystemPrompt(systemPrompt),
+		agent.WithTools(shellTools),
+		agent.WithAdkAgentMiddlewares([]adk.AgentMiddleware{skillMiddleware}),
+	}
+	a, err := agent.NewAgent(ctx, chatModel, opts...)
 
-1. **加载 Skill**: 首先使用 skill 工具加载 "skill-creator" skill
-2. **理解需求**: 根据 skill 创建指南，了解用户的具体需求
-3. **创建 Skill**: 按照 skill-creator 中的指南，帮助用户创建或更新 skill
-4. **返回结果**: 将创建的 skill 结构和内容清晰地返回给用户
-
-## 重要提示
-- skill-creator skill 中包含了完整的 skill 创建流程和最佳实践
-- 遵循渐进式披露原则，保持 SKILL.md 简洁
-- 使用正确的 YAML frontmatter 格式`,
-		Model: chatModel,
-		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: shellTools, // 添加 shell 工具
-			},
-		},
-		Middlewares: []adk.AgentMiddleware{skillMiddleware},
-	})
 	if err != nil {
 		log.Fatalf("Failed to create agent: %v", err)
 	}
 
 	// ============================================================
-	// Step 6: 创建 runner 并运行 agent
-	// ============================================================
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{
-		Agent: agent,
-	})
-
-	// ============================================================
-	// Step 7: 执行查询
+	// Step 6: 执行查询
 	// ============================================================
 	query := "请帮我创建一个用于处理 PDF 文件的 skill"
 
-	fmt.Println("=== Running Agent ===")
-	fmt.Printf("Query: %s\n\n", query)
-
-	iter := runner.Query(ctx, query)
+	iter := a.Run(ctx, &adk.AgentInput{
+		Messages:        []adk.Message{schema.UserMessage(query)},
+		EnableStreaming: false,
+	})
 
 	// 处理来自 agent 的事件
 	for {

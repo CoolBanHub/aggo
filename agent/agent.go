@@ -24,12 +24,13 @@ type Agent struct {
 	memoryManager *memory.MemoryManager
 
 	// 基本信息（用于创建agent时使用）
-	name         string
-	description  string
-	systemPrompt string
-	cm           model.ToolCallingChatModel
-	tools        []tool.BaseTool
-	maxStep      int
+	name           string
+	description    string
+	systemPrompt   string
+	cm             model.ToolCallingChatModel
+	tools          []tool.BaseTool
+	maxStep        int
+	adkMiddlewares []adk.AgentMiddleware
 
 	// 子agents（用于多agent场景）
 	subAgents []adk.Agent
@@ -73,6 +74,7 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 			},
 		},
 		MaxIterations: this.maxStep,
+		Middlewares:   this.adkMiddlewares,
 	})
 	if err != nil {
 		return nil, err
@@ -356,7 +358,6 @@ func (this *Agent) runAgentWithPreprocess(ctx context.Context, input []*schema.M
 
 	// 调用底层 adk.Agent 的 Run 方法
 	iter := this.agent.Run(ctx, processedAgentInput, options...)
-
 	return ctx, iter, nil
 }
 
