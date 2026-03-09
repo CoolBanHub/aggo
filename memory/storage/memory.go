@@ -422,10 +422,13 @@ func (m *MemoryStore) GetMessages(ctx context.Context, sessionID string, userID 
 	defer m.mu.RUnlock()
 
 	key := m.generateKey(sessionID, userID)
-	messages, exists := m.messages[key]
+	msgs, exists := m.messages[key]
 	if !exists {
 		return []*memory.ConversationMessage{}, nil
 	}
+
+	messages := make([]*memory.ConversationMessage, len(msgs))
+	copy(messages, msgs)
 
 	// 按时间排序（最新的在后面）
 	sort.Slice(messages, func(i, j int) bool {
@@ -480,8 +483,7 @@ func (m *MemoryStore) CleanupOldMessages(ctx context.Context, userID string, bef
 	cleanedCount := 0
 	for sessionKey, messages := range m.messages {
 		// 检查是否属于指定用户
-		sessionUserID := strings.Split(sessionKey, ":")[1]
-		if sessionUserID != userID {
+		if !strings.HasSuffix(sessionKey, ":"+userID) {
 			continue
 		}
 
