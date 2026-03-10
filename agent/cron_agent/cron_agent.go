@@ -55,6 +55,7 @@ type config struct {
 	extraTools     []tool.BaseTool
 	maxJobs        int // 任务总数上限，0 表示不限制（默认不限制）
 	maxJobsPerUser int // 单用户任务数上限
+	locker         cronPkg.Locker
 }
 
 // WithFileStore 使用文件存储
@@ -96,6 +97,13 @@ func WithOnJobTriggered(fn func(job *cronPkg.CronJob)) Option {
 func WithOnJobProcessed(fn func(job *cronPkg.CronJob, response string, err error)) Option {
 	return func(c *config) {
 		c.onJobProcessed = fn
+	}
+}
+
+// WithLocker 设置分布式锁
+func WithLocker(locker cronPkg.Locker) Option {
+	return func(c *config) {
+		c.locker = locker
 	}
 }
 
@@ -155,6 +163,11 @@ func New(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*C
 	}
 	if cfg.maxJobsPerUser > 0 {
 		service.SetMaxJobsPerUser(cfg.maxJobsPerUser)
+	}
+
+	// 设置分布式锁
+	if cfg.locker != nil {
+		service.SetLocker(cfg.locker)
 	}
 
 	// 构建 cron 工具（先不设置回调，在 agent 创建后再设置）

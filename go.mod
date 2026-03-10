@@ -3,7 +3,6 @@ module github.com/CoolBanHub/aggo
 go 1.24.4
 
 require (
-	github.com/adhocore/gronx v1.19.6
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.8.0
 	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20260305011506-a75910204c1f
@@ -11,6 +10,7 @@ require (
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13
+	github.com/go-co-op/gocron/v2 v2.19.1
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/google/uuid v1.6.0
 	github.com/gookit/slog v0.6.0
@@ -67,7 +67,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	github.com/jonboulle/clockwork v0.2.2 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
@@ -91,6 +91,7 @@ require (
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.42.0 // indirect
 	github.com/prometheus/procfs v0.9.0 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/samber/lo v1.27.0 // indirect
 	github.com/shirou/gopsutil/v3 v3.22.9 // indirect

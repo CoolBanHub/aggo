@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -8,11 +9,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/adhocore/gronx"
+	"github.com/go-co-op/gocron/v2"
+	"github.com/google/uuid"
 )
 
 // JobHandler 任务触发回调
 type JobHandler func(job *CronJob) (string, error)
+
+// Locker 分布式锁接口，便于后续扩展
+type Locker interface {
+	Lock(ctx context.Context, key string) error
+	Unlock(ctx context.Context, key string) error
+}
 
 // CronService 定时调度服务
 type CronService struct {
@@ -20,19 +28,29 @@ type CronService struct {
 	onJob          JobHandler
 	mu             sync.RWMutex
 	running        bool
-	stopChan       chan struct{}
-	gronx          *gronx.Gronx
+	scheduler      gocron.Scheduler
+	locker         Locker
 	maxJobs        int // 任务数量上限，0 表示不限制
 	maxJobsPerUser int // 单用户任务数量上限，0 表示不限制
+
+	// jobIDToGocronID 维护内部 ID 到 gocron ID 的映射
+	jobIDToGocronID map[string]uuid.UUID
 }
 
 // NewCronService 创建定时调度服务
 func NewCronService(store Store, onJob JobHandler) *CronService {
 	return &CronService{
-		store: store,
-		onJob: onJob,
-		gronx: gronx.New(),
+		store:           store,
+		onJob:           onJob,
+		jobIDToGocronID: make(map[string]uuid.UUID),
 	}
+}
+
+// SetLocker 设置分布式锁实现
+func (cs *CronService) SetLocker(locker Locker) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.locker = locker
 }
 
 // SetMaxJobs 设置最大任务数量限制，0 表示不限制
@@ -58,14 +76,30 @@ func (cs *CronService) Start() error {
 		return nil
 	}
 
-	// 重新计算所有任务的下次运行时间
-	if err := cs.recomputeNextRuns(); err != nil {
-		return fmt.Errorf("failed to recompute next runs: %w", err)
+	// 创建调度器
+	s, err := gocron.NewScheduler()
+	if err != nil {
+		return fmt.Errorf("failed to create gocron scheduler: %w", err)
+	}
+	cs.scheduler = s
+
+	// 加载并启动所有已启用的任务
+	jobs, err := cs.store.List()
+	if err != nil {
+		return fmt.Errorf("failed to list jobs from store: %w", err)
 	}
 
-	cs.stopChan = make(chan struct{})
+	for i := range jobs {
+		job := &jobs[i]
+		if job.Enabled {
+			if err := cs.registerJobInScheduler(job); err != nil {
+				log.Printf("[cron] failed to register job %s: %v", job.ID, err)
+			}
+		}
+	}
+
+	cs.scheduler.Start()
 	cs.running = true
-	go cs.runLoop(cs.stopChan)
 
 	return nil
 }
@@ -79,171 +113,148 @@ func (cs *CronService) Stop() {
 		return
 	}
 
+	if cs.scheduler != nil {
+		_ = cs.scheduler.Shutdown()
+		cs.scheduler = nil
+	}
 	cs.running = false
-	if cs.stopChan != nil {
-		close(cs.stopChan)
-		cs.stopChan = nil
-	}
+	cs.jobIDToGocronID = make(map[string]uuid.UUID)
 }
 
-func (cs *CronService) runLoop(stopChan chan struct{}) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+func (cs *CronService) registerJobInScheduler(job *CronJob) error {
+	var definition gocron.JobDefinition
 
-	for {
-		select {
-		case <-stopChan:
-			return
-		case <-ticker.C:
-			cs.checkJobs()
+	switch job.Schedule.Kind {
+	case "at":
+		if job.Schedule.AtMS == nil {
+			return fmt.Errorf("atMs is required for kind=at")
 		}
-	}
-}
-
-func (cs *CronService) checkJobs() {
-	cs.mu.Lock()
-
-	if !cs.running {
-		cs.mu.Unlock()
-		return
-	}
-
-	jobs, err := cs.store.List()
-	if err != nil {
-		cs.mu.Unlock()
-		log.Printf("[cron] failed to list jobs: %v", err)
-		return
-	}
-
-	now := time.Now().UnixMilli()
-	var dueJobs []CronJob
-
-	for i := range jobs {
-		job := &jobs[i]
-		if job.Enabled && job.State.NextRunAtMS != nil && *job.State.NextRunAtMS <= now {
-			dueJobs = append(dueJobs, *job)
-			// 清除 NextRunAtMS 避免重复执行
+		startTime := time.UnixMilli(*job.Schedule.AtMS)
+		if startTime.Before(time.Now()) {
+			// 如果时间已过，标记为禁用并跳过
+			job.Enabled = false
 			job.State.NextRunAtMS = nil
-			if saveErr := cs.store.Save(job); saveErr != nil {
-				log.Printf("[cron] failed to save job state: %v", saveErr)
-			}
+			_ = cs.store.Save(job)
+			return nil
 		}
+		definition = gocron.OneTimeJob(gocron.OneTimeJobStartDateTime(startTime))
+
+	case "every":
+		if job.Schedule.EveryMS == nil || *job.Schedule.EveryMS <= 0 {
+			return fmt.Errorf("everyMs is required for kind=every")
+		}
+		definition = gocron.DurationJob(time.Duration(*job.Schedule.EveryMS) * time.Millisecond)
+
+	case "cron":
+		if job.Schedule.Expr == "" {
+			return fmt.Errorf("expr is required for kind=cron")
+		}
+		definition = gocron.CronJob(job.Schedule.Expr, false)
+
+	default:
+		return fmt.Errorf("unknown schedule kind: %s", job.Schedule.Kind)
 	}
 
-	cs.mu.Unlock()
-
-	// 在锁外执行任务
-	for i := range dueJobs {
-		cs.executeJob(&dueJobs[i])
+	// 包装执行逻辑，处理分布式锁和状态更新
+	task := func() {
+		cs.executeJob(job.ID)
 	}
+
+	gJob, err := cs.scheduler.NewJob(definition, gocron.NewTask(task))
+	if err != nil {
+		return err
+	}
+
+	cs.jobIDToGocronID[job.ID] = gJob.ID()
+
+	// 更新下次运行时间到 Store
+	nextRun, _ := gJob.NextRun()
+	if !nextRun.IsZero() {
+		ms := nextRun.UnixMilli()
+		job.State.NextRunAtMS = &ms
+		_ = cs.store.Save(job)
+	}
+
+	return nil
 }
 
-func (cs *CronService) executeJob(job *CronJob) {
+func (cs *CronService) executeJob(jobID string) {
+	// 获取最新的任务信息
+	cs.mu.Lock()
+	job, err := cs.store.Get(jobID)
+	cs.mu.Unlock()
+	if err != nil || !job.Enabled {
+		return
+	}
+
+	// 分布式锁逻辑
+	if cs.locker != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := cs.locker.Lock(ctx, "cron_job_"+jobID); err != nil {
+			log.Printf("[cron] failed to acquire lock for job %s: %v", jobID, err)
+			return
+		}
+		defer cs.locker.Unlock(ctx, "cron_job_"+jobID)
+	}
+
 	startTime := time.Now().UnixMilli()
 
-	var err error
+	var jobErr error
 	if cs.onJob != nil {
-		_, err = cs.onJob(job)
+		_, jobErr = cs.onJob(job)
 	}
 
 	// 更新状态
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	// 从 store 获取最新的 job
-	current, getErr := cs.store.Get(job.ID)
+	current, getErr := cs.store.Get(jobID)
 	if getErr != nil {
-		log.Printf("[cron] job %s disappeared before state update", job.ID)
 		return
 	}
 
 	current.State.LastRunAtMS = &startTime
 	current.UpdatedAtMS = time.Now().UnixMilli()
 
-	if err != nil {
+	if jobErr != nil {
 		current.State.LastStatus = "error"
-		current.State.LastError = err.Error()
+		current.State.LastError = jobErr.Error()
 	} else {
 		current.State.LastStatus = "ok"
 		current.State.LastError = ""
 	}
 
-	// 计算下次运行时间
+	// 处理一次性任务的后续逻辑
 	if current.Schedule.Kind == "at" {
 		if current.DeleteAfterRun {
-			if delErr := cs.store.Delete(current.ID); delErr != nil {
-				log.Printf("[cron] failed to delete one-time job: %v", delErr)
+			_ = cs.store.Delete(current.ID)
+			if gid, ok := cs.jobIDToGocronID[current.ID]; ok && cs.scheduler != nil {
+				_ = cs.scheduler.RemoveJob(gid)
+				delete(cs.jobIDToGocronID, current.ID)
 			}
 			return
 		}
 		current.Enabled = false
 		current.State.NextRunAtMS = nil
 	} else {
-		nextRun := cs.computeNextRun(&current.Schedule, time.Now().UnixMilli())
-		current.State.NextRunAtMS = nextRun
-	}
-
-	if saveErr := cs.store.Save(current); saveErr != nil {
-		log.Printf("[cron] failed to save job state: %v", saveErr)
-	}
-}
-
-func (cs *CronService) computeNextRun(schedule *CronSchedule, nowMS int64) *int64 {
-	switch schedule.Kind {
-	case "at":
-		if schedule.AtMS != nil && *schedule.AtMS > nowMS {
-			return schedule.AtMS
-		}
-		return nil
-
-	case "every":
-		if schedule.EveryMS == nil || *schedule.EveryMS <= 0 {
-			return nil
-		}
-		next := nowMS + *schedule.EveryMS
-		return &next
-
-	case "cron":
-		if schedule.Expr == "" {
-			return nil
-		}
-		now := time.UnixMilli(nowMS)
-		nextTime, err := gronx.NextTickAfter(schedule.Expr, now, false)
-		if err != nil {
-			log.Printf("[cron] failed to compute next run for expr '%s': %v", schedule.Expr, err)
-			return nil
-		}
-		nextMS := nextTime.UnixMilli()
-		return &nextMS
-	}
-
-	return nil
-}
-
-func (cs *CronService) recomputeNextRuns() error {
-	jobs, err := cs.store.List()
-	if err != nil {
-		return err
-	}
-
-	now := time.Now().UnixMilli()
-	for i := range jobs {
-		job := &jobs[i]
-		if job.Enabled {
-			job.State.NextRunAtMS = cs.computeNextRun(&job.Schedule, now)
-			if saveErr := cs.store.Save(job); saveErr != nil {
-				return saveErr
+		// 更新下次运行时间
+		if gid, ok := cs.jobIDToGocronID[current.ID]; ok && cs.scheduler != nil {
+			// 尝试从 gocron 获取真实下次运行时间
+			for _, gj := range cs.scheduler.Jobs() {
+				if gj.ID() == gid {
+					next, _ := gj.NextRun()
+					if !next.IsZero() {
+						ms := next.UnixMilli()
+						current.State.NextRunAtMS = &ms
+					}
+					break
+				}
 			}
 		}
 	}
-	return nil
-}
 
-// SetOnJob 设置任务触发回调
-func (cs *CronService) SetOnJob(handler JobHandler) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	cs.onJob = handler
+	_ = cs.store.Save(current)
 }
 
 // AddJob 添加定时任务
@@ -286,9 +297,6 @@ func (cs *CronService) AddJob(name string, schedule CronSchedule, message string
 		Payload: CronPayload{
 			Message: message,
 		},
-		State: CronJobState{
-			NextRunAtMS: cs.computeNextRun(&schedule, now),
-		},
 		CreatedAtMS:    now,
 		UpdatedAtMS:    now,
 		DeleteAfterRun: deleteAfterRun,
@@ -298,6 +306,13 @@ func (cs *CronService) AddJob(name string, schedule CronSchedule, message string
 		return nil, err
 	}
 
+	if cs.running {
+		if err := cs.registerJobInScheduler(job); err != nil {
+			// 即使注册失败也返回 job，因为已经存入 store，下次启动会重试
+			log.Printf("[cron] failed to register new job in scheduler: %v", err)
+		}
+	}
+
 	return job, nil
 }
 
@@ -305,6 +320,11 @@ func (cs *CronService) AddJob(name string, schedule CronSchedule, message string
 func (cs *CronService) RemoveJob(jobID string) bool {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
+
+	if gid, ok := cs.jobIDToGocronID[jobID]; ok && cs.scheduler != nil {
+		_ = cs.scheduler.RemoveJob(gid)
+		delete(cs.jobIDToGocronID, jobID)
+	}
 
 	if err := cs.store.Delete(jobID); err != nil {
 		return false
@@ -322,12 +342,24 @@ func (cs *CronService) EnableJob(jobID string, enabled bool) *CronJob {
 		return nil
 	}
 
+	if job.Enabled == enabled {
+		return job
+	}
+
 	job.Enabled = enabled
 	job.UpdatedAtMS = time.Now().UnixMilli()
 
 	if enabled {
-		job.State.NextRunAtMS = cs.computeNextRun(&job.Schedule, time.Now().UnixMilli())
+		if cs.running {
+			if err := cs.registerJobInScheduler(job); err != nil {
+				log.Printf("[cron] failed to enable job %s: %v", jobID, err)
+			}
+		}
 	} else {
+		if gid, ok := cs.jobIDToGocronID[jobID]; ok && cs.scheduler != nil {
+			_ = cs.scheduler.RemoveJob(gid)
+			delete(cs.jobIDToGocronID, jobID)
+		}
 		job.State.NextRunAtMS = nil
 	}
 
@@ -381,10 +413,28 @@ func (cs *CronService) Status() map[string]any {
 	}
 }
 
+// SetOnJob 设置任务触发回调
+func (cs *CronService) SetOnJob(handler JobHandler) {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.onJob = handler
+}
+
 func generateID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+// 辅助方法：解析 UUID（处理 gocron 的 ID 类型）
+func parseUUID(s string) uuid.UUID {
+	// gocron.JobID is uuid.UUID
+	id, err := uuid.Parse(s)
+	if err != nil {
+		log.Printf("[cron] failed to parse UUID string '%s': %v", s, err)
+		return uuid.Nil // Return a nil UUID on error
+	}
+	return id
 }
