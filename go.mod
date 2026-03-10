@@ -3,8 +3,9 @@ module github.com/CoolBanHub/aggo
 go 1.24.4
 
 require (
+	github.com/adhocore/gronx v1.19.6
 	github.com/bytedance/sonic v1.15.0
-	github.com/cloudwego/eino v0.7.37
+	github.com/cloudwego/eino v0.8.0
 	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20260305011506-a75910204c1f
 	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20260305011506-a75910204c1f
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f
@@ -21,7 +22,6 @@ require (
 
 require (
 	github.com/PuerkitoBio/goquery v1.8.1 // indirect
-	github.com/adhocore/gronx v1.19.6 // indirect
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect

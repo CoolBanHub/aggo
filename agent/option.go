@@ -54,7 +54,7 @@ func WithMaxStep(maxStep int) Option {
 	}
 }
 
-func WithAdkAgentMiddlewares(adkMiddlewares []adk.AgentMiddleware) Option {
+func WithAdkAgentMiddlewares(adkMiddlewares []adk.ChatModelAgentMiddleware) Option {
 	return func(agent *Agent) {
 		agent.adkMiddlewares = adkMiddlewares
 	}

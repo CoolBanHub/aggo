@@ -30,7 +30,7 @@ type Agent struct {
 	cm             model.ToolCallingChatModel
 	tools          []tool.BaseTool
 	maxStep        int
-	adkMiddlewares []adk.AgentMiddleware
+	adkMiddlewares []adk.ChatModelAgentMiddleware
 
 	// 子agents（用于多agent场景）
 	subAgents []adk.Agent
@@ -74,7 +74,7 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 			},
 		},
 		MaxIterations: this.maxStep,
-		Middlewares:   this.adkMiddlewares,
+		Handlers:      this.adkMiddlewares,
 	})
 	if err != nil {
 		return nil, err

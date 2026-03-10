@@ -7,7 +7,7 @@ replace github.com/CoolBanHub/aggo => ../
 require (
 	github.com/CoolBanHub/aggo v0.0.0-00010101000000-000000000000
 	github.com/bytedance/sonic v1.15.0
-	github.com/cloudwego/eino v0.7.37
+	github.com/cloudwego/eino v0.8.0
 	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20251111090228-91a10bbc864f
 	github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20251011073417-75b93b87b8a9
 	github.com/cloudwego/eino-ext/components/model/gemini v0.1.17
@@ -33,6 +33,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
@@ -45,7 +46,6 @@ require (
 	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20251117090452-bd6375a0b3cf // indirect
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f // indirect
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8 // indirect
-	github.com/cloudwego/eino-ext/components/tool/httprequest v0.0.0-20260306073537-008f82264d85 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect
