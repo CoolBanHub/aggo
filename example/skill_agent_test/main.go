@@ -61,32 +61,27 @@ func main() {
 	shellTools := shell.GetTools()
 
 	// ============================================================
-	// Step 3: 创建 LocalBackend 从文件系统加载 skills
+	// Step 3: 创建 Backend 从文件系统加载 skills
 	// ============================================================
 	skillsDir := "./skills"
 
-	localBackend, err := skill.NewLocalBackend(&skill.LocalBackendConfig{
+	backend, err := skill.NewBackendFromFilesystem(ctx, &skill.BackendFromFilesystemConfig{
 		BaseDir: skillsDir,
 	})
 	if err != nil {
-		log.Fatalf("Failed to create local backend: %v", err)
+		log.Fatalf("Failed to create backend: %v", err)
 	}
 
 	// ============================================================
 	// Step 4: 创建 skill middleware
 	// ============================================================
-	skillMiddleware, err := skill.New(ctx, &skill.Config{
-		Backend:    localBackend,
+	skillMiddleware, err := skill.NewMiddleware(ctx, &skill.Config{
+		Backend:    backend,
 		UseChinese: true,
 	})
 	if err != nil {
 		log.Fatalf("Failed to create skill middleware: %v", err)
 	}
-
-	fmt.Println("=== Skill Middleware ===")
-	fmt.Println("AdditionalInstruction 长度:", len(skillMiddleware.AdditionalInstruction))
-	fmt.Println("AdditionalTools 数量:", len(skillMiddleware.AdditionalTools))
-	fmt.Println()
 
 	// ============================================================
 	// Step 5: 创建 ChatModelAgent
@@ -112,7 +107,7 @@ func main() {
 		agent.WithDescription("Skill 创建助手，可以帮助用户创建和更新 AgentSkills"),
 		agent.WithSystemPrompt(systemPrompt),
 		agent.WithTools(shellTools),
-		agent.WithAdkAgentMiddlewares([]adk.AgentMiddleware{skillMiddleware}),
+		agent.WithAdkAgentMiddlewares([]adk.ChatModelAgentMiddleware{skillMiddleware}),
 	}
 	a, err := agent.NewAgent(ctx, chatModel, opts...)
 
