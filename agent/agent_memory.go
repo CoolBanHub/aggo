@@ -184,19 +184,19 @@ func (this *Agent) fetchUserMemoryMessage(ctx context.Context, chatOpts *chatOpt
 	}
 
 	// 获取用户记忆
-	userMemories, err := this.memoryManager.GetUserMemories(ctx, chatOpts.userID)
+	userMemory, err := this.memoryManager.GetUserMemory(ctx, chatOpts.userID)
 	if err != nil {
 		log.Printf("获取用户记忆失败: %v", err)
 		return nil
 	}
 
 	// 如果没有用户记忆，返回 nil
-	if len(userMemories) == 0 {
+	if userMemory == nil || userMemory.Memory == "" {
 		return nil
 	}
 
 	// 格式化用户记忆
-	memoryContent := this.formatUserMemories(userMemories)
+	memoryContent := this.formatUserMemory(userMemory)
 	if memoryContent == "" {
 		return nil
 	}
@@ -240,18 +240,15 @@ func (this *Agent) fetchSessionSummaryMessage(ctx context.Context, chatOpts *cha
 // 辅助方法
 // ============================================================================
 
-// formatUserMemories 格式化用户记忆为可读的上下文信息
-func (this *Agent) formatUserMemories(memories []*memory.UserMemory) string {
-	if len(memories) == 0 {
+// formatUserMemory 格式化用户记忆为可读的上下文信息
+func (this *Agent) formatUserMemory(userMemory *memory.UserMemory) string {
+	if userMemory == nil || userMemory.Memory == "" {
 		return ""
 	}
 
 	var builder strings.Builder
 	builder.WriteString("用户个人信息记忆（请在回复中考虑这些信息，提供个性化的响应）:\n")
-
-	for _, mem := range memories {
-		builder.WriteString(fmt.Sprintf("- %s\n", mem.Memory))
-	}
+	builder.WriteString(userMemory.Memory)
 
 	return builder.String()
 }

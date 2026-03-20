@@ -387,15 +387,16 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 	return nil
 }
 
-// analyzeAndCreateUserMemory 分析用户消息并创建记忆
+// analyzeAndCreateUserMemory 分析用户消息并更新记忆
 func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, sessionID string) {
-	userMemoryList, err := m.storage.GetUserMemories(ctx, userID, 0, m.config.Retrieval)
+	// 获取现有记忆
+	existingMemory, err := m.storage.GetUserMemory(ctx, userID)
 	if err != nil {
 		slog.Errorf("获取用户记忆失败: %v\n", err)
 		return
 	}
 
-	// 获取最近20条消息作为上下文
+	// 获取最近消息作为上下文
 	historyMessages, err := m.storage.GetMessages(ctx, sessionID, userID, m.config.MemoryLimit/2)
 	if err != nil {
 		slog.Errorf("获取历史消息失败: %v\n", err)
@@ -406,9 +407,10 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 		return
 	}
 
-	classifierMemoryList, err := m.userMemoryAnalyzer.ShouldUpdateMemoryWithParts(
+	// 分析对话并生成更新后的记忆
+	needUpdate, newMemoryContent, err := m.userMemoryAnalyzer.ShouldUpdateMemory(
 		ctx,
-		userMemoryList,
+		existingMemory,
 		historyMessages,
 	)
 	if err != nil {
@@ -416,54 +418,25 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 		return
 	}
 
-	delIds := make([]string, 0)
-	for _, v := range classifierMemoryList {
-		if v.Op == UserMemoryAnalyzerOpDelete {
-			delIds = append(delIds, v.Id)
-		} else if v.Op == UserMemoryAnalyzerOpCreate {
-			memory := &UserMemory{
-				UserID: userID,
-				Type:   v.Type,
-				Memory: v.Memory,
-			}
-			err = m.storage.SaveUserMemory(ctx, memory)
-			if err != nil {
-				slog.Errorf("创建用户记忆失败: %v\n", err)
-			}
-		} else if v.Op == UserMemoryAnalyzerOpUpdate {
-			// 从已获取的记忆列表中查找现有记忆以保留CreatedAt
-			var existingMemory *UserMemory
-			for _, mem := range userMemoryList {
-				if mem.ID == v.Id {
-					existingMemory = mem
-					break
-				}
-			}
-
-			if existingMemory != nil {
-				existingMemory.Type = v.Type
-				existingMemory.Memory = v.Memory
-				err = m.storage.UpdateUserMemory(ctx, existingMemory)
-			} else {
-				memory := &UserMemory{
-					ID:     v.Id,
-					UserID: userID,
-					Type:   v.Type,
-					Memory: v.Memory,
-				}
-				err = m.storage.SaveUserMemory(ctx, memory)
-			}
-			if err != nil {
-				slog.Errorf("更新用户记忆失败: %v\n", err)
-			}
-		}
+	// 如果不需要更新，直接返回
+	if !needUpdate {
+		return
 	}
 
-	if len(delIds) > 0 {
-		err = m.storage.DeleteUserMemoriesByIds(ctx, userID, delIds)
-		if err != nil {
-			slog.Errorf("删除用户记忆失败: %v\n", err)
-		}
+	// 保存更新后的记忆
+	memory := &UserMemory{
+		UserID: userID,
+		Memory: newMemoryContent,
+	}
+
+	// 如果有现有记忆，保留创建时间
+	if existingMemory != nil {
+		memory.CreatedAt = existingMemory.CreatedAt
+	}
+
+	err = m.storage.UpsertUserMemory(ctx, memory)
+	if err != nil {
+		slog.Errorf("保存用户记忆失败: %v\n", err)
 	}
 }
 
@@ -534,40 +507,19 @@ func (m *MemoryManager) updateSessionSummary(ctx context.Context, userID, sessio
 	}
 }
 
-// GetUserMemories 获取用户记忆
-func (m *MemoryManager) GetUserMemories(ctx context.Context, userID string) ([]*UserMemory, error) {
-	return m.storage.GetUserMemories(ctx, userID, 0, m.config.Retrieval)
+// GetUserMemory 获取用户记忆
+func (m *MemoryManager) GetUserMemory(ctx context.Context, userID string) (*UserMemory, error) {
+	return m.storage.GetUserMemory(ctx, userID)
 }
 
-// AddUserMemory 手动添加用户记忆
-func (m *MemoryManager) AddUserMemory(ctx context.Context, userID, memoryContent string, memoryType UserMemoryType) error {
-	memory := &UserMemory{
-		UserID: userID,
-		Type:   memoryType,
-		Memory: memoryContent,
-	}
-
-	return m.storage.SaveUserMemory(ctx, memory)
+// UpsertUserMemory 创建或更新用户记忆
+func (m *MemoryManager) UpsertUserMemory(ctx context.Context, memory *UserMemory) error {
+	return m.storage.UpsertUserMemory(ctx, memory)
 }
 
-// UpdateUserMemory 更新用户记忆
-func (m *MemoryManager) UpdateUserMemory(ctx context.Context, memory *UserMemory) error {
-	return m.storage.UpdateUserMemory(ctx, memory)
-}
-
-// DeleteUserMemory 删除用户记忆
-func (m *MemoryManager) DeleteUserMemory(ctx context.Context, memoryID string) error {
-	return m.storage.DeleteUserMemory(ctx, memoryID)
-}
-
-// ClearUserMemories 清空用户记忆
-func (m *MemoryManager) ClearUserMemories(ctx context.Context, userID string) error {
-	return m.storage.ClearUserMemories(ctx, userID)
-}
-
-// SearchUserMemories 搜索用户记忆
-func (m *MemoryManager) SearchUserMemories(ctx context.Context, userID, query string, limit int) ([]*UserMemory, error) {
-	return m.storage.SearchUserMemories(ctx, userID, query, limit)
+// ClearUserMemory 清空用户记忆
+func (m *MemoryManager) ClearUserMemory(ctx context.Context, userID string) error {
+	return m.storage.ClearUserMemory(ctx, userID)
 }
 
 // GetSessionSummary 获取会话摘要

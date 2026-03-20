@@ -60,9 +60,9 @@ func (f *FileStore) load() error {
 	f.MemoryStore.mu.Lock()
 	defer f.MemoryStore.mu.Unlock()
 
-	// 1. 加载用户记忆 (JSONL 格式)
+	// 1. 加载用户记忆 (JSONL 格式，每用户一条记录)
 	if data, err := os.ReadFile(f.getFilePath("user_memories")); err == nil {
-		userMemories := make(map[string]map[string]*memory.UserMemory)
+		userMemories := make(map[string]*memory.UserMemory)
 		lines := strings.Split(string(data), "\n")
 		for _, line := range lines {
 			if strings.TrimSpace(line) == "" {
@@ -70,10 +70,7 @@ func (f *FileStore) load() error {
 			}
 			var mem memory.UserMemory
 			if err := json.Unmarshal([]byte(line), &mem); err == nil {
-				if userMemories[mem.UserID] == nil {
-					userMemories[mem.UserID] = make(map[string]*memory.UserMemory)
-				}
-				userMemories[mem.UserID][mem.ID] = &mem // 同ID会被覆盖，达到更新目的
+				userMemories[mem.UserID] = &mem
 			}
 		}
 		f.MemoryStore.userMemories = userMemories
@@ -136,11 +133,9 @@ func (f *FileStore) saveToFileB(name string, b []byte) error {
 func (f *FileStore) saveUserMemories() error {
 	f.MemoryStore.mu.RLock()
 	var lines []string
-	for _, userMems := range f.MemoryStore.userMemories {
-		for _, mem := range userMems {
-			if b, err := json.Marshal(mem); err == nil {
-				lines = append(lines, string(b))
-			}
+	for _, mem := range f.MemoryStore.userMemories {
+		if b, err := json.Marshal(mem); err == nil {
+			lines = append(lines, string(b))
 		}
 	}
 	f.MemoryStore.mu.RUnlock()
@@ -155,7 +150,7 @@ func (f *FileStore) saveUserMemories() error {
 	return f.saveToFileB("user_memories", data)
 }
 
-// appendUserMemory 增量追加单条用户记忆到 JSONL 文件结尾
+// appendUserMemory 增量追加用户记忆到 JSONL 文件
 func (f *FileStore) appendUserMemory(mem *memory.UserMemory) error {
 	b, err := json.Marshal(mem)
 	if err != nil {
@@ -269,36 +264,17 @@ func (f *FileStore) appendMessage(msg *memory.ConversationMessage) error {
 
 // === 下面覆写所有可能修改数据的方法，按对应的表分离落地存储 ===
 
-func (f *FileStore) SaveUserMemory(ctx context.Context, userMemory *memory.UserMemory) error {
-	if err := f.MemoryStore.SaveUserMemory(ctx, userMemory); err != nil {
+// UpsertUserMemory 创建或更新用户记忆
+func (f *FileStore) UpsertUserMemory(ctx context.Context, userMemory *memory.UserMemory) error {
+	if err := f.MemoryStore.UpsertUserMemory(ctx, userMemory); err != nil {
 		return err
 	}
 	return f.appendUserMemory(userMemory)
 }
 
-func (f *FileStore) UpdateUserMemory(ctx context.Context, userMem *memory.UserMemory) error {
-	if err := f.MemoryStore.UpdateUserMemory(ctx, userMem); err != nil {
-		return err
-	}
-	return f.appendUserMemory(userMem)
-}
-
-func (f *FileStore) DeleteUserMemory(ctx context.Context, memoryID string) error {
-	if err := f.MemoryStore.DeleteUserMemory(ctx, memoryID); err != nil {
-		return err
-	}
-	return f.saveUserMemories()
-}
-
-func (f *FileStore) DeleteUserMemoriesByIds(ctx context.Context, userID string, memoryIDs []string) error {
-	if err := f.MemoryStore.DeleteUserMemoriesByIds(ctx, userID, memoryIDs); err != nil {
-		return err
-	}
-	return f.saveUserMemories()
-}
-
-func (f *FileStore) ClearUserMemories(ctx context.Context, userID string) error {
-	if err := f.MemoryStore.ClearUserMemories(ctx, userID); err != nil {
+// ClearUserMemory 清空用户记忆
+func (f *FileStore) ClearUserMemory(ctx context.Context, userID string) error {
+	if err := f.MemoryStore.ClearUserMemory(ctx, userID); err != nil {
 		return err
 	}
 	return f.saveUserMemories()

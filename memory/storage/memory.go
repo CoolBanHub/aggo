@@ -20,8 +20,8 @@ type MemoryStore struct {
 	// 读写锁，保证并发安全
 	mu sync.RWMutex
 
-	// 用户记忆存储 map[userID]map[memoryID]*UserMemory
-	userMemories map[string]map[string]*memory.UserMemory
+	// 用户记忆存储 map[userID]*UserMemory
+	userMemories map[string]*memory.UserMemory
 
 	// 会话摘要存储 map[sessionID+userID]*SessionSummary
 	sessionSummaries map[string]*memory.SessionSummary
@@ -33,14 +33,13 @@ type MemoryStore struct {
 // NewMemoryStore 创建新的内存存储实例
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		userMemories:     make(map[string]map[string]*memory.UserMemory),
+		userMemories:     make(map[string]*memory.UserMemory),
 		sessionSummaries: make(map[string]*memory.SessionSummary),
 		messages:         make(map[string][]*memory.ConversationMessage),
 	}
 }
 
 func (m *MemoryStore) AutoMigrate() error {
-
 	return nil
 }
 
@@ -52,8 +51,8 @@ func (m *MemoryStore) generateKey(sessionID, userID string) string {
 	return fmt.Sprintf("%s:%s", sessionID, userID)
 }
 
-// SaveUserMemory 保存用户记忆
-func (m *MemoryStore) SaveUserMemory(ctx context.Context, userMemory *memory.UserMemory) error {
+// UpsertUserMemory 创建或更新用户记忆（每个用户一条记录）
+func (m *MemoryStore) UpsertUserMemory(ctx context.Context, userMemory *memory.UserMemory) error {
 	if userMemory == nil {
 		return errors.New("记忆对象不能为空")
 	}
@@ -67,16 +66,6 @@ func (m *MemoryStore) SaveUserMemory(ctx context.Context, userMemory *memory.Use
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 如果用户的记忆映射不存在，创建一个
-	if m.userMemories[userMemory.UserID] == nil {
-		m.userMemories[userMemory.UserID] = make(map[string]*memory.UserMemory)
-	}
-
-	// 如果没有ID，生成一个
-	if userMemory.ID == "" {
-		userMemory.ID = utils.GetULID()
-	}
-
 	// 设置时间戳
 	now := time.Now()
 	if userMemory.CreatedAt.IsZero() {
@@ -85,12 +74,12 @@ func (m *MemoryStore) SaveUserMemory(ctx context.Context, userMemory *memory.Use
 	userMemory.UpdatedAt = now
 
 	// 保存记忆
-	m.userMemories[userMemory.UserID][userMemory.ID] = userMemory
+	m.userMemories[userMemory.UserID] = userMemory
 	return nil
 }
 
-// GetUserMemories 获取用户的记忆列表
-func (m *MemoryStore) GetUserMemories(ctx context.Context, userID string, limit int, retrieval memory.MemoryRetrieval) ([]*memory.UserMemory, error) {
+// GetUserMemory 获取用户的记忆
+func (m *MemoryStore) GetUserMemory(ctx context.Context, userID string) (*memory.UserMemory, error) {
 	if userID == "" {
 		return nil, errors.New("用户ID不能为空")
 	}
@@ -98,139 +87,16 @@ func (m *MemoryStore) GetUserMemories(ctx context.Context, userID string, limit 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	userMems, exists := m.userMemories[userID]
+	userMemory, exists := m.userMemories[userID]
 	if !exists {
-		return []*memory.UserMemory{}, nil
+		return nil, nil
 	}
 
-	// 将map转换为slice
-	var memories []*memory.UserMemory
-	for _, mem := range userMems {
-		memories = append(memories, mem)
-	}
-
-	// 根据检索方式排序
-	switch retrieval {
-	case memory.RetrievalLastN:
-		// 按更新时间降序排列（最新的在前）
-		sort.Slice(memories, func(i, j int) bool {
-			return memories[i].UpdatedAt.After(memories[j].UpdatedAt)
-		})
-	case memory.RetrievalFirstN:
-		// 按创建时间升序排列（最早的在前）
-		sort.Slice(memories, func(i, j int) bool {
-			return memories[i].CreatedAt.Before(memories[j].CreatedAt)
-		})
-	default:
-		// 默认按更新时间降序
-		sort.Slice(memories, func(i, j int) bool {
-			return memories[i].UpdatedAt.After(memories[j].UpdatedAt)
-		})
-	}
-
-	// 应用限制
-	if limit > 0 && len(memories) > limit {
-		memories = memories[:limit]
-	}
-
-	return memories, nil
+	return userMemory, nil
 }
 
-// UpdateUserMemory 更新用户记忆
-func (m *MemoryStore) UpdateUserMemory(ctx context.Context, memory *memory.UserMemory) error {
-	if memory == nil {
-		return errors.New("记忆对象不能为空")
-	}
-	if memory.ID == "" {
-		return errors.New("记忆ID不能为空")
-	}
-	if memory.UserID == "" {
-		return errors.New("用户ID不能为空")
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	userMems, exists := m.userMemories[memory.UserID]
-	if !exists || userMems[memory.ID] == nil {
-		return errors.New("记忆不存在")
-	}
-
-	// 更新时间戳
-	memory.UpdatedAt = time.Now()
-
-	// 保持原有的创建时间
-	if memory.CreatedAt.IsZero() {
-		memory.CreatedAt = userMems[memory.ID].CreatedAt
-	}
-
-	// 更新记忆
-	userMems[memory.ID] = memory
-	return nil
-}
-
-// DeleteUserMemory 删除用户记忆
-func (m *MemoryStore) DeleteUserMemory(ctx context.Context, memoryID string) error {
-	if memoryID == "" {
-		return errors.New("记忆ID不能为空")
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// 遍历所有用户查找并删除记忆
-	for userID, userMems := range m.userMemories {
-		if _, exists := userMems[memoryID]; exists {
-			delete(userMems, memoryID)
-			// 如果用户没有记忆了，删除整个用户条目
-			if len(userMems) == 0 {
-				delete(m.userMemories, userID)
-			}
-			return nil
-		}
-	}
-
-	return errors.New("记忆不存在")
-}
-
-func (m *MemoryStore) DeleteUserMemoriesByIds(ctx context.Context, userID string, memoryIDs []string) error {
-	if userID == "" {
-		return errors.New("用户ID不能为空")
-	}
-	if len(memoryIDs) == 0 {
-		return nil
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	userMems, ok := m.userMemories[userID]
-	if !ok {
-		return nil
-	}
-
-	deleted := false
-	for _, memoryID := range memoryIDs {
-		if _, exists := userMems[memoryID]; exists {
-			delete(userMems, memoryID)
-			deleted = true
-		}
-	}
-
-	// 如果用户没有记忆了，删除整个用户条目
-	if len(userMems) == 0 {
-		delete(m.userMemories, userID)
-	}
-
-	if !deleted {
-		return errors.New("记忆不存在")
-	}
-
-	return nil
-}
-
-// ClearUserMemories 清空用户的所有记忆
-func (m *MemoryStore) ClearUserMemories(ctx context.Context, userID string) error {
+// ClearUserMemory 清空用户记忆
+func (m *MemoryStore) ClearUserMemory(ctx context.Context, userID string) error {
 	if userID == "" {
 		return errors.New("用户ID不能为空")
 	}
@@ -240,46 +106,6 @@ func (m *MemoryStore) ClearUserMemories(ctx context.Context, userID string) erro
 
 	delete(m.userMemories, userID)
 	return nil
-}
-
-// SearchUserMemories 搜索用户记忆（简单的文本匹配实现）
-func (m *MemoryStore) SearchUserMemories(ctx context.Context, userID string, query string, limit int) ([]*memory.UserMemory, error) {
-	if userID == "" {
-		return nil, errors.New("用户ID不能为空")
-	}
-	if query == "" {
-		return []*memory.UserMemory{}, nil
-	}
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	userMems, exists := m.userMemories[userID]
-	if !exists {
-		return []*memory.UserMemory{}, nil
-	}
-
-	var results []*memory.UserMemory
-	queryLower := strings.ToLower(query)
-
-	for _, mem := range userMems {
-		// 简单的文本匹配搜索
-		if strings.Contains(strings.ToLower(mem.Memory), queryLower) {
-			results = append(results, mem)
-		}
-	}
-
-	// 按相关性排序（这里简单按更新时间排序）
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].UpdatedAt.After(results[j].UpdatedAt)
-	})
-
-	// 应用限制
-	if limit > 0 && len(results) > limit {
-		results = results[:limit]
-	}
-
-	return results, nil
 }
 
 // SaveSessionSummary 保存会话摘要

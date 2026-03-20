@@ -15,29 +15,14 @@ type MemoryStorage interface {
 
 	// 用户记忆操作
 
-	// SaveUserMemory 保存用户记忆
-	SaveUserMemory(ctx context.Context, memory *UserMemory) error
+	// UpsertUserMemory 创建或更新用户记忆（每个用户一条记录）
+	UpsertUserMemory(ctx context.Context, memory *UserMemory) error
 
-	// GetUserMemories 获取用户的记忆列表
-	// userID: 用户ID
-	// limit: 限制返回数量，0表示不限制
-	// retrieval: 检索方式
-	GetUserMemories(ctx context.Context, userID string, limit int, retrieval MemoryRetrieval) ([]*UserMemory, error)
+	// GetUserMemory 获取用户的记忆
+	GetUserMemory(ctx context.Context, userID string) (*UserMemory, error)
 
-	// UpdateUserMemory 更新用户记忆
-	UpdateUserMemory(ctx context.Context, memory *UserMemory) error
-
-	// DeleteUserMemory 删除用户记忆
-	DeleteUserMemory(ctx context.Context, memoryID string) error
-
-	// DeleteUserMemoriesByIds 批量删除用户记忆
-	DeleteUserMemoriesByIds(ctx context.Context, userID string, memoryIDs []string) error
-
-	// ClearUserMemories 清空用户的所有记忆
-	ClearUserMemories(ctx context.Context, userID string) error
-
-	// SearchUserMemories 搜索用户记忆（支持语义搜索）
-	SearchUserMemories(ctx context.Context, userID string, query string, limit int) ([]*UserMemory, error)
+	// ClearUserMemory 清空用户记忆
+	ClearUserMemory(ctx context.Context, userID string) error
 
 	// 会话摘要操作
 

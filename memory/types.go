@@ -7,35 +7,17 @@ import (
 )
 
 // UserMemory 用户记忆结构
-// 存储关于用户的个人化信息，如偏好、兴趣、个人事实等
+// 每个用户一条记录，使用Markdown格式存储所有记忆内容
 type UserMemory struct {
-	// 记忆的唯一标识符
-	ID string `json:"id"`
-	// 用户ID
+	// 用户ID（主键）
 	UserID string `json:"userId"`
-	// 记忆类型：convention(约定)、task(任务)、event(事件)、basic(基础信息)
-	Type UserMemoryType `json:"type"`
-	// 记忆内容
+	// 记忆内容（Markdown格式）
 	Memory string `json:"memory"`
 	// 创建时间
 	CreatedAt time.Time `json:"createdAt"`
 	// 最后更新时间
 	UpdatedAt time.Time `json:"updatedAt"`
 }
-
-// UserMemoryType 用户记忆类型
-type UserMemoryType string
-
-const (
-	// MemoryTypeConvention 核心约定（最高优先级）：交互方式、行为约束、工作流程
-	MemoryTypeConvention UserMemoryType = "convention"
-	// MemoryTypeTask 重要里程碑：完成的任务、关键决策、问题解决
-	MemoryTypeTask UserMemoryType = "task"
-	// MemoryTypeEvent 事件记录：人物事件、会议约定、截止日期
-	MemoryTypeEvent UserMemoryType = "event"
-	// MemoryTypeBasic 基础信息：个人背景、偏好习惯、关系网络
-	MemoryTypeBasic UserMemoryType = "basic"
-)
 
 // SessionSummary 会话摘要结构
 // 存储对话会话的智能摘要
@@ -138,22 +120,20 @@ const (
 	TriggerSmart SummaryTriggerStrategy = "smart"
 )
 
-// MemoryClassifierParam 用户记忆分类参数
+// UserMemoryAnalyzerParam 用户记忆更新参数
 type UserMemoryAnalyzerParam struct {
-	Op     string         `json:"op"`
-	Id     string         `json:"id"`
-	Memory string         `json:"memory"`
-	Type   UserMemoryType `json:"type"`
+	// 操作类型: update(更新记忆)、noop(无需更新)
+	Op string `json:"op"`
+	// 记忆内容（完整Markdown文档，op为update时有效）
+	Memory string `json:"memory"`
 }
 
-// 用户记忆分类操作
+// 用户记忆操作类型
 const (
-	//UserMemoryAnalyzerOpCreate 创建
-	UserMemoryAnalyzerOpCreate = "create"
-	//UserMemoryAnalyzerOpUpdate 更新
-	UserMemoryAnalyzerOpUpdate = "update"
-	//UserMemoryAnalyzerOpDelete 删除
-	UserMemoryAnalyzerOpDelete = "del"
+	// UserMemoryOpUpdate 更新记忆
+	UserMemoryOpUpdate = "update"
+	// UserMemoryOpNoop 无需更新
+	UserMemoryOpNoop = "noop"
 )
 
 // TaskQueueStats 异步任务队列统计
