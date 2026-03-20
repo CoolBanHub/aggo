@@ -44,12 +44,12 @@ func (mp MessageParts) GormDataType() string {
 
 // UserMemoryModel GORM模型 - 用户记忆表
 type UserMemoryModel struct {
-	ID        string    `gorm:"primaryKey;size:255" json:"id"`
-	UserID    string    `gorm:"index;size:255;not null" json:"userId"`
-	Memory    string    `gorm:"type:text;not null" json:"memory"`
-	Input     string    `gorm:"type:text" json:"input"`
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"createdAt"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
+	ID        string                `gorm:"primaryKey;size:255" json:"id"`
+	UserID    string                `gorm:"index;size:255;not null" json:"userId"`
+	Type      memory.UserMemoryType `gorm:"size:50;not null;default:'basic'" json:"type"`
+	Memory    string                `gorm:"type:text;not null" json:"memory"`
+	CreatedAt time.Time             `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt time.Time             `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
 // SessionSummaryModel GORM模型 - 会话摘要表
@@ -81,8 +81,8 @@ func (m *UserMemoryModel) ToUserMemory() *memory.UserMemory {
 	userMemory := &memory.UserMemory{
 		ID:        m.ID,
 		UserID:    m.UserID,
+		Type:      m.Type,
 		Memory:    m.Memory,
-		Input:     m.Input,
 		CreatedAt: m.CreatedAt,
 		UpdatedAt: m.UpdatedAt,
 	}
@@ -94,8 +94,8 @@ func (m *UserMemoryModel) ToUserMemory() *memory.UserMemory {
 func (m *UserMemoryModel) FromUserMemory(userMemory *memory.UserMemory) {
 	m.ID = userMemory.ID
 	m.UserID = userMemory.UserID
+	m.Type = userMemory.Type
 	m.Memory = userMemory.Memory
-	m.Input = userMemory.Input
 	m.CreatedAt = userMemory.CreatedAt
 	m.UpdatedAt = userMemory.UpdatedAt
 }

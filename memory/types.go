@@ -13,15 +13,29 @@ type UserMemory struct {
 	ID string `json:"id"`
 	// 用户ID
 	UserID string `json:"userId"`
+	// 记忆类型：convention(约定)、task(任务)、event(事件)、basic(基础信息)
+	Type UserMemoryType `json:"type"`
 	// 记忆内容
 	Memory string `json:"memory"`
-	// 触发该记忆的原始用户输入
-	Input string `json:"input,omitempty"`
 	// 创建时间
 	CreatedAt time.Time `json:"createdAt"`
 	// 最后更新时间
 	UpdatedAt time.Time `json:"updatedAt"`
 }
+
+// UserMemoryType 用户记忆类型
+type UserMemoryType string
+
+const (
+	// MemoryTypeConvention 核心约定（最高优先级）：交互方式、行为约束、工作流程
+	MemoryTypeConvention UserMemoryType = "convention"
+	// MemoryTypeTask 重要里程碑：完成的任务、关键决策、问题解决
+	MemoryTypeTask UserMemoryType = "task"
+	// MemoryTypeEvent 事件记录：人物事件、会议约定、截止日期
+	MemoryTypeEvent UserMemoryType = "event"
+	// MemoryTypeBasic 基础信息：个人背景、偏好习惯、关系网络
+	MemoryTypeBasic UserMemoryType = "basic"
+)
 
 // SessionSummary 会话摘要结构
 // 存储对话会话的智能摘要
@@ -128,9 +142,10 @@ const (
 
 // MemoryClassifierParam 用户记忆分类参数
 type UserMemoryAnalyzerParam struct {
-	Op     string `json:"op"`
-	Id     string `json:"id"`
-	Memory string `json:"memory"`
+	Op     string         `json:"op"`
+	Id     string         `json:"id"`
+	Memory string         `json:"memory"`
+	Type   UserMemoryType `json:"type"`
 }
 
 // 用户记忆分类操作

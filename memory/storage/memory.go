@@ -264,8 +264,7 @@ func (m *MemoryStore) SearchUserMemories(ctx context.Context, userID string, que
 
 	for _, mem := range userMems {
 		// 简单的文本匹配搜索
-		if strings.Contains(strings.ToLower(mem.Memory), queryLower) ||
-			strings.Contains(strings.ToLower(mem.Input), queryLower) {
+		if strings.Contains(strings.ToLower(mem.Memory), queryLower) {
 			results = append(results, mem)
 		}
 	}

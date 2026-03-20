@@ -471,8 +471,8 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 		} else if v.Op == UserMemoryAnalyzerOpCreate {
 			memory := &UserMemory{
 				UserID: userID,
+				Type:   v.Type,
 				Memory: v.Memory,
-				Input:  fullContent.String(),
 			}
 			err = m.storage.SaveUserMemory(ctx, memory)
 			if err != nil {
@@ -491,16 +491,16 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 
 			if existingMemory != nil {
 				// 找到现有记忆，更新它，保留CreatedAt
+				existingMemory.Type = v.Type
 				existingMemory.Memory = v.Memory
-				existingMemory.Input = fullContent.String()
 				err = m.storage.UpdateUserMemory(ctx, existingMemory)
 			} else {
 				// 没有找到现有记忆，创建新记忆
 				memory := &UserMemory{
 					ID:     v.Id,
 					UserID: userID,
+					Type:   v.Type,
 					Memory: v.Memory,
-					Input:  fullContent.String(),
 				}
 				err = m.storage.SaveUserMemory(ctx, memory)
 			}
@@ -595,11 +595,11 @@ func (m *MemoryManager) GetUserMemories(ctx context.Context, userID string) ([]*
 }
 
 // AddUserMemory 手动添加用户记忆
-func (m *MemoryManager) AddUserMemory(ctx context.Context, userID, memoryContent, input string) error {
+func (m *MemoryManager) AddUserMemory(ctx context.Context, userID, memoryContent string, memoryType UserMemoryType) error {
 	memory := &UserMemory{
 		UserID: userID,
+		Type:   memoryType,
 		Memory: memoryContent,
-		Input:  input,
 	}
 
 	return m.storage.SaveUserMemory(ctx, memory)
