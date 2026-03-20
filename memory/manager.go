@@ -396,7 +396,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 	}
 
 	// 获取最近20条消息作为上下文
-	historyMessages, err := m.storage.GetMessages(ctx, sessionID, userID, m.config.MemoryLimit)
+	historyMessages, err := m.storage.GetMessages(ctx, sessionID, userID, m.config.MemoryLimit/2)
 	if err != nil {
 		slog.Errorf("获取历史消息失败: %v\n", err)
 		return
