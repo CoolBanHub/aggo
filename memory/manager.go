@@ -42,6 +42,10 @@ type MemoryManager struct {
 	// 异步任务队列统计
 	taskQueueStats TaskQueueStats
 	taskQueueMutex sync.RWMutex
+
+	// 外部注入的清理函数
+	CleanupOldMessagesFunc     func(ctx context.Context) error // 按时间清理旧消息
+	CleanupMessagesByLimitFunc func(ctx context.Context) error // 按数量限制清理消息
 }
 
 // asyncTask 异步任务结构
@@ -78,7 +82,6 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 			SessionCleanupInterval: 24,   // 24小时清理一次会话状态
 			SessionRetentionTime:   168,  // 7天保留时间
 			MessageHistoryLimit:    1000, // 1000条消息限制
-			MessageRetentionTime:   720,  // 30天消息保留时间
 			CleanupInterval:        12,   // 12小时定期清理
 		}
 	}
@@ -239,30 +242,20 @@ func (m *MemoryManager) performPeriodicCleanup() {
 			sessionRetention = 168 * time.Hour // 默认7天
 		}
 		m.summaryTrigger.CleanupOldSessions(sessionRetention)
-		slog.Infof("定期清理: 清理了 %v 小时前的会话状态", sessionRetention.Hours())
 	}
 
-	// 2. 清理旧的消息历史（按时间）
-	if m.config.MessageRetentionTime > 0 {
-		messageRetention := time.Duration(m.config.MessageRetentionTime) * time.Hour
-		cutoff := time.Now().Add(-messageRetention)
-
-		// 这里可以添加按用户清理的逻辑，需要获取所有用户列表
-		// 目前只记录执行日志，具体清理由各存储实现处理
-		slog.Infof("定期清理: 清理 %v 之前的消息历史", cutoff.Format("2006-01-02 15:04:05"))
-
-		// 示例：清理管理员用户的历史消息（实际应用中需要遍历所有活跃用户）
-		err := m.storage.CleanupOldMessages(ctx, "admin", cutoff)
-		if err != nil {
+	// 2. 清理旧的消息历史（按时间）- 调用外部注入的函数
+	if m.CleanupOldMessagesFunc != nil {
+		if err := m.CleanupOldMessagesFunc(ctx); err != nil {
 			slog.Errorf("清理旧消息失败: %v", err)
 		}
 	}
 
-	// 3. 按数量限制清理消息
-	if m.config.MessageHistoryLimit > 0 {
-		// 这里需要获取所有活跃用户的会话，然后逐个清理
-		// 由于存储接口限制，暂时只记录日志
-		slog.Infof("定期清理: 消息历史限制设置为 %d 条", m.config.MessageHistoryLimit)
+	// 3. 按数量限制清理消息 - 调用外部注入的函数
+	if m.CleanupMessagesByLimitFunc != nil {
+		if err := m.CleanupMessagesByLimitFunc(ctx); err != nil {
+			slog.Errorf("按数量清理消息失败: %v", err)
+		}
 	}
 }
 

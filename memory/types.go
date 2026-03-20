@@ -90,8 +90,6 @@ type MemoryConfig struct {
 	SessionRetentionTime int `json:"sessionRetentionTime"`
 	// 消息历史保留数量限制，默认1000条
 	MessageHistoryLimit int `json:"messageHistoryLimit"`
-	// 消息历史保留时间（小时），默认720小时（30天）
-	MessageRetentionTime int `json:"messageRetentionTime"`
 	// 定期清理间隔（小时），默认12小时
 	CleanupInterval int `json:"cleanupInterval"`
 }
