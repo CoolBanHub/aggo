@@ -49,8 +49,6 @@ type asyncTask struct {
 	taskType  string // "memory" 或 "summary"
 	userID    string
 	sessionID string
-	message   string
-	parts     []schema.MessageInputPart
 }
 
 /**
@@ -398,7 +396,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 	}
 
 	// 获取最近20条消息作为上下文
-	historyMessages, err := m.storage.GetMessages(ctx, sessionID, userID, 20)
+	historyMessages, err := m.storage.GetMessages(ctx, sessionID, userID, m.config.MemoryLimit)
 	if err != nil {
 		slog.Errorf("获取历史消息失败: %v\n", err)
 		return
@@ -538,7 +536,7 @@ func (m *MemoryManager) updateSessionSummary(ctx context.Context, userID, sessio
 
 // GetUserMemories 获取用户记忆
 func (m *MemoryManager) GetUserMemories(ctx context.Context, userID string) ([]*UserMemory, error) {
-	return m.storage.GetUserMemories(ctx, userID, m.config.MemoryLimit, m.config.Retrieval)
+	return m.storage.GetUserMemories(ctx, userID, 0, m.config.Retrieval)
 }
 
 // AddUserMemory 手动添加用户记忆
