@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CloudWeGo Eino](https://img.shields.io/badge/powered%20by-CloudWeGo%20Eino-orange)](https://github.com/cloudwego/eino)
 
-AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架构建的企业级 AI Agent 框架，提供完整的对话 AI、知识管理、记忆系统和工具调用能力。
+AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架构建的企业级 AI Agent 框架，提供完整的对话 AI、知识管理、记忆系统、定时任务和工具调用能力。
 
 ## ✨ 核心特性
 
@@ -13,6 +13,7 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 - **工具调用**: 原生支持多种工具集成，包括知识库、数据库、Shell 命令等
 - **多轮对话**: 上下文感知的多轮对话能力
 - **流式响应**: 基于 SSE (Server-Sent Events) 的实时流式输出
+- **定时任务代理**: 预配置的 CronAgent，开箱即用的定时任务管理
 
 ### 🧠 记忆管理系统
 - **会话记忆**: 自动管理会话级别的对话历史
@@ -20,6 +21,15 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 - **智能摘要**: 自动生成会话摘要，优化上下文长度
 - **多种检索策略**: 支持 LastN、全部、摘要等多种记忆检索模式
 - **灵活存储**: 支持内存存储和 SQL 存储（MySQL、PostgreSQL、SQLite）
+- **异步处理**: 基于工作池的异步任务处理，提升响应性能
+- **智能清理**: 支持定期清理和外部注入的清理策略
+
+### ⏰ 定时任务系统
+- **多种调度方式**: 支持一次性定时(at)、周期定时(every)、Cron表达式(cron)
+- **多种存储后端**: 支持文件存储、GORM存储（MySQL、PostgreSQL、SQLite）
+- **分布式锁**: 支持分布式环境下的任务锁定
+- **任务数量限制**: 支持全局和单用户任务数量上限
+- **自动清理**: 一次性任务执行后自动删除
 
 ### 📚 向量数据库集成
 - **Milvus**: 企业级向量数据库支持，适合大规模生产环境
@@ -30,7 +40,13 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 - **知识库工具**: 文档加载、语义搜索、向量检索
 - **数据库工具**: MySQL、PostgreSQL 操作工具
 - **Shell 工具**: 安全的系统命令执行
+- **定时任务工具**: 添加、查看、删除、启用/禁用定时任务
 - **可扩展**: 易于集成自定义工具
+
+### 🤖 多模型支持
+- **OpenAI 兼容模型**: 支持 OpenAI、Azure OpenAI 等兼容服务
+- **GLM 模型**: 原生支持智谱 GLM 系列模型，包含 Thinking 模式
+- **推理强度参数**: 支持 low、medium、high 推理强度配置
 
 ### 📊 可观测性
 - **Langfuse 集成**: AI 应用监控和追踪
@@ -47,8 +63,9 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 │  │   Agent Layer   │  │  Memory Layer   │  │   Tool Layer    │  │
 │  │                 │  │                 │  │                 │  │
 │  │ • ReAct Agent   │◄─┤ • Session Mem   │  │ • Knowledge     │  │
-│  │ • Multi-turn    │  │ • Long-term Mem │  │ • Database      │  │
-│  │ • Streaming     │  │ • Auto Summary  │  │ • Shell Exec    │  │
+│  │ • CronAgent     │  │ • Long-term Mem │  │ • Database      │  │
+│  │ • Multi-turn    │  │ • Auto Summary  │  │ • Shell Exec    │  │
+│  │ • Streaming     │  │ • Async Process │  │ • Cron Tools    │  │
 │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  │
 │           │                    │                    │            │
 │           └────────────────────┼────────────────────┘            │
@@ -65,9 +82,17 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 │           └──────────────────────────────────────────┘            │
 │                                                                   │
 │           ┌──────────────────────────────────────────┐            │
+│           │         Cron Schedule Layer              │            │
+│           │                                          │            │
+│           │  • One-time (at)   • Periodic (every)    │            │
+│           │  • Cron Expression  • File/GORM Store    │            │
+│           └──────────────────────────────────────────┘            │
+│                                                                   │
+│           ┌──────────────────────────────────────────┐            │
 │           │         Model & Embedding Layer          │            │
 │           │                                          │            │
 │           │  • OpenAI Compatible Chat Models         │            │
+│           │  • GLM Models (with Thinking Mode)       │            │
 │           │  • OpenAI Compatible Embedding Models    │            │
 │           │  • Support Reasoning Parameters          │            │
 │           └──────────────────────────────────────────┘            │
@@ -213,6 +238,56 @@ memoryManager, err := memory.NewMemoryManager(
 - `RetrievalAll`: 返回所有记忆
 - `RetrievalSummary`: 仅返回摘要
 
+### 定时任务系统
+
+#### 创建定时任务代理
+
+```go
+import (
+    "github.com/CoolBanHub/aggo/agent/cron_agent"
+)
+
+// 使用文件存储
+cronAgent, _ := cron_agent.New(ctx, chatModel,
+    cron_agent.WithFileStore("/path/to/cron_jobs.json"),
+)
+
+// 使用 GORM 存储
+cronAgent, _ := cron_agent.New(ctx, chatModel,
+    cron_agent.WithGormStore(gormDB),
+    cron_agent.WithMaxJobsPerUser(20),  // 单用户最多20个任务
+)
+
+// 启动服务
+cronAgent.Start()
+defer cronAgent.Stop()
+
+// 使用代理
+response, _ := cronAgent.Generate(ctx, []*schema.Message{
+    schema.UserMessage("10分钟后提醒我开会"),
+})
+```
+
+#### 调度方式
+
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| `at` | 一次性定时 | 10分钟后执行一次 |
+| `every` | 周期性定时 | 每2小时执行一次 |
+| `cron` | Cron表达式 | 每天9点执行 |
+
+#### 自定义任务触发
+
+```go
+cronAgent, _ := cron_agent.New(ctx, chatModel,
+    cron_agent.WithFileStore("/path/to/cron_jobs.json"),
+    cron_agent.WithOnJobTriggered(func(job *cronPkg.CronJob) {
+        // 自定义处理逻辑
+        fmt.Printf("任务触发: %s\n", job.Payload.Message)
+    }),
+)
+```
+
 ### 向量数据库集成
 
 #### Milvus 配置
@@ -355,19 +430,34 @@ aggo/
 ├── agent/                      # AI 代理系统
 │   ├── agent.go                   # ReAct 代理实现
 │   ├── option.go                  # 代理配置选项
-│   └── utils.go                   # 工具函数
+│   ├── utils.go                   # 工具函数
+│   ├── agent_memory.go            # 代理记忆管理
+│   └── cron_agent/                # 定时任务代理
+│       └── cron_agent.go             # CronAgent 实现
 │
 ├── memory/                     # 记忆管理系统
 │   ├── manager.go                 # 记忆管理器
 │   ├── storage.go                 # 存储接口
 │   ├── types.go                   # 类型定义
+│   ├── prompt.go                  # 提示词模板
 │   ├── session_summary_generator.go  # 会话摘要生成器
 │   ├── summary_trigger_manager.go    # 摘要触发管理器
 │   ├── user_memory_analyzer.go       # 用户记忆分析器
 │   └── storage/                   # 存储实现
 │       ├── memory.go                 # 内存存储
+│       ├── file.go                   # 文件存储
 │       ├── sql.go                    # SQL 存储 (GORM)
-│       └── sql_models.go             # 数据模型
+│       ├── sql_models.go             # 数据模型
+│       ├── sql_session.go            # 会话存储
+│       ├── sql_summary.go            # 摘要存储
+│       └── sql_user_memory.go        # 用户记忆存储
+│
+├── cron/                       # 定时任务系统
+│   ├── model.go                   # 任务模型定义
+│   ├── service.go                 # 调度服务
+│   ├── store.go                   # 存储接口
+│   ├── store_file.go              # 文件存储实现
+│   └── store_gorm.go              # GORM 存储实现
 │
 ├── database/                   # 向量数据库
 │   ├── database.go                # 数据库接口
@@ -383,15 +473,25 @@ aggo/
 ├── model/                      # AI 模型封装
 │   ├── chat.go                    # 聊天模型 (支持推理强度参数)
 │   ├── embedding.go               # 嵌入模型
-│   └── option.go                  # 模型配置选项
+│   ├── option.go                  # 模型配置选项
+│   └── glm/                       # GLM 模型支持
+│       ├── chatmodel.go              # GLM 聊天模型
+│       ├── option.go                 # 配置选项
+│       └── types.go                  # 类型定义
 │
 ├── tools/                      # 工具集
-│   ├── knowledge_tool.go             # 知识库操作工具
-│   ├── knowledge_reasoning_tools.go  # 知识推理工具
-│   ├── mysql_tool.go                 # MySQL 数据库工具
-│   ├── postgres_tool.go              # PostgreSQL 数据库工具
-│   ├── shell_tool.go                 # Shell 命令执行工具
-│   └── example_tools.go              # 示例工具
+│   ├── tools.go                   # 工具函数
+│   ├── knowledge/                 # 知识库工具
+│   │   ├── knowledge.go             # 知识库操作
+│   │   └── reasoning.go             # 知识推理
+│   ├── database/                  # 数据库工具
+│   │   └── database.go              # MySQL/PostgreSQL 操作
+│   ├── shell/                     # Shell 工具
+│   │   ├── shell.go                 # Shell 执行
+│   │   ├── shell_process_unix.go    # Unix 进程管理
+│   │   └── shell_process_windows.go # Windows 进程管理
+│   └── cron/                      # 定时任务工具
+│       └── cron.go                  # Cron 操作工具
 │
 ├── pkg/                        # 公共包
 │   ├── sse/                       # Server-Sent Events
@@ -420,7 +520,12 @@ aggo/
     ├── sse/                       # SSE 流式响应示例
     ├── adk_test/                  # ADK 使用示例
     ├── callback_test/             # 回调示例
-    └── tool_test/                 # 工具测试示例
+    ├── tool_test/                 # 工具测试示例
+    ├── cron_test/                 # 定时任务示例
+    ├── vision_test/               # 视觉能力示例
+    ├── generate_img_test/         # 图像生成示例
+    ├── skill_agent_test/          # 技能代理示例
+    └── claw/                      # Claw 示例
 ```
 
 ### 构建和测试
@@ -512,6 +617,7 @@ defer memoryManager.Close()  // 确保在创建后立即添加 defer
 - [CloudWeGo Eino](https://github.com/cloudwego/eino) - 强大的 AI Agent 开发框架
 - [Milvus](https://milvus.io/) - 高性能向量数据库
 - [Langfuse](https://langfuse.com/) - AI 应用可观测性平台
+- [gocron](https://github.com/go-co-op/gocron) - 定时任务调度库
 
 ## 📧 联系方式
 
