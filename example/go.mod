@@ -9,7 +9,7 @@ require (
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.8.0
 	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20251111090228-91a10bbc864f
-	github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20251011073417-75b93b87b8a9
+	github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20260316121515-014a29323bbe
 	github.com/cloudwego/eino-ext/components/model/gemini v0.1.17
 	github.com/google/uuid v1.6.0
 	github.com/gookit/slog v0.6.0

@@ -100,6 +100,7 @@ github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20251117090
 github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20251117090452-bd6375a0b3cf/go.mod h1:DBwsPrdNxPeE3HNr5XyjjFreG4ypqCUjN0T2C2JSy6k=
 github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20251011073417-75b93b87b8a9 h1:iTz6+oVwmL+sK//C5FxeigEFJXLDTccoFEz5RSeT9Dg=
 github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20251011073417-75b93b87b8a9/go.mod h1:3R7eHOKq+O5aOWXNUAm950kgSnHH5ulfNGoM0SrrQy8=
+github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20260316121515-014a29323bbe/go.mod h1:9R0RQrQSpg1JaNnRtw7+RfRAAv0HgdE348YnrlZ6coo=
 github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f h1:XOoC/Ze6drdZTPed9eVaP3jWzLGhKg/qHIIXNveNlGg=
 github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f/go.mod h1:SajSFFRIXJXIbxadAAlSUIS5KTY8R/jzJg9RNSOXCCI=
 github.com/cloudwego/eino-ext/components/model/gemini v0.1.17 h1:Za42IMOr1icFGrGGeufkwQE1sGef4M5EtbSBbP9BgR4=

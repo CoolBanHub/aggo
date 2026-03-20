@@ -111,7 +111,6 @@ func main() {
 		EnableUserMemories:   true,
 		EnableSessionSummary: true,
 		MemoryLimit:          20,
-		AsyncProcessing:      true,
 		AsyncWorkerPoolSize:  3,
 	})
 	if err != nil {

@@ -51,7 +51,6 @@ func main() {
 		EnableUserMemories:   true,
 		MemoryLimit:          8,
 		Retrieval:            memory.RetrievalLastN,
-		AsyncProcessing:      true,
 	})
 	if err != nil {
 		log.Fatalf("new manager fail,err:%s", err)
