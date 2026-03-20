@@ -93,8 +93,6 @@ type MemoryConfig struct {
 	Retrieval MemoryRetrieval `json:"retrieval"`
 	// 记忆数量限制
 	MemoryLimit int `json:"memoryLimit"`
-	// 是否异步处理记忆分析和会话摘要
-	AsyncProcessing bool `json:"asyncProcessing"`
 	// 异步处理的goroutine池大小
 	AsyncWorkerPoolSize int `json:"asyncWorkerPoolSize"`
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -71,7 +70,6 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 			EnableSessionSummary: false,
 			Retrieval:            RetrievalLastN,
 			MemoryLimit:          20,
-			AsyncProcessing:      true,
 			AsyncWorkerPoolSize:  5,
 			SummaryTrigger: SummaryTriggerConfig{
 				Strategy:         TriggerSmart,
@@ -125,14 +123,11 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 		cleanupCancel:           cleanupCancel,
 	}
 
-	// 如果启用异步处理，初始化goroutine池
-	if config.AsyncProcessing {
-		// 增大队列缓冲区，减少任务丢失的可能性
-		queueCapacity := config.AsyncWorkerPoolSize * 10 // 缓冲区大小为工作池的10倍
-		manager.taskChannel = make(chan asyncTask, queueCapacity)
-		manager.taskQueueStats.QueueCapacity = queueCapacity
-		manager.startAsyncWorkers()
-	}
+	// 初始化goroutine池
+	queueCapacity := config.AsyncWorkerPoolSize * 10 // 缓冲区大小为工作池的10倍
+	manager.taskChannel = make(chan asyncTask, queueCapacity)
+	manager.taskQueueStats.QueueCapacity = queueCapacity
+	manager.startAsyncWorkers()
 
 	// 启动定期清理任务
 	manager.startPeriodicCleanup()
@@ -172,12 +167,8 @@ func (m *MemoryManager) updateQueueStats(delta int) {
 	}
 }
 
-// submitAsyncTask 提交异步任务，改进错误处理
+// submitAsyncTask 提交异步任务
 func (m *MemoryManager) submitAsyncTask(task asyncTask) bool {
-	if !m.config.AsyncProcessing {
-		return false
-	}
-
 	select {
 	case m.taskChannel <- task:
 		m.updateQueueStats(1) // 增加队列大小
@@ -282,9 +273,9 @@ func (m *MemoryManager) processAsyncTask(task asyncTask) {
 	switch task.taskType {
 	case "memory":
 		// 创建新的context用于异步操作，避免超时
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // 30秒超时
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		m.analyzeAndCreateUserMemory(ctx, task.userID, task.message, task.parts)
+		m.analyzeAndCreateUserMemory(ctx, task.userID, task.sessionID)
 	case "summary":
 		// 创建新的context用于异步操作
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // 30秒超时
@@ -340,25 +331,6 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 		return fmt.Errorf("保存用户消息失败: %v", err)
 	}
 
-	// 如果启用了用户记忆，分析消息并创建记忆
-	if m.config.EnableUserMemories {
-		if m.config.AsyncProcessing {
-			// 异步处理，使用改进的任务提交方法
-			submitted := m.submitAsyncTask(asyncTask{
-				taskType: "memory",
-				userID:   userID,
-				message:  content,
-				parts:    parts,
-			})
-			if !submitted {
-				slog.Errorf("警告: 用户记忆分析队列已满，跳过处理: userID=%s\n", userID)
-			}
-		} else {
-			// 同步处理
-			m.analyzeAndCreateUserMemory(ctx, userID, content, parts)
-		}
-	}
-
 	return nil
 }
 
@@ -391,26 +363,26 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 		if err != nil {
 			slog.Errorf("检查摘要触发条件失败: %v\n", err)
 		} else if shouldTrigger {
-			if m.config.AsyncProcessing {
-				// 异步处理，使用改进的任务提交方法
-				submitted := m.submitAsyncTask(asyncTask{
-					taskType:  "summary",
-					userID:    userID,
-					sessionID: sessionID,
-				})
-				if !submitted {
-					slog.Errorf("警告: 会话摘要更新队列已满，跳过处理: sessionID=%s, userID=%s\n", sessionID, userID)
-				}
-			} else {
-				// 同步处理
-				err = m.updateSessionSummary(ctx, userID, sessionID)
-				if err != nil {
-					slog.Errorf("更新会话摘要失败: msg:%s,err:%v\n", assistantMessage, err)
-				} else {
-					// 标记摘要已更新
-					m.summaryTrigger.MarkSummaryUpdated(generateSessionKey(userID, sessionID))
-				}
+			submitted := m.submitAsyncTask(asyncTask{
+				taskType:  "summary",
+				userID:    userID,
+				sessionID: sessionID,
+			})
+			if !submitted {
+				slog.Errorf("警告: 会话摘要更新队列已满，跳过处理: sessionID=%s, userID=%s\n", sessionID, userID)
 			}
+		}
+	}
+
+	// 如果启用了用户记忆，分析消息并创建记忆（在AI回复后触发）
+	if m.config.EnableUserMemories {
+		submitted := m.submitAsyncTask(asyncTask{
+			taskType:  "memory",
+			userID:    userID,
+			sessionID: sessionID,
+		})
+		if !submitted {
+			slog.Errorf("警告: 用户记忆分析队列已满，跳过处理: userID=%s\n", userID)
 		}
 	}
 
@@ -418,49 +390,31 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 }
 
 // analyzeAndCreateUserMemory 分析用户消息并创建记忆
-func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, content string, parts []schema.MessageInputPart) {
+func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, sessionID string) {
 	userMemoryList, err := m.storage.GetUserMemories(ctx, userID, 0, m.config.Retrieval)
 	if err != nil {
-		// 记忆创建失败不应该阻断主流程，只记录日志
-		slog.Errorf("创建用户记忆失败: %v\n", err)
+		slog.Errorf("获取用户记忆失败: %v\n", err)
 		return
 	}
 
-	// 构建完整的消息内容用于保存
-	var fullContent strings.Builder
-	if content != "" {
-		fullContent.WriteString(content)
-	}
-	// 简单记录多媒体内容的存在
-	for _, part := range parts {
-		switch part.Type {
-		case schema.ChatMessagePartTypeImageURL:
-			fullContent.WriteString(fmt.Sprintf("[图片]"))
-			if part.Image.URL != nil {
-				fullContent.WriteString(fmt.Sprintf(",link:%s", *part.Image.URL))
-			}
-		case schema.ChatMessagePartTypeAudioURL:
-			fullContent.WriteString("[音频]")
-			if part.Audio.URL != nil {
-				fullContent.WriteString(fmt.Sprintf(",link:%s", *part.Audio.URL))
-			}
-		case schema.ChatMessagePartTypeVideoURL:
-			fullContent.WriteString("[视频]")
-			if part.Video.URL != nil {
-				fullContent.WriteString(fmt.Sprintf(",link:%s", *part.Video.URL))
-			}
-		case schema.ChatMessagePartTypeFileURL:
-			fullContent.WriteString("[文件]")
-			if part.File.URL != nil {
-				fullContent.WriteString(fmt.Sprintf(",link:%s", *part.File.URL))
-			}
-		}
+	// 获取最近20条消息作为上下文
+	historyMessages, err := m.storage.GetMessages(ctx, sessionID, userID, 20)
+	if err != nil {
+		slog.Errorf("获取历史消息失败: %v\n", err)
+		return
 	}
 
-	classifierMemoryList, err := m.userMemoryAnalyzer.ShouldUpdateMemoryWithParts(ctx, content, parts, userMemoryList)
+	if len(historyMessages) == 0 {
+		return
+	}
+
+	classifierMemoryList, err := m.userMemoryAnalyzer.ShouldUpdateMemoryWithParts(
+		ctx,
+		userMemoryList,
+		historyMessages,
+	)
 	if err != nil {
-		// 记忆创建失败不应该阻断主流程，只记录日志
-		slog.Errorf("创建用户记忆失败: %v\n", err)
+		slog.Errorf("分析用户记忆失败: %v\n", err)
 		return
 	}
 
@@ -476,7 +430,6 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 			}
 			err = m.storage.SaveUserMemory(ctx, memory)
 			if err != nil {
-				// 记忆创建失败不应该阻断主流程，只记录日志
 				slog.Errorf("创建用户记忆失败: %v\n", err)
 			}
 		} else if v.Op == UserMemoryAnalyzerOpUpdate {
@@ -490,12 +443,10 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 			}
 
 			if existingMemory != nil {
-				// 找到现有记忆，更新它，保留CreatedAt
 				existingMemory.Type = v.Type
 				existingMemory.Memory = v.Memory
 				err = m.storage.UpdateUserMemory(ctx, existingMemory)
 			} else {
-				// 没有找到现有记忆，创建新记忆
 				memory := &UserMemory{
 					ID:     v.Id,
 					UserID: userID,
@@ -505,7 +456,6 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 				err = m.storage.SaveUserMemory(ctx, memory)
 			}
 			if err != nil {
-				// 记忆更新失败不应该阻断主流程，只记录日志
 				slog.Errorf("更新用户记忆失败: %v\n", err)
 			}
 		}
@@ -514,12 +464,9 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 	if len(delIds) > 0 {
 		err = m.storage.DeleteUserMemoriesByIds(ctx, userID, delIds)
 		if err != nil {
-			// 记忆创建失败不应该阻断主流程，只记录日志
-			slog.Errorf("创建用户记忆失败: %v\n", err)
+			slog.Errorf("删除用户记忆失败: %v\n", err)
 		}
 	}
-
-	return
 }
 
 // shouldTriggerSummaryUpdate 判断是否需要触发摘要更新
@@ -682,10 +629,8 @@ func (m *MemoryManager) GetMemoryStats() map[string]interface{} {
 		"config": m.config,
 	}
 
-	// 如果启用异步处理，添加队列统计
-	if m.config.AsyncProcessing {
-		stats["taskQueue"] = m.GetTaskQueueStats()
-	}
+	// 添加队列统计
+	stats["taskQueue"] = m.GetTaskQueueStats()
 
 	// 添加会话状态统计（通过summary trigger获取）
 	sessionCount := len(m.summaryTrigger.sessionStates)
@@ -716,14 +661,9 @@ func (m *MemoryManager) Close() error {
 	}
 
 	// 关闭异步处理
-	if m.config.AsyncProcessing {
-		// 发送取消信号
-		m.cancel()
-		// 关闭任务通道
-		close(m.taskChannel)
-		// 等待所有goroutine结束
-		m.wg.Wait()
-	}
+	m.cancel()
+	close(m.taskChannel)
+	m.wg.Wait()
 
 	return m.storage.Close()
 }

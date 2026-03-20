@@ -30,7 +30,7 @@ func (u *UserMemoryAnalyzer) SetSystemPrompt(systemPrompt string) {
 }
 
 // ShouldUpdateMemoryWithParts determines if a message with multi-part content should be added to memory
-func (u *UserMemoryAnalyzer) ShouldUpdateMemoryWithParts(ctx context.Context, content string, parts []schema.MessageInputPart, userMemoryList []*UserMemory) ([]UserMemoryAnalyzerParam, error) {
+func (u *UserMemoryAnalyzer) ShouldUpdateMemoryWithParts(ctx context.Context, userMemoryList []*UserMemory, historyMessages []*ConversationMessage) ([]UserMemoryAnalyzerParam, error) {
 
 	messages := []*schema.Message{
 		{
@@ -46,7 +46,6 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemoryWithParts(ctx context.Context, co
 		for _, v := range userMemoryList {
 			existingMemories.WriteString(fmt.Sprintf("- **ID**: %s\n  **内容**: %s\n", v.ID, v.Memory))
 		}
-		existingMemories.WriteString("\n请基于以上现有记忆和用户新输入，决定执行的操作。")
 
 		messages = append(messages, &schema.Message{
 			Role:    schema.System,
@@ -54,19 +53,23 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemoryWithParts(ctx context.Context, co
 		})
 	}
 
-	// 构建用户消息，支持多部分内容
-	userMessage := &schema.Message{
-		Role: schema.User,
+	// 添加历史消息作为上下文
+	if len(historyMessages) > 0 {
+		for _, v := range historyMessages {
+			// 构建用户消息，支持多部分内容
+			userMessage := &schema.Message{
+				Role: schema.RoleType(v.Role),
+			}
+			userMessage.Content = v.Content
+			// 如果有多部分内容，使用UserInputMultiContent
+			if len(v.Parts) > 0 {
+				multiContent := make([]schema.MessageInputPart, 0, len(v.Parts))
+				multiContent = append(multiContent, v.Parts...)
+				userMessage.UserInputMultiContent = multiContent
+			}
+			messages = append(messages, userMessage)
+		}
 	}
-	userMessage.Content = content
-	// 如果有多部分内容，使用UserInputMultiContent
-	if len(parts) > 0 {
-		multiContent := make([]schema.MessageInputPart, 0, len(parts))
-		multiContent = append(multiContent, parts...)
-		userMessage.UserInputMultiContent = multiContent
-	}
-
-	messages = append(messages, userMessage)
 
 	response, err := u.cm.Generate(ctx, messages)
 	if err != nil {
