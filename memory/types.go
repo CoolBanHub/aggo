@@ -6,6 +6,21 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+// ToSchemaMessage 将 ConversationMessage 转换为 schema.Message
+// 统一转换逻辑，避免在多处重复实现
+func (m *ConversationMessage) ToSchemaMessage() *schema.Message {
+	msg := &schema.Message{
+		Role:    schema.RoleType(m.Role),
+		Content: m.Content,
+	}
+	if len(m.Parts) > 0 {
+		multiContent := make([]schema.MessageInputPart, len(m.Parts))
+		copy(multiContent, m.Parts)
+		msg.UserInputMultiContent = multiContent
+	}
+	return msg
+}
+
 // UserMemory 用户记忆结构
 // 每个用户一条记录，使用Markdown格式存储所有记忆内容
 type UserMemory struct {
@@ -84,6 +99,11 @@ type MemoryConfig struct {
 	TablePre string `json:"tablePre"`
 
 	// 清理配置
+	Cleanup CleanupConfig `json:"cleanup"`
+}
+
+// CleanupConfig 清理相关配置
+type CleanupConfig struct {
 	// 会话状态清理间隔（小时），默认24小时
 	SessionCleanupInterval int `json:"sessionCleanupInterval"`
 	// 会话状态保留时间（小时），默认168小时（7天）
@@ -92,6 +112,28 @@ type MemoryConfig struct {
 	MessageHistoryLimit int `json:"messageHistoryLimit"`
 	// 定期清理间隔（小时），默认12小时
 	CleanupInterval int `json:"cleanupInterval"`
+}
+
+// DefaultMemoryConfig 返回完整的默认配置
+func DefaultMemoryConfig() *MemoryConfig {
+	return &MemoryConfig{
+		EnableUserMemories:   true,
+		EnableSessionSummary: false,
+		Retrieval:            RetrievalLastN,
+		MemoryLimit:          20,
+		AsyncWorkerPoolSize:  5,
+		SummaryTrigger: SummaryTriggerConfig{
+			Strategy:         TriggerSmart,
+			MessageThreshold: 10,
+			MinInterval:      600, // 600秒最小间隔
+		},
+		Cleanup: CleanupConfig{
+			SessionCleanupInterval: 24,   // 24小时
+			SessionRetentionTime:   168,  // 7天
+			MessageHistoryLimit:    1000, // 1000条
+			CleanupInterval:        12,   // 12小时
+		},
+	}
 }
 
 // SummaryTriggerConfig 摘要触发配置

@@ -71,19 +71,3 @@ type MemoryStorage interface {
 	// GetMessageCount 获取消息总数
 	GetMessageCount(ctx context.Context, userID, sessionID string) (int, error)
 }
-
-// MemoryQuery 记忆查询条件
-type MemoryQuery struct {
-	// 用户ID
-	UserID string
-	// 会话ID (可选)
-	SessionID string
-	// 时间范围 (可选)
-	CreatedAfter  *int64 // Unix时间戳
-	CreatedBefore *int64 // Unix时间戳
-	// 内容关键词 (可选)
-	Keywords []string
-	// 分页
-	Offset int
-	Limit  int
-}

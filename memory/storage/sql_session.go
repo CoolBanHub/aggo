@@ -130,9 +130,11 @@ func (s *SQLStore) CleanupMessagesByLimit(ctx context.Context, userID, sessionID
 		return errors.New("保留数量必须大于0")
 	}
 
+	tableName := s.tableNameProvider.GetConversationMessageTableName()
+
 	// 获取消息总数
 	var totalCount int64
-	countErr := s.db.WithContext(ctx).Table(s.tableNameProvider.GetConversationMessageTableName()).
+	countErr := s.db.WithContext(ctx).Table(tableName).
 		Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Count(&totalCount).Error
 
@@ -144,23 +146,27 @@ func (s *SQLStore) CleanupMessagesByLimit(ctx context.Context, userID, sessionID
 		return nil // 消息数量在限制内，无需清理
 	}
 
-	// 找到要保留的消息的最早创建时间
-	var earliestKeepTime time.Time
-	err := s.db.WithContext(ctx).Table(s.tableNameProvider.GetConversationMessageTableName()).
-		Select("created_at").
+	// 使用 ID 子查询确定要保留的消息，避免时间戳相同导致误删
+	// 先查出要保留的最新 N 条消息的 ID
+	var keepIDs []string
+	err := s.db.WithContext(ctx).Table(tableName).
+		Select("id").
 		Where("user_id = ? AND session_id = ?", userID, sessionID).
 		Order("created_at DESC").
-		Limit(1).
-		Offset(keepLimit - 1).
-		Scan(&earliestKeepTime).Error
+		Limit(keepLimit).
+		Pluck("id", &keepIDs).Error
 
 	if err != nil {
-		return fmt.Errorf("获取清理边界时间失败: %v", err)
+		return fmt.Errorf("获取保留消息ID失败: %v", err)
 	}
 
-	// 删除早于边界时间的所有消息
-	result := s.db.WithContext(ctx).Table(s.tableNameProvider.GetConversationMessageTableName()).
-		Where("user_id = ? AND session_id = ? AND created_at < ?", userID, sessionID, earliestKeepTime).
+	if len(keepIDs) == 0 {
+		return nil
+	}
+
+	// 删除不在保留列表中的消息
+	result := s.db.WithContext(ctx).Table(tableName).
+		Where("user_id = ? AND session_id = ? AND id NOT IN ?", userID, sessionID, keepIDs).
 		Delete(&ConversationMessageModel{})
 
 	if result.Error != nil {

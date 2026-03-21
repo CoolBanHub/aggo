@@ -41,7 +41,9 @@ type MemoryManager struct {
 
 	// 异步任务队列统计
 	taskQueueStats TaskQueueStats
-	taskQueueMutex sync.RWMutex
+
+	// 异步任务处理去重标记，防止同一(任务类型,用户,会话)多次排队
+	pendingTasks sync.Map
 
 	// 外部注入的清理函数
 	CleanupOldMessagesFunc     func(ctx context.Context) error // 按时间清理旧消息
@@ -55,35 +57,34 @@ type asyncTask struct {
 	sessionID string
 }
 
-/**
-  📊 默认清理策略
-
-  - 会话状态: 保留7天，每12小时清理一次
-  - 对话消息: 单会话最多1000条，保留30天
-  - 异步队列: 10倍工作池大小的缓冲区
-  - 定期清理: 每12小时执行一次
-*/
-
 // NewMemoryManager 创建新的记忆管理器
 func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage, config *MemoryConfig) (*MemoryManager, error) {
 	if config == nil {
-		config = &MemoryConfig{
-			EnableUserMemories:   true,
-			EnableSessionSummary: false,
-			Retrieval:            RetrievalLastN,
-			MemoryLimit:          20,
-			AsyncWorkerPoolSize:  5,
-			SummaryTrigger: SummaryTriggerConfig{
-				Strategy:         TriggerSmart,
-				MessageThreshold: 10,  // MemoryLimit的一半
-				MinInterval:      600, // 600秒最小间隔
-			},
-			// 默认清理配置
-			SessionCleanupInterval: 24,   // 24小时清理一次会话状态
-			SessionRetentionTime:   168,  // 7天保留时间
-			MessageHistoryLimit:    1000, // 1000条消息限制
-			CleanupInterval:        12,   // 12小时定期清理
-		}
+		config = DefaultMemoryConfig()
+	}
+
+	// 填充零值字段的默认值
+	defaults := DefaultMemoryConfig()
+	if config.MemoryLimit <= 0 {
+		config.MemoryLimit = defaults.MemoryLimit
+	}
+	if config.AsyncWorkerPoolSize <= 0 {
+		config.AsyncWorkerPoolSize = defaults.AsyncWorkerPoolSize
+	}
+	if config.SummaryTrigger.MessageThreshold <= 0 {
+		config.SummaryTrigger.MessageThreshold = defaults.SummaryTrigger.MessageThreshold
+	}
+	if config.Cleanup.CleanupInterval <= 0 {
+		config.Cleanup.CleanupInterval = defaults.Cleanup.CleanupInterval
+	}
+	if config.Cleanup.SessionCleanupInterval <= 0 {
+		config.Cleanup.SessionCleanupInterval = defaults.Cleanup.SessionCleanupInterval
+	}
+	if config.Cleanup.SessionRetentionTime <= 0 {
+		config.Cleanup.SessionRetentionTime = defaults.Cleanup.SessionRetentionTime
+	}
+	if config.Cleanup.MessageHistoryLimit <= 0 {
+		config.Cleanup.MessageHistoryLimit = defaults.Cleanup.MessageHistoryLimit
 	}
 
 	// 设置表前缀
@@ -94,19 +95,6 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 	err := memoryStorage.AutoMigrate()
 	if err != nil {
 		return nil, err
-	}
-
-	if config.MemoryLimit == 0 {
-		config.MemoryLimit = 30
-	}
-
-	if config.EnableSessionSummary && config.SummaryTrigger.MessageThreshold == 0 && !(config.SummaryTrigger.Strategy == TriggerSmart || config.SummaryTrigger.Strategy == TriggerByMessages) {
-		config.SummaryTrigger.MessageThreshold = config.MemoryLimit / 2
-	}
-
-	// 设置异步处理的默认值
-	if config.AsyncWorkerPoolSize <= 0 {
-		config.AsyncWorkerPoolSize = 5
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -146,8 +134,15 @@ func (m *MemoryManager) startAsyncWorkers() {
 				select {
 				case <-m.ctx.Done():
 					return
-				case task := <-m.taskChannel:
-					m.updateQueueStats(-1) // 减少队列大小
+				case task, ok := <-m.taskChannel:
+					if !ok {
+						return // channel 已关闭
+					}
+
+					// 任务已取出准备处理，从排队重标记中移除，允许同类新任务入队
+					taskKey := fmt.Sprintf("%s:%s:%s", task.taskType, task.userID, task.sessionID)
+					m.pendingTasks.Delete(taskKey)
+
 					m.processAsyncTask(task)
 					atomic.AddInt64(&m.taskQueueStats.ProcessedTasks, 1)
 				}
@@ -157,63 +152,52 @@ func (m *MemoryManager) startAsyncWorkers() {
 	m.taskQueueStats.ActiveWorkers = m.config.AsyncWorkerPoolSize
 }
 
-// updateQueueStats 更新队列统计
-func (m *MemoryManager) updateQueueStats(delta int) {
-	m.taskQueueMutex.Lock()
-	defer m.taskQueueMutex.Unlock()
-
-	m.taskQueueStats.QueueSize += delta
-	if m.taskQueueStats.QueueCapacity > 0 {
-		m.taskQueueStats.QueueUtilization = float64(m.taskQueueStats.QueueSize) / float64(m.taskQueueStats.QueueCapacity)
-	}
-}
-
-// submitAsyncTask 提交异步任务
+// submitAsyncTask 提交异步任务，带队列重防抖功能
 func (m *MemoryManager) submitAsyncTask(task asyncTask) bool {
+	taskKey := fmt.Sprintf("%s:%s:%s", task.taskType, task.userID, task.sessionID)
+	// 如果相同签名（任务类型+用户+会话）的任务已在队列中，则丢弃当前重复提交，节省开销
+	if _, loaded := m.pendingTasks.LoadOrStore(taskKey, struct{}{}); loaded {
+		slog.Debugf("异步任务去重: 已存在相同的待处理任务, 类型: %s, 用户: %s", task.taskType, task.userID)
+		return true // 返回 true 表示"已接收处理"（虽然是去重扔掉的），不视为"队列满丢弃"
+	}
+
 	select {
 	case m.taskChannel <- task:
-		m.updateQueueStats(1) // 增加队列大小
 		return true
 	default:
+		// 队列满，入队失败，需清除去重标记以免卡死后续重试
+		m.pendingTasks.Delete(taskKey)
+
 		// 队列满，增加丢弃计数
 		atomic.AddInt64(&m.taskQueueStats.DroppedTasks, 1)
-
-		// 记录详细统计信息
-		m.taskQueueMutex.RLock()
-		queueSize := m.taskQueueStats.QueueSize
-		capacity := m.taskQueueStats.QueueCapacity
-		dropped := m.taskQueueStats.DroppedTasks
-		m.taskQueueMutex.RUnlock()
-
 		slog.Errorf("异步任务队列已满，丢弃任务. 队列: %d/%d, 总丢弃: %d, 任务类型: %s, 用户: %s",
-			queueSize, capacity, dropped, task.taskType, task.userID)
+			len(m.taskChannel), m.taskQueueStats.QueueCapacity,
+			atomic.LoadInt64(&m.taskQueueStats.DroppedTasks),
+			task.taskType, task.userID)
 		return false
 	}
 }
 
 // GetTaskQueueStats 获取异步任务队列统计
 func (m *MemoryManager) GetTaskQueueStats() TaskQueueStats {
-	m.taskQueueMutex.RLock()
-	defer m.taskQueueMutex.RUnlock()
-
-	// 更新当前队列大小
+	stats := TaskQueueStats{
+		QueueCapacity:  m.taskQueueStats.QueueCapacity,
+		ActiveWorkers:  m.taskQueueStats.ActiveWorkers,
+		ProcessedTasks: atomic.LoadInt64(&m.taskQueueStats.ProcessedTasks),
+		DroppedTasks:   atomic.LoadInt64(&m.taskQueueStats.DroppedTasks),
+	}
 	if m.taskChannel != nil {
-		m.taskQueueStats.QueueSize = len(m.taskChannel)
-		if m.taskQueueStats.QueueCapacity > 0 {
-			m.taskQueueStats.QueueUtilization = float64(m.taskQueueStats.QueueSize) / float64(m.taskQueueStats.QueueCapacity)
+		stats.QueueSize = len(m.taskChannel)
+		if stats.QueueCapacity > 0 {
+			stats.QueueUtilization = float64(stats.QueueSize) / float64(stats.QueueCapacity)
 		}
 	}
-
-	return m.taskQueueStats
+	return stats
 }
 
 // startPeriodicCleanup 启动定期清理任务
 func (m *MemoryManager) startPeriodicCleanup() {
-	if m.config.CleanupInterval <= 0 {
-		m.config.CleanupInterval = 12 // 默认12小时
-	}
-
-	m.cleanupTicker = time.NewTicker(time.Duration(m.config.CleanupInterval) * time.Hour)
+	m.cleanupTicker = time.NewTicker(time.Duration(m.config.Cleanup.CleanupInterval) * time.Hour)
 	m.cleanupWg.Add(1)
 	go func() {
 		defer m.cleanupWg.Done()
@@ -223,24 +207,21 @@ func (m *MemoryManager) startPeriodicCleanup() {
 				m.cleanupTicker.Stop()
 				return
 			case <-m.cleanupTicker.C:
-				m.performPeriodicCleanup()
+				m.performPeriodicCleanup(m.cleanupCtx)
 			}
 		}
 	}()
 }
 
 // performPeriodicCleanup 执行定期清理
-func (m *MemoryManager) performPeriodicCleanup() {
+func (m *MemoryManager) performPeriodicCleanup(parentCtx context.Context) {
 	// 创建超时context，避免清理任务阻塞
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 	defer cancel()
 
 	// 1. 清理旧的会话状态
-	if m.config.SessionCleanupInterval > 0 {
-		sessionRetention := time.Duration(m.config.SessionRetentionTime) * time.Hour
-		if sessionRetention <= 0 {
-			sessionRetention = 168 * time.Hour // 默认7天
-		}
+	if m.config.Cleanup.SessionCleanupInterval > 0 {
+		sessionRetention := time.Duration(m.config.Cleanup.SessionRetentionTime) * time.Hour
 		m.summaryTrigger.CleanupOldSessions(sessionRetention)
 	}
 
@@ -263,13 +244,11 @@ func (m *MemoryManager) performPeriodicCleanup() {
 func (m *MemoryManager) processAsyncTask(task asyncTask) {
 	switch task.taskType {
 	case "memory":
-		// 创建新的context用于异步操作，避免超时
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		m.analyzeAndCreateUserMemory(ctx, task.userID, task.sessionID)
 	case "summary":
-		// 创建新的context用于异步操作
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // 30秒超时
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		err := m.updateSessionSummary(ctx, task.userID, task.sessionID)
 		if err != nil {
@@ -295,17 +274,17 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 	}
 
 	// 检查消息数量并可能清理旧消息
-	if m.config.MessageHistoryLimit > 0 {
+	if m.config.Cleanup.MessageHistoryLimit > 0 {
 		currentCount, err := m.storage.GetMessageCount(ctx, userID, sessionID)
 		if err != nil {
 			slog.Errorf("获取消息数量失败: %v", err)
-		} else if currentCount >= m.config.MessageHistoryLimit {
+		} else if currentCount >= m.config.Cleanup.MessageHistoryLimit {
 			// 清理超出限制的消息，保留最新的N条
-			err := m.storage.CleanupMessagesByLimit(ctx, userID, sessionID, m.config.MessageHistoryLimit-1)
+			err := m.storage.CleanupMessagesByLimit(ctx, userID, sessionID, m.config.Cleanup.MessageHistoryLimit-1)
 			if err != nil {
 				slog.Errorf("清理超限消息失败: %v", err)
 			} else {
-				slog.Infof("会话 %s 消息数量达到限制 %d，已清理旧消息", sessionID, m.config.MessageHistoryLimit)
+				slog.Infof("会话 %s 消息数量达到限制 %d，已清理旧消息", sessionID, m.config.Cleanup.MessageHistoryLimit)
 			}
 		}
 	}
@@ -417,17 +396,17 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 	}
 
 	// 保存更新后的记忆
-	memory := &UserMemory{
+	mem := &UserMemory{
 		UserID: userID,
 		Memory: newMemoryContent,
 	}
 
 	// 如果有现有记忆，保留创建时间
 	if existingMemory != nil {
-		memory.CreatedAt = existingMemory.CreatedAt
+		mem.CreatedAt = existingMemory.CreatedAt
 	}
 
-	err = m.storage.UpsertUserMemory(ctx, memory)
+	err = m.storage.UpsertUserMemory(ctx, mem)
 	if err != nil {
 		slog.Errorf("保存用户记忆失败: %v\n", err)
 	}
@@ -435,15 +414,13 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 
 // shouldTriggerSummaryUpdate 判断是否需要触发摘要更新
 func (m *MemoryManager) shouldTriggerSummaryUpdate(ctx context.Context, userID, sessionID string) (bool, error) {
-	// 获取当前会话的消息总数
-	messages, err := m.storage.GetMessages(ctx, sessionID, userID, 0) // 获取所有消息
+	// 直接获取消息数量，避免加载全量消息到内存
+	messageCount, err := m.storage.GetMessageCount(ctx, userID, sessionID)
 	if err != nil {
 		return false, fmt.Errorf("获取消息总数失败: %w", err)
 	}
 
-	messageCount := len(messages)
 	sessionKey := generateSessionKey(userID, sessionID)
-
 	return m.summaryTrigger.ShouldTriggerSummary(sessionKey, messageCount), nil
 }
 
@@ -534,16 +511,7 @@ func (m *MemoryManager) GetMessages(ctx context.Context, sessionID, userID strin
 
 	list := make([]*schema.Message, len(messages))
 	for i, v := range messages {
-		schemaMsg := &schema.Message{
-			Role: schema.RoleType(v.Role),
-		}
-		schemaMsg.Content = v.Content
-		if len(v.Parts) > 0 {
-			multiContent := make([]schema.MessageInputPart, 0, len(v.Parts))
-			multiContent = append(multiContent, v.Parts...)
-			schemaMsg.UserInputMultiContent = multiContent
-		}
-		list[i] = schemaMsg
+		list[i] = v.ToSchemaMessage()
 	}
 	return list, nil
 }
@@ -555,15 +523,21 @@ func (m *MemoryManager) GetConfig() *MemoryConfig {
 
 // UpdateConfig 更新配置
 func (m *MemoryManager) UpdateConfig(config *MemoryConfig) {
-	if config != nil {
-		m.config = config
-		// 如果配置更新，重新启动定期清理
-		m.cleanupCancel()
-		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
-		m.cleanupCtx = cleanupCtx
-		m.cleanupCancel = cleanupCancel
-		m.startPeriodicCleanup()
+	if config == nil {
+		return
 	}
+
+	m.config = config
+
+	// 停止旧的定期清理任务并等待退出
+	m.cleanupCancel()
+	m.cleanupWg.Wait()
+
+	// 启动新的定期清理任务
+	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	m.cleanupCtx = cleanupCtx
+	m.cleanupCancel = cleanupCancel
+	m.startPeriodicCleanup()
 }
 
 // GetMemoryStats 获取内存管理器统计信息
@@ -575,9 +549,8 @@ func (m *MemoryManager) GetMemoryStats() map[string]interface{} {
 	// 添加队列统计
 	stats["taskQueue"] = m.GetTaskQueueStats()
 
-	// 添加会话状态统计（通过summary trigger获取）
-	sessionCount := len(m.summaryTrigger.sessionStates)
-	stats["activeSessions"] = sessionCount
+	// 添加会话状态统计（通过并发安全的方法获取）
+	stats["activeSessions"] = m.summaryTrigger.GetSessionCount()
 
 	return stats
 }
@@ -588,8 +561,8 @@ func (m *MemoryManager) ForceCleanupNow(ctx context.Context) error {
 		ctx = context.Background()
 	}
 
-	// 执行定期清理
-	m.performPeriodicCleanup()
+	// 使用传入的 ctx 执行清理
+	m.performPeriodicCleanup(ctx)
 
 	return nil
 }
@@ -603,10 +576,10 @@ func (m *MemoryManager) Close() error {
 		m.cleanupWg.Wait()
 	}
 
-	// 关闭异步处理
+	// 通知所有 worker 退出，等待退出后再关闭 channel
 	m.cancel()
-	close(m.taskChannel)
 	m.wg.Wait()
+	close(m.taskChannel)
 
 	return m.storage.Close()
 }

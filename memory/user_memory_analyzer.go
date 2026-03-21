@@ -52,19 +52,8 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, existingMem
 	}
 
 	// 添加历史消息作为上下文
-	if len(historyMessages) > 0 {
-		for _, v := range historyMessages {
-			userMessage := &schema.Message{
-				Role: schema.RoleType(v.Role),
-			}
-			userMessage.Content = v.Content
-			if len(v.Parts) > 0 {
-				multiContent := make([]schema.MessageInputPart, 0, len(v.Parts))
-				multiContent = append(multiContent, v.Parts...)
-				userMessage.UserInputMultiContent = multiContent
-			}
-			messages = append(messages, userMessage)
-		}
+	for _, v := range historyMessages {
+		messages = append(messages, v.ToSchemaMessage())
 	}
 
 	response, err := u.cm.Generate(ctx, messages)

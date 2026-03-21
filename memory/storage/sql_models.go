@@ -62,14 +62,14 @@ type SessionSummaryModel struct {
 // ConversationMessageModel GORM模型 - 对话消息表
 type ConversationMessageModel struct {
 	ID        string `gorm:"primaryKey;size:255" json:"id"`
-	SessionID string `gorm:"index;size:255;not null" json:"sessionId"`
-	UserID    string `gorm:"index;size:255;not null" json:"userId"`
+	SessionID string `gorm:"size:255;not null;index:idx_session_user" json:"sessionId"`
+	UserID    string `gorm:"size:255;not null;index:idx_session_user;index:idx_user_session" json:"userId"`
 	Role      string `gorm:"size:50;not null" json:"role"`
 	// 保留Content字段用于向后兼容
 	Content string `gorm:"type:text" json:"content,omitempty"`
 	// 多部分内容，使用自定义类型直接存储
 	Parts     MessageParts `gorm:"type:text" json:"parts,omitempty"`
-	CreatedAt time.Time    `gorm:"autoCreateTime" json:"createdAt"`
+	CreatedAt time.Time    `gorm:"autoCreateTime;index:idx_user_session" json:"createdAt"`
 }
 
 // 模型转换函数

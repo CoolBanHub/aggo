@@ -90,7 +90,6 @@ func initializeBot(ctx context.Context) error {
 		EnableUserMemories:   false,
 		MemoryLimit:          8,
 		Retrieval:            memory.RetrievalLastN,
-		AsyncProcessing:      true,
 	})
 	if err != nil {
 		return fmt.Errorf("new manager fail,err:%s", err)

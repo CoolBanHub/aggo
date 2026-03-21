@@ -265,11 +265,12 @@ func (f *FileStore) appendMessage(msg *memory.ConversationMessage) error {
 // === 下面覆写所有可能修改数据的方法，按对应的表分离落地存储 ===
 
 // UpsertUserMemory 创建或更新用户记忆
+// 由于每个用户只有一条记录，直接全量重写文件（记录数极少，开销可忽略）
 func (f *FileStore) UpsertUserMemory(ctx context.Context, userMemory *memory.UserMemory) error {
 	if err := f.MemoryStore.UpsertUserMemory(ctx, userMemory); err != nil {
 		return err
 	}
-	return f.appendUserMemory(userMemory)
+	return f.saveUserMemories()
 }
 
 // ClearUserMemory 清空用户记忆

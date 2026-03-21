@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -11,14 +12,28 @@ import (
 
 // SessionSummaryGenerator 基于AI的会话摘要生成器
 type SessionSummaryGenerator struct {
-	cm model.ToolCallingChatModel
+	cm                model.ToolCallingChatModel
+	summaryPrompt     string
+	incrementalPrompt string
 }
 
 // NewSessionSummaryGenerator 创建新的会话摘要生成器
 func NewSessionSummaryGenerator(cm model.ToolCallingChatModel) *SessionSummaryGenerator {
 	return &SessionSummaryGenerator{
-		cm: cm,
+		cm:                cm,
+		summaryPrompt:     DefaultSessionSummaryPrompt,
+		incrementalPrompt: DefaultIncrementalSessionSummaryPrompt,
 	}
+}
+
+// SetSummaryPrompt 自定义完整摘要系统提示词
+func (s *SessionSummaryGenerator) SetSummaryPrompt(prompt string) {
+	s.summaryPrompt = prompt
+}
+
+// SetIncrementalPrompt 自定义增量摘要系统提示词
+func (s *SessionSummaryGenerator) SetIncrementalPrompt(prompt string) {
+	s.incrementalPrompt = prompt
 }
 
 // GenerateSummary 生成会话摘要
@@ -28,7 +43,7 @@ func (s *SessionSummaryGenerator) GenerateSummary(ctx context.Context, messages 
 	}
 
 	// 构建提示消息
-	systemPrompt := DefaultSessionSummaryPrompt
+	systemPrompt := strings.ReplaceAll(s.summaryPrompt, "{{current_time}}", time.Now().Format("2006-01-02 15:04"))
 
 	promptMessages := []*schema.Message{
 		{
@@ -45,9 +60,10 @@ func (s *SessionSummaryGenerator) GenerateSummary(ctx context.Context, messages 
 		})
 	}
 
-	// 将对话消息转换为多部分内容格式
-	schemaMessages := s.convertConversationMessages(messages)
-	promptMessages = append(promptMessages, schemaMessages...)
+	// 将对话消息转换为 schema.Message
+	for _, msg := range messages {
+		promptMessages = append(promptMessages, msg.ToSchemaMessage())
+	}
 
 	// 生成摘要
 	response, err := s.cm.Generate(ctx, promptMessages)
@@ -75,7 +91,7 @@ func (s *SessionSummaryGenerator) GenerateIncrementalSummary(ctx context.Context
 		return s.GenerateSummary(ctx, recentMessages, "")
 	}
 
-	systemPrompt := DefaultIncrementalSessionSummaryPrompt
+	systemPrompt := strings.ReplaceAll(s.incrementalPrompt, "{{current_time}}", time.Now().Format("2006-01-02 15:04"))
 
 	promptMessages := []*schema.Message{
 		{
@@ -88,15 +104,10 @@ func (s *SessionSummaryGenerator) GenerateIncrementalSummary(ctx context.Context
 		},
 	}
 
-	// 将最新对话消息转换为多部分内容格式
-	schemaMessages := s.convertConversationMessages(recentMessages)
-	promptMessages = append(promptMessages, schemaMessages...)
-
-	// 添加更新指令
-	promptMessages = append(promptMessages, &schema.Message{
-		Role:    schema.User,
-		Content: "请基于以上最新对话内容，更新摘要以包含新的信息。",
-	})
+	// 将最新对话消息转换
+	for _, msg := range recentMessages {
+		promptMessages = append(promptMessages, msg.ToSchemaMessage())
+	}
 
 	response, err := s.cm.Generate(ctx, promptMessages)
 	if err != nil {
@@ -109,24 +120,4 @@ func (s *SessionSummaryGenerator) GenerateIncrementalSummary(ctx context.Context
 	}
 
 	return summary, nil
-}
-
-// convertConversationMessages 将ConversationMessage转换为schema.Message，支持多部分内容
-func (s *SessionSummaryGenerator) convertConversationMessages(messages []*ConversationMessage) []*schema.Message {
-	schemaMessages := make([]*schema.Message, 0, len(messages))
-
-	for _, msg := range messages {
-		schemaMsg := &schema.Message{
-			Role: schema.RoleType(msg.Role),
-		}
-		schemaMsg.Content = msg.Content
-		if len(msg.Parts) > 0 {
-			multiContent := make([]schema.MessageInputPart, 0, len(msg.Parts))
-			multiContent = append(multiContent, msg.Parts...)
-			schemaMsg.UserInputMultiContent = multiContent
-		}
-		schemaMessages = append(schemaMessages, schemaMsg)
-	}
-
-	return schemaMessages
 }

@@ -132,6 +132,13 @@ func (stm *SummaryTriggerManager) MarkSummaryUpdated(sessionKey string) {
 	}
 }
 
+// GetSessionCount 获取当前活跃会话数量（并发安全）
+func (stm *SummaryTriggerManager) GetSessionCount() int {
+	stm.mutex.RLock()
+	defer stm.mutex.RUnlock()
+	return len(stm.sessionStates)
+}
+
 // GetSessionState 获取会话状态（用于调试）
 func (stm *SummaryTriggerManager) GetSessionState(sessionKey string) *SessionState {
 	stm.mutex.RLock()
