@@ -8,6 +8,7 @@ require (
 	github.com/CoolBanHub/aggo v0.0.0-00010101000000-000000000000
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.8.0
+	github.com/cloudwego/eino-ext/adk/backend/local v0.2.3
 	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20251111090228-91a10bbc864f
 	github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20260316121515-014a29323bbe
 	github.com/cloudwego/eino-ext/components/model/gemini v0.1.17

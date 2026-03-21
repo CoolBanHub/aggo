@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools/shell"
+	"github.com/cloudwego/eino-ext/adk/backend/local"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/skill"
 	"github.com/cloudwego/eino/schema"
@@ -63,9 +65,16 @@ func main() {
 	// ============================================================
 	// Step 3: 创建 Backend 从文件系统加载 skills
 	// ============================================================
-	skillsDir := "./skills"
+	cwd, _ := os.Getwd()
+	skillsDir := filepath.Join(cwd, "skills")
+
+	localBackend, err := local.NewBackend(ctx, &local.Config{})
+	if err != nil {
+		log.Fatalf("Failed to create local backend: %v", err)
+	}
 
 	backend, err := skill.NewBackendFromFilesystem(ctx, &skill.BackendFromFilesystemConfig{
+		Backend: localBackend,
 		BaseDir: skillsDir,
 	})
 	if err != nil {
@@ -76,8 +85,7 @@ func main() {
 	// Step 4: 创建 skill middleware
 	// ============================================================
 	skillMiddleware, err := skill.NewMiddleware(ctx, &skill.Config{
-		Backend:    backend,
-		UseChinese: true,
+		Backend: backend,
 	})
 	if err != nil {
 		log.Fatalf("Failed to create skill middleware: %v", err)
