@@ -114,3 +114,11 @@ func WithChatOptions(chatOpts []ChatOption) adk.AgentRunOption {
 		}
 	})
 }
+
+// WithAdkAgentRunOptions 允许传递原生的 adk.AgentRunOption
+// 用于设置 session values 等需要原生支持的选项
+func WithAdkAgentRunOptions(opts ...adk.AgentRunOption) ChatOption {
+	return func(co *chatOptions) {
+		co.adkAgentRunOptions = append(co.adkAgentRunOptions, opts...)
+	}
+}

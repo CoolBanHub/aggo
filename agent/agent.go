@@ -347,17 +347,18 @@ func (this *Agent) runAgentWithPreprocess(ctx context.Context, input []*schema.M
 		return ctx, nil, err
 	}
 
-	// 创建新的 AgentInput 使用处理后的消息
-	processedAgentInput := &adk.AgentInput{
-		Messages:        processedInput,
-		EnableStreaming: enableStreaming,
-	}
-
 	// 默认去掉TransferMessages
 	options = append(options, adk.WithSkipTransferMessages())
 
+	// 添加原生 adk.AgentRunOptions（如 WithSessionValues）
+	options = append(options, chatOpts.adkAgentRunOptions...)
+
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{
+		Agent:           this.agent,
+		EnableStreaming: enableStreaming,
+	})
+	iter := runner.Run(ctx, processedInput, options...)
 	// 调用底层 adk.Agent 的 Run 方法
-	iter := this.agent.Run(ctx, processedAgentInput, options...)
 	return ctx, iter, nil
 }
 
