@@ -359,6 +359,11 @@ func (this *Agent) runAgentWithPreprocess(ctx context.Context, input []*schema.M
 		return ctx, nil, err
 	}
 
+	if this.subAgentMode == SubAgentModeDefault {
+		// 默认去掉TransferMessages
+		options = append(options, adk.WithSkipTransferMessages())
+	}
+
 	// 添加原生 adk.AgentRunOptions（如 WithSessionValues）
 	options = append(options, chatOpts.adkAgentRunOptions...)
 
