@@ -48,6 +48,12 @@ func WithSubAgent(agents []adk.Agent) Option {
 	}
 }
 
+func WithSubAgentMode(subAgentMode string) Option {
+	return func(agent *Agent) {
+		agent.subAgentMode = subAgentMode
+	}
+}
+
 func WithMaxStep(maxStep int) Option {
 	return func(agent *Agent) {
 		agent.maxStep = maxStep

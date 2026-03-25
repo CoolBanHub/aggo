@@ -33,7 +33,8 @@ type Agent struct {
 	adkMiddlewares []adk.ChatModelAgentMiddleware
 
 	// 子agents（用于多agent场景）
-	subAgents []adk.Agent
+	subAgents    []adk.Agent
+	subAgentMode string
 }
 
 func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option) (*Agent, error) {
@@ -84,7 +85,18 @@ func NewAgent(ctx context.Context, cm model.ToolCallingChatModel, opts ...Option
 
 	// 如果有子agents，设置它们
 	if len(this.subAgents) > 0 {
-		this.agent, err = adk.SetSubAgents(ctx, mainAgent, this.subAgents)
+		subAgents := this.subAgents
+		if this.subAgentMode == SubAgentModeSupervisor {
+			subAgents = make([]adk.Agent, 0, len(this.subAgents))
+			supervisorName := this.agent.Name(ctx)
+			for _, subAgent := range this.subAgents {
+				subAgents = append(subAgents, adk.AgentWithDeterministicTransferTo(ctx, &adk.DeterministicTransferConfig{
+					Agent:        subAgent,
+					ToAgentNames: []string{supervisorName},
+				}))
+			}
+		}
+		this.agent, err = adk.SetSubAgents(ctx, mainAgent, subAgents)
 		if err != nil {
 			return nil, err
 		}
@@ -346,9 +358,6 @@ func (this *Agent) runAgentWithPreprocess(ctx context.Context, input []*schema.M
 	if err != nil {
 		return ctx, nil, err
 	}
-
-	// 默认去掉TransferMessages
-	options = append(options, adk.WithSkipTransferMessages())
 
 	// 添加原生 adk.AgentRunOptions（如 WithSessionValues）
 	options = append(options, chatOpts.adkAgentRunOptions...)
