@@ -4,41 +4,37 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
-	"sync"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
 
-// MemoryMiddleware 实现 adk.ChatModelAgentMiddleware 接口
-// 通过 Eino 生命周期钩子自动处理：历史消息注入、用户记忆/会话摘要增强、消息存储
+// MemoryMiddleware implements adk.ChatModelAgentMiddleware.
+// It delegates to a MemoryProvider for retrieval and memorization.
 type MemoryMiddleware struct {
 	*adk.BaseChatModelAgentMiddleware
-
-	manager *MemoryManager
+	provider MemoryProvider
 }
 
-// NewMemoryMiddleware 创建 MemoryMiddleware 实例
-func NewMemoryMiddleware(manager *MemoryManager) *MemoryMiddleware {
+// NewMemoryMiddleware creates a MemoryMiddleware with a MemoryProvider.
+func NewMemoryMiddleware(provider MemoryProvider) *MemoryMiddleware {
 	return &MemoryMiddleware{
 		BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{},
-		manager:                      manager,
+		provider:                     provider,
 	}
 }
 
-// BeforeAgent 在 Agent 运行前初始化 session/user 上下文到 SessionValues
+// BeforeAgent is called before the agent runs.
 func (m *MemoryMiddleware) BeforeAgent(ctx context.Context, runCtx *adk.ChatModelAgentContext) (context.Context, *adk.ChatModelAgentContext, error) {
 	return ctx, runCtx, nil
 }
 
-// BeforeModelRewriteState 在模型调用前注入历史消息、用户记忆和会话摘要
+// BeforeModelRewriteState injects memory context before a model call.
 func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
-	if m.manager == nil {
+	if m.provider == nil {
 		return ctx, state, nil
 	}
 
-	// 从 SessionValues 获取 sessionID 和 userID
 	sessionID, _ := adk.GetSessionValue(ctx, "sessionID")
 	userID, _ := adk.GetSessionValue(ctx, "userID")
 	sid, _ := sessionID.(string)
@@ -46,72 +42,49 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 	if sid == "" || uid == "" {
 		return ctx, state, nil
 	}
+
 	if prepared, ok := adk.GetSessionValue(ctx, m.beforeModelRewriteStateKey()); ok {
 		if done, ok := prepared.(bool); ok && done {
 			return ctx, state, nil
 		}
 	}
 
-	// 并发获取三种数据
-	type fetchResult struct {
-		historyMessages   []*schema.Message
-		userMemoryMsg     *schema.Message
-		sessionSummaryMsg *schema.Message
+	// Call provider to retrieve context
+	result, err := m.provider.Retrieve(ctx, &RetrieveRequest{
+		UserID:    uid,
+		SessionID: sid,
+		Messages:  state.Messages,
+	})
+	if err != nil {
+		log.Printf("MemoryMiddleware: Retrieve failed: %v", err)
+		return ctx, state, nil
 	}
 
-	result := &fetchResult{}
-	var wg sync.WaitGroup
+	// Assemble enhanced messages
+	enhanced := make([]*schema.Message, 0)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		result.historyMessages = m.fetchHistoryMessages(ctx, sid, uid)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		result.userMemoryMsg = m.fetchUserMemoryMessage(ctx, uid)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		result.sessionSummaryMsg = m.fetchSessionSummaryMessage(ctx, sid, uid)
-	}()
-
-	wg.Wait()
-
-	// 按顺序拼接消息
-	enhanced := make([]*schema.Message, 0, len(result.historyMessages)+len(state.Messages)+2)
-
-	if result.userMemoryMsg != nil {
-		enhanced = append(enhanced, result.userMemoryMsg)
-	}
-	if result.sessionSummaryMsg != nil {
-		enhanced = append(enhanced, result.sessionSummaryMsg)
-	}
-	if len(result.historyMessages) > 0 {
-		enhanced = append(enhanced, result.historyMessages...)
+	if result != nil {
+		if len(result.SystemMessages) > 0 {
+			enhanced = append(enhanced, result.SystemMessages...)
+		}
+		if len(result.HistoryMessages) > 0 {
+			enhanced = append(enhanced, result.HistoryMessages...)
+		}
 	}
 	enhanced = append(enhanced, state.Messages...)
-
 	state.Messages = enhanced
 
-	// 存储用户消息（取最后一条 user 消息）
-	m.storeUserMessage(ctx, state.Messages, uid, sid)
 	adk.AddSessionValue(ctx, m.beforeModelRewriteStateKey(), true)
 
 	return ctx, state, nil
 }
 
-// AfterModelRewriteState 在模型调用后存储助手消息
+// AfterModelRewriteState stores assistant response after a model call.
 func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
-	if m.manager == nil {
+	if m.provider == nil {
 		return ctx, state, nil
 	}
 
-	// 从 SessionValues 获取 sessionID 和 userID
 	sessionID, _ := adk.GetSessionValue(ctx, "sessionID")
 	userID, _ := adk.GetSessionValue(ctx, "userID")
 	sid, _ := sessionID.(string)
@@ -120,92 +93,42 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 		return ctx, state, nil
 	}
 
-	// 找到最后的 assistant 消息并异步存储
+	// Find the last user and assistant messages
+	var userMsg, assistantMsg *schema.Message
 	for i := len(state.Messages) - 1; i >= 0; i-- {
-		if state.Messages[i].Role == schema.Assistant && state.Messages[i].Content != "" {
-			go func(content string) {
-				bgCtx := context.Background()
-				if err := m.manager.ProcessAssistantMessage(bgCtx, uid, sid, content); err != nil {
-					log.Printf("MemoryMiddleware: 存储助手消息失败: %v", err)
-				}
-			}(state.Messages[i].Content)
+		if assistantMsg == nil && state.Messages[i].Role == schema.Assistant && state.Messages[i].Content != "" {
+			assistantMsg = state.Messages[i]
+		}
+		if userMsg == nil && state.Messages[i].Role == schema.User {
+			userMsg = state.Messages[i]
+		}
+		if userMsg != nil && assistantMsg != nil {
 			break
 		}
 	}
 
-	return ctx, state, nil
-}
-
-// fetchHistoryMessages 获取历史消息
-func (m *MemoryMiddleware) fetchHistoryMessages(ctx context.Context, sessionID, userID string) []*schema.Message {
-	messages, err := m.manager.GetMessages(ctx, sessionID, userID, m.manager.GetConfig().MemoryLimit)
-	if err != nil {
-		log.Printf("MemoryMiddleware: 获取历史消息失败: %v", err)
-		return nil
+	var messagesToMemorize []*schema.Message
+	if userMsg != nil {
+		messagesToMemorize = append(messagesToMemorize, userMsg)
 	}
-	return messages
-}
-
-// fetchUserMemoryMessage 获取用户记忆作为 System Message
-func (m *MemoryMiddleware) fetchUserMemoryMessage(ctx context.Context, userID string) *schema.Message {
-	if !m.manager.GetConfig().EnableUserMemories {
-		return nil
+	if assistantMsg != nil {
+		messagesToMemorize = append(messagesToMemorize, assistantMsg)
 	}
 
-	userMemory, err := m.manager.GetUserMemory(ctx, userID)
-	if err != nil {
-		log.Printf("MemoryMiddleware: 获取用户记忆失败: %v", err)
-		return nil
-	}
-	if userMemory == nil || userMemory.Memory == "" {
-		return nil
-	}
-
-	var builder strings.Builder
-	builder.WriteString("用户个人信息记忆（请在回复中考虑这些信息，提供个性化的响应）:\n")
-	builder.WriteString(userMemory.Memory)
-
-	return &schema.Message{
-		Role:    schema.System,
-		Content: builder.String(),
-	}
-}
-
-// fetchSessionSummaryMessage 获取会话摘要作为 System Message
-func (m *MemoryMiddleware) fetchSessionSummaryMessage(ctx context.Context, sessionID, userID string) *schema.Message {
-	if !m.manager.GetConfig().EnableSessionSummary {
-		return nil
-	}
-
-	summary, err := m.manager.GetSessionSummary(ctx, sessionID, userID)
-	if err != nil {
-		log.Printf("MemoryMiddleware: 获取会话摘要失败: %v", err)
-		return nil
-	}
-	if summary == nil || summary.Summary == "" {
-		return nil
-	}
-
-	return &schema.Message{
-		Role:    schema.System,
-		Content: fmt.Sprintf("会话背景: %s", summary.Summary),
-	}
-}
-
-// storeUserMessage 存储用户消息
-func (m *MemoryMiddleware) storeUserMessage(ctx context.Context, messages []*schema.Message, userID, sessionID string) {
-	if len(messages) == 0 {
-		return
-	}
-	// 找到最后一条 user 消息
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == schema.User {
-			if err := m.manager.ProcessUserMessage(ctx, userID, sessionID, messages[i].Content, messages[i].UserInputMultiContent); err != nil {
-				log.Printf("MemoryMiddleware: 存储用户消息失败: %v", err)
+	if len(messagesToMemorize) > 0 {
+		go func() {
+			bgCtx := context.Background()
+			if err := m.provider.Memorize(bgCtx, &MemorizeRequest{
+				UserID:    uid,
+				SessionID: sid,
+				Messages:  messagesToMemorize,
+			}); err != nil {
+				log.Printf("MemoryMiddleware: Memorize failed: %v", err)
 			}
-			return
-		}
+		}()
 	}
+
+	return ctx, state, nil
 }
 
 func (m *MemoryMiddleware) beforeModelRewriteStateKey() string {
