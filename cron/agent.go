@@ -28,7 +28,7 @@ type cronConfig struct {
 	maxJobs        int
 	maxJobsPerUser int
 	locker         Locker
-	memoryManager  *memory.MemoryManager
+	memoryProvider  memory.MemoryProvider
 	name           string
 	systemPrompt   string
 }
@@ -96,10 +96,10 @@ func WithCronMiddlewares(mw ...adk.ChatModelAgentMiddleware) CronAgentOption {
 	}
 }
 
-// WithCronMemoryManager 设置 MemoryManager
-func WithCronMemoryManager(mm *memory.MemoryManager) CronAgentOption {
+// WithCronMemory 设置 MemoryProvider
+func WithCronMemory(provider memory.MemoryProvider) CronAgentOption {
 	return func(c *cronConfig) {
-		c.memoryManager = mm
+		c.memoryProvider = provider
 	}
 }
 
@@ -162,8 +162,8 @@ func NewCronAgent(ctx context.Context, cm model.ToolCallingChatModel, cronTools 
 
 	// 构建 Middleware 链
 	handlers := make([]adk.ChatModelAgentMiddleware, 0, len(cfg.middlewares)+1)
-	if cfg.memoryManager != nil {
-		handlers = append(handlers, memory.NewMemoryMiddleware(cfg.memoryManager))
+	if cfg.memoryProvider != nil {
+		handlers = append(handlers, memory.NewMemoryMiddleware(cfg.memoryProvider))
 	}
 	handlers = append(handlers, cfg.middlewares...)
 
