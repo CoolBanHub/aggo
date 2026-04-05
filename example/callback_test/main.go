@@ -9,6 +9,7 @@ import (
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/callbacks"
 	model2 "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -35,14 +36,18 @@ func main() {
 
 	callbacks.AppendGlobalHandlers(NewChatModelCallback())
 
-	bot, err := agent.NewAgent(ctx, cm,
-		agent.WithName("linux大师"),
-		agent.WithDescription("我是一个linux大师，请勿使用此工具进行非法操作"),
-		agent.WithSystemPrompt("你是一个linux大师"))
+	ag, err := agent.NewAgentBuilder(cm).
+		WithName("linux大师").
+		WithDescription("我是一个linux大师，请勿使用此工具进行非法操作").
+		WithInstruction("你是一个linux大师").
+		Build(ctx)
 	if err != nil {
 		log.Fatalf("new agent fail,err:%s", err)
 		return
 	}
+
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag, EnableStreaming: true})
+
 	conversations := []string{
 		"你好，我是Alice",
 		"我是一名软件工程师，专门做后端开发",
@@ -60,20 +65,31 @@ func main() {
 	}
 	for _, conversation := range conversations {
 		log.Printf("User: %s", conversation)
-		out, err := bot.Stream(context.Background(), []*schema.Message{
+		iter := runner.Run(context.Background(), []*schema.Message{
 			schema.UserMessage(conversation),
 		})
-		if err != nil {
-			log.Fatalf("generate fail,err:%s", err)
-			return
-		}
 		for {
-			o, err2 := out.Recv()
-			if err2 != nil {
-				log.Println("err2:", err2)
+			event, ok := iter.Next()
+			if !ok {
 				break
 			}
-			log.Printf("AI:%s", o.Content)
+			if event.Err != nil {
+				log.Printf("event error: %v", event.Err)
+				continue
+			}
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				if event.Output.MessageOutput.MessageStream != nil {
+					for {
+						msg, err2 := event.Output.MessageOutput.MessageStream.Recv()
+						if err2 != nil {
+							break
+						}
+						log.Printf("AI:%s", msg.Content)
+					}
+				} else if msg, err2 := event.Output.MessageOutput.GetMessage(); err2 == nil && msg != nil {
+					log.Printf("AI:%s", msg.Content)
+				}
+			}
 		}
 	}
 }

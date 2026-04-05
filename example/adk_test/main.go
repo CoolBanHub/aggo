@@ -7,8 +7,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/CoolBanHub/aggo/pkg/adapter"
 	"github.com/cloudwego/eino-ext/callbacks/langfuse"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/callbacks"
@@ -58,7 +58,7 @@ func main() {
 		log.Fatalf("创建聊天模型失败: %v", err)
 	}
 
-	fmt.Println("=== ADK 多 Agent 路由架构示例 ===\n")
+	fmt.Println("=== ADK 多 Agent 路由架构示例 ===")
 
 	// 1. 创建三个专业子 Agent，每个配置不同的工具
 	mathAgent, err := createMathAgent(ctx, cm)
@@ -102,10 +102,7 @@ func main() {
 		log.Fatalf("设置子 Agent 失败: %v", err)
 	}
 
-	bot, err := agent.NewAgentFromADK(routerAgent)
-	if err != nil {
-		log.Fatalf("创建 Agent 失败: %v", err)
-	}
+	// routerAgent is already an adk.Agent, use it directly
 
 	// 4. 测试不同类型的问题，主 Agent 会自动路由到对应的子 Agent
 	testQuestions := []string{
@@ -128,7 +125,7 @@ func main() {
 		}
 
 		// 直接调用 Agent 运行
-		out := bot.Run(ctx1, &adk.AgentInput{
+		out := routerAgent.Run(ctx1, &adk.AgentInput{
 			Messages: []adk.Message{
 				{Role: schema.User, Content: question},
 			},
@@ -159,14 +156,14 @@ func main() {
 							if err != nil {
 								break
 							}
-							result := model.OutStreamMessageEinoToOpenai(msg, idx)
+							result := adapter.MessageToOpenaiStreamResponse(msg, idx)
 							respJSON, _ := json.Marshal(result)
 							slog.Infof("stream chunk %d: %s", idx, string(respJSON))
 							idx++
 						}
 					} else if event.Output.MessageOutput.Message != nil {
 						// 单个消息，转换为流式格式
-						result := model.OutStreamMessageEinoToOpenai(event.Output.MessageOutput.Message, idx)
+						result := adapter.MessageToOpenaiStreamResponse(event.Output.MessageOutput.Message, idx)
 						j, _ := json.Marshal(result)
 						slog.Infof("stream message: %s", string(j))
 						idx++
@@ -174,7 +171,7 @@ func main() {
 				} else {
 					// 非流式模式：直接转换 Message
 					if event.Output.MessageOutput.Message != nil {
-						result := model.OutMessageEinoToOpenai(event.Output.MessageOutput.Message)
+						result := adapter.MessageToOpenaiResponse(event.Output.MessageOutput.Message)
 						j, _ := json.Marshal(result)
 						slog.Infof("response: %s", string(j))
 					} else if event.Output.MessageOutput.MessageStream != nil {
@@ -183,7 +180,7 @@ func main() {
 						if err != nil {
 							continue
 						}
-						result := model.OutMessageEinoToOpenai(msg)
+						result := adapter.MessageToOpenaiResponse(msg)
 						j, _ := json.Marshal(result)
 						slog.Infof("response: %s", string(j))
 					}

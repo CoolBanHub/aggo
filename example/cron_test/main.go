@@ -8,9 +8,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/CoolBanHub/aggo/agent/cron_agent"
 	cronPkg "github.com/CoolBanHub/aggo/cron"
 	"github.com/CoolBanHub/aggo/model"
+	cronTool "github.com/CoolBanHub/aggo/tools/cron"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 	"github.com/joho/godotenv"
 )
@@ -18,12 +19,10 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// 加载 .env 文件
 	if err := godotenv.Load(); err != nil {
 		log.Printf("警告: 无法加载 .env 文件: %v", err)
 	}
 
-	// 创建聊天模型
 	cm, err := model.NewChatModel(
 		model.WithBaseUrl(os.Getenv("BaseUrl")),
 		model.WithAPIKey(os.Getenv("APIKey")),
@@ -33,11 +32,13 @@ func main() {
 		log.Fatalf("创建聊天模型失败: %v", err)
 	}
 
-	// 创建 CronAgent（使用文件存储）
-	// 默认行为：任务触发时，将 message 回送给 Agent 处理（支持嵌套任务）
-	ca, err := cron_agent.New(ctx, cm,
-		cron_agent.WithFileStore("cron_jobs.json"),
-		cron_agent.WithOnJobProcessed(func(job *cronPkg.CronJob, response string, err error) {
+	// 创建 CronService 和工具
+	service := cronPkg.NewCronService(cronPkg.NewFileStore("cron_jobs.json"), nil)
+	tools := cronTool.GetTools(service)
+
+	// 创建 CronAgent
+	result, err := cronPkg.NewCronAgent(ctx, cm, tools,
+		cronPkg.WithOnJobProcessed(func(job *cronPkg.CronJob, response string, err error) {
 			if err != nil {
 				fmt.Printf("\n❌ [任务处理失败] %s: %v\n", job.Name, err)
 			} else {
@@ -50,14 +51,15 @@ func main() {
 	}
 
 	// 启动调度服务
-	if err := ca.Start(); err != nil {
+	if err := result.Service.Start(); err != nil {
 		log.Fatalf("启动调度服务失败: %v", err)
 	}
-	defer ca.Stop()
+	defer result.Service.Stop()
 
-	fmt.Println("=== Cron Agent 定时任务示例 ===\n")
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: result.Agent})
 
-	//测试对话
+	fmt.Println("=== Cron Agent 定时任务示例 ===")
+
 	conversations := []string{
 		"帮我添加一个定时任务，每60秒提醒我喝水",
 		"帮我添加一个一次性定时，30秒后提醒我开会",
@@ -67,19 +69,28 @@ func main() {
 
 	for i, msg := range conversations {
 		fmt.Printf("【问题 %d】: %s\n", i+1, msg)
-		out, err := ca.Generate(ctx, []*schema.Message{
+		iter := runner.Run(ctx, []*schema.Message{
 			schema.UserMessage(msg),
 		})
-		if err != nil {
-			log.Printf("生成失败: %v", err)
-			continue
+		for {
+			event, ok := iter.Next()
+			if !ok {
+				break
+			}
+			if event.Err != nil {
+				log.Printf("生成失败: %v", event.Err)
+				break
+			}
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				if m, err := event.Output.MessageOutput.GetMessage(); err == nil && m != nil {
+					fmt.Printf("【回答】: %s\n\n", m.Content)
+				}
+			}
 		}
-		fmt.Printf("【回答】: %s\n\n", out.Content)
 	}
 
 	fmt.Println("定时任务已创建，等待触发中（按 Ctrl+C 退出）...")
 
-	// 等待信号退出
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh

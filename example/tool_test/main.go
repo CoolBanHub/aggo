@@ -8,6 +8,7 @@ import (
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools/shell"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 	"github.com/joho/godotenv"
 )
@@ -29,14 +30,19 @@ func main() {
 		return
 	}
 
-	bot, err := agent.NewAgent(ctx, cm,
-		agent.WithSystemPrompt("你是一个linux大师"),
-		agent.WithTools(shell.GetExecuteTools()),
-	)
+	// 合并所有工具：创建时一次性设置
+	allTools := append(shell.GetExecuteTools(), shell.GetTools()...)
+
+	ag, err := agent.NewAgentBuilder(cm).
+		WithInstruction("你是一个linux大师").
+		WithTools(allTools...).
+		Build(ctx)
 	if err != nil {
 		log.Fatalf("new agent fail,err:%s", err)
 		return
 	}
+
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
 
 	conversations := []string{
 		"帮我看一下当前目录有什么文件",
@@ -45,13 +51,24 @@ func main() {
 
 	for _, conversation := range conversations {
 		log.Printf("User: %s", conversation)
-		out, err := bot.Generate(ctx, []*schema.Message{
+		iter := runner.Run(ctx, []*schema.Message{
 			schema.UserMessage(conversation),
-		}, agent.WithChatTools(shell.GetTools()))
-		if err != nil {
-			log.Fatalf("generate fail,err:%s", err)
-			return
+		})
+		var response string
+		for {
+			event, ok := iter.Next()
+			if !ok {
+				break
+			}
+			if event.Err != nil {
+				log.Fatalf("generate fail,err:%s", event.Err)
+			}
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				if msg, err := event.Output.MessageOutput.GetMessage(); err == nil && msg != nil {
+					response = msg.Content
+				}
+			}
 		}
-		log.Printf("AI:%s", out.Content)
+		log.Printf("AI:%s", response)
 	}
 }

@@ -10,12 +10,13 @@ import (
 	"syscall"
 
 	"github.com/CoolBanHub/aggo/agent"
-	"github.com/CoolBanHub/aggo/agent/cron_agent"
 	cronPkg "github.com/CoolBanHub/aggo/cron"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/memory/storage"
 	"github.com/CoolBanHub/aggo/model"
+	cronTool "github.com/CoolBanHub/aggo/tools/cron"
 	"github.com/CoolBanHub/aggo/tools/shell"
+	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino-ext/adk/backend/local"
 	"github.com/cloudwego/eino-ext/components/tool/httprequest"
 	"github.com/cloudwego/eino/adk"
@@ -30,7 +31,6 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// 加载 .env 文件
 	if err := godotenv.Load(); err != nil {
 		log.Printf("警告: 无法加载 .env 文件: %v", err)
 	}
@@ -45,23 +45,31 @@ func main() {
 		log.Fatalf("Failed to create chat model: %v", err)
 	}
 
-	cronSubAgent, err := cron_agent.New(ctx, chatModel, cron_agent.WithFileStore("cron_jobs.json"),
-		cron_agent.WithOnJobProcessed(func(job *cronPkg.CronJob, response string, err error) {
+	// 创建 CronService 和工具
+	cronService := cronPkg.NewCronService(cronPkg.NewFileStore("cron_jobs.json"), nil)
+	cronTools := cronTool.GetTools(cronService, cronTool.WithOnJobTriggered(func(job *cronPkg.CronJob) {
+		fmt.Printf("\n🔔 [任务触发] %s: %s\n", job.Name, job.Payload.Message)
+	}))
+
+	// 启动调度服务
+	if err := cronService.Start(); err != nil {
+		log.Fatalf("启动调度服务失败: %v", err)
+	}
+	defer cronService.Stop()
+
+	// 创建 Cron 子 Agent
+	cronAgentResult, err := cronPkg.NewCronAgent(ctx, chatModel, cronTools,
+		cronPkg.WithOnJobProcessed(func(job *cronPkg.CronJob, response string, err error) {
 			if err != nil {
 				fmt.Printf("\n❌ [任务处理失败] %s: %v\n", job.Name, err)
 			} else {
-				fmt.Printf("\n🔔 [任务处理完成] %s \n", response)
+				fmt.Printf("\n🔔 [任务处理完成] %s\n", response)
 			}
-		}))
+		}),
+	)
 	if err != nil {
 		log.Fatalf("Failed to create cron agent: %v", err)
 	}
-
-	// 启动调度服务
-	if err := cronSubAgent.Start(); err != nil {
-		log.Fatalf("启动调度服务失败: %v", err)
-	}
-	defer cronSubAgent.Stop()
 
 	agentTools := shell.GetTools()
 	httpTools, err := httprequest.NewToolKit(ctx, nil)
@@ -70,7 +78,7 @@ func main() {
 	}
 	agentTools = append(agentTools, httpTools...)
 
-	// 获取 skills 目录的绝对路径
+	// 获取 skills 目录
 	cwd, _ := os.Getwd()
 	skillsDir := filepath.Join(cwd, "skills")
 
@@ -79,22 +87,22 @@ func main() {
 		log.Fatalf("Failed to create local backend: %v", err)
 	}
 
-	backend, err := skill.NewBackendFromFilesystem(ctx, &skill.BackendFromFilesystemConfig{
+	skillBackend, err := skill.NewBackendFromFilesystem(ctx, &skill.BackendFromFilesystemConfig{
 		Backend: localBackend,
 		BaseDir: skillsDir,
 	})
 	if err != nil {
-		log.Fatalf("Failed to create local backend: %v", err)
+		log.Fatalf("Failed to create skill backend: %v", err)
 	}
 
 	skillMiddleware, err := skill.NewMiddleware(ctx, &skill.Config{
-		Backend: backend,
+		Backend: skillBackend,
 	})
 	if err != nil {
 		log.Fatalf("Failed to create skill middleware: %v", err)
 	}
 
-	// 创建 SQLite 存储用于 Memory (静默日志)
+	// SQLite 存储
 	sqliteDb, err := gorm.Open(sqlite.Open("memory.db"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -106,7 +114,6 @@ func main() {
 		log.Fatalf("Failed to create sqlite storage: %v", err)
 	}
 
-	// 创建 MemoryManager
 	memoryManager, err := memory.NewMemoryManager(chatModel, sqliteStorage, &memory.MemoryConfig{
 		EnableUserMemories:   true,
 		EnableSessionSummary: true,
@@ -125,40 +132,54 @@ func main() {
 2. 不需要经过我同意，直接做决定就行
 3. 回复简洁准确`
 
-	opts := []agent.Option{
-		agent.WithName("assistant"),
-		agent.WithDescription("小助手"),
-		agent.WithSystemPrompt(systemPrompt),
-		agent.WithTools(agentTools),
-		agent.WithAdkAgentMiddlewares([]adk.ChatModelAgentMiddleware{skillMiddleware}),
-		agent.WithSubAgent([]adk.Agent{cronSubAgent}),
-		agent.WithMemoryManager(memoryManager),
-	}
-	a, err := agent.NewAgent(ctx, chatModel, opts...)
+	ag, err := agent.NewAgentBuilder(chatModel).
+		WithName("assistant").
+		WithDescription("小助手").
+		WithInstruction(systemPrompt).
+		WithTools(agentTools...).
+		WithMiddlewares(skillMiddleware).
+		WithSubAgents(agent.SubAgentModeDefault, cronAgentResult.Agent).
+		WithMemoryMiddleware(memory.NewMemoryMiddleware(memoryManager)).
+		Build(ctx)
 
 	if err != nil {
 		log.Fatalf("Failed to create agent: %v", err)
 	}
 
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
+
 	conversations := []string{
-		//`帮我定时10秒，10秒后提醒我看书`,
 		"帮我创建一个google搜索的skill",
 		"直接帮我将技能保存到技能目录内，格式需要按照skill的规范进行保存",
 	}
 
+	userID := utils.GetULID()
+	sessionID := utils.GetULID()
 	for i, msg := range conversations {
 		fmt.Printf("【问题 %d】: %s\n", i+1, msg)
-		out, err := a.Generate(ctx, []*schema.Message{
+		iter := runner.Run(ctx, []*schema.Message{
 			schema.UserMessage(msg),
-		})
-		if err != nil {
-			log.Printf("生成失败: %v", err)
-			continue
+		}, adk.WithSessionValues(map[string]any{
+			"userID":    userID,
+			"sessionID": sessionID,
+		}))
+		for {
+			event, ok := iter.Next()
+			if !ok {
+				break
+			}
+			if event.Err != nil {
+				log.Printf("生成失败: %v", event.Err)
+				break
+			}
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				if m, err := event.Output.MessageOutput.GetMessage(); err == nil && m != nil {
+					fmt.Printf("【回答】: %s\n\n", m.Content)
+				}
+			}
 		}
-		fmt.Printf("【回答】: %s\n\n", out.Content)
 	}
 
-	// 等待信号退出
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh

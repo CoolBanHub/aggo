@@ -7,7 +7,7 @@ import (
 	"time"
 
 	cronPkg "github.com/CoolBanHub/aggo/cron"
-	"github.com/CoolBanHub/aggo/state"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 )
@@ -26,6 +26,15 @@ func WithOnJobTriggered(fn func(job *cronPkg.CronJob)) CronOption {
 type CronTool struct {
 	service        *cronPkg.CronService
 	onJobTriggered func(job *cronPkg.CronJob)
+}
+
+type serviceBoundTool struct {
+	tool.InvokableTool
+	service *cronPkg.CronService
+}
+
+func (t *serviceBoundTool) CronService() *cronPkg.CronService {
+	return t.service
 }
 
 // CronParams 工具参数
@@ -75,7 +84,10 @@ func GetTools(service *cronPkg.CronService, opts ...CronOption) []tool.BaseTool 
 
 	t, _ := utils.InferTool(name, desc, ct.execute)
 
-	return []tool.BaseTool{t}
+	return []tool.BaseTool{&serviceBoundTool{
+		InvokableTool: t,
+		service:       service,
+	}}
 }
 
 func (ct *CronTool) execute(ctx context.Context, params CronParams) (interface{}, error) {
@@ -131,7 +143,19 @@ func (ct *CronTool) addJob(ctx context.Context, params CronParams) (interface{},
 		name = string(nameRunes[:30]) + "..."
 	}
 
-	userID := state.GetUserID(ctx)
+	var userID string
+	if v, ok := adk.GetSessionValue(ctx, "userID"); ok {
+		if s, ok := v.(string); ok {
+			userID = s
+		}
+	}
+	if userID == "" {
+		if v, ok := adk.GetSessionValue(ctx, "sessionID"); ok {
+			if s, ok := v.(string); ok {
+				userID = s
+			}
+		}
+	}
 	job, err := ct.service.AddJob(name, schedule, params.Message, userID)
 	if err != nil {
 		return nil, fmt.Errorf("error adding job: %w", err)

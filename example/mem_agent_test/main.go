@@ -12,6 +12,7 @@ import (
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/bytedance/sonic"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -58,14 +59,16 @@ func main() {
 	}
 	defer memoryManager.Close()
 	sessionID := utils.GetULID()
-	bot, err := agent.NewAgent(ctx, cm,
-		agent.WithMemoryManager(memoryManager),
-		agent.WithSystemPrompt("你是一名28岁的厦门女孩,名叫mary,是一名短视频剪辑师，主要剪辑电影类。喜欢养狗，家里有一只金毛，它叫小黄。喜欢宅在家里刷剧。不喜欢吃水果。性格内向高冷，别人不问的时候，一般都不回答自己的信息"),
-	)
+	ag, err := agent.NewAgentBuilder(cm).
+		WithInstruction("你是一名28岁的厦门女孩,名叫mary,是一名短视频剪辑师，主要剪辑电影类。喜欢养狗，家里有一只金毛，它叫小黄。喜欢宅在家里刷剧。不喜欢吃水果。性格内向高冷，别人不问的时候，一般都不回答自己的信息").
+		WithMemoryMiddleware(memory.NewMemoryMiddleware(memoryManager)).
+		Build(ctx)
 	if err != nil {
 		log.Fatalf("new agent fail,err:%s", err)
 		return
 	}
+
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
 
 	conversations := []*schema.Message{
 		schema.UserMessage("你好，我是Alice"),
@@ -104,14 +107,29 @@ func main() {
 	for _, conversation := range conversations {
 		j, _ := sonic.MarshalString(conversation)
 		log.Printf("User: %s", j)
-		out, err := bot.Generate(ctx, []*schema.Message{
+		iter := runner.Run(ctx, []*schema.Message{
 			conversation,
-		}, agent.WithChatSessionID(sessionID), agent.WithChatUserID(sessionID))
-		if err != nil {
-			log.Fatalf("generate fail,err:%s", err)
-			return
+		}, adk.WithSessionValues(map[string]any{
+			"userID":    sessionID,
+			"sessionID": sessionID,
+		}))
+		var response string
+		for {
+			event, ok := iter.Next()
+			if !ok {
+				break
+			}
+			if event.Err != nil {
+				log.Fatalf("generate fail,err:%s", event.Err)
+				return
+			}
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				if msg, err := event.Output.MessageOutput.GetMessage(); err == nil && msg != nil {
+					response = msg.Content
+				}
+			}
 		}
-		log.Printf("AI:%s", out.Content)
+		log.Printf("AI:%s", response)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -29,10 +30,12 @@ func main() {
 		log.Fatalf("创建聊天模型失败: %v", err)
 	}
 	ctx := context.Background()
-	a, err := agent.NewAgent(ctx, cm)
+	ag, err := agent.NewAgentBuilder(cm).Build(ctx)
 	if err != nil {
 		log.Fatalf("创建agent失败：%v", err)
 	}
+	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
+
 	link := "https://cdn.deepseek.com/logo.png"
 	msgList := []*schema.Message{
 		{
@@ -55,10 +58,23 @@ func main() {
 			},
 		},
 	}
-	msg, err := a.Generate(ctx, msgList)
-	if err != nil {
-		log.Fatalf("生成消息失败：%v", err)
+
+	iter := runner.Run(ctx, msgList)
+	var response string
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil {
+			log.Fatalf("生成消息失败：%v", event.Err)
+		}
+		if event.Output != nil && event.Output.MessageOutput != nil {
+			if msg, err := event.Output.MessageOutput.GetMessage(); err == nil && msg != nil {
+				response = msg.Content
+			}
+		}
 	}
 
-	log.Printf("result: %s", msg.String())
+	log.Printf("result: %s", response)
 }
