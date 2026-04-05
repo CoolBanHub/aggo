@@ -6,7 +6,7 @@ replace github.com/CoolBanHub/aggo => ../../
 
 require (
 	github.com/CoolBanHub/aggo v0.0.0-00010101000000-000000000000
-	github.com/cloudwego/eino v0.8.0
+	github.com/cloudwego/eino v0.8.6
 	github.com/cloudwego/eino-ext/adk/backend/local v0.2.1
 	github.com/cloudwego/eino-ext/components/tool/httprequest v0.0.0-20260306073537-008f82264d85
 	github.com/joho/godotenv v1.5.1
