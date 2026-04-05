@@ -61,6 +61,12 @@ func (b *AgentBuilder) WithMemoryMiddleware(mm *memory.MemoryMiddleware) *AgentB
 	return b
 }
 
+// WithMemory adds a memory provider and creates the middleware automatically.
+func (b *AgentBuilder) WithMemory(provider memory.MemoryProvider) *AgentBuilder {
+	b.middlewares = append(b.middlewares, memory.NewMemoryMiddleware(provider))
+	return b
+}
+
 // WithMiddlewares 添加自定义 Middleware
 func (b *AgentBuilder) WithMiddlewares(mw ...adk.ChatModelAgentMiddleware) *AgentBuilder {
 	b.middlewares = append(b.middlewares, mw...)
