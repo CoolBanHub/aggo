@@ -19,10 +19,13 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 - **会话记忆**: 自动管理会话级别的对话历史
 - **长期记忆**: 支持用户级别的长期记忆存储
 - **智能摘要**: 自动生成会话摘要，优化上下文长度
-- **多种检索策略**: 支持 LastN、全部、摘要等多种记忆检索模式
+- **多后端支持**: 内置 `builtin` provider，并支持接入外部 `memu` 记忆服务
+- **多种检索策略**: `builtin` 支持 LastN、FirstN、语义检索等策略
 - **灵活存储**: 支持内存存储和 SQL 存储（MySQL、PostgreSQL、SQLite）
 - **异步处理**: 基于工作池的异步任务处理，提升响应性能
 - **智能清理**: 支持定期清理和外部注入的清理策略
+
+详细说明见 [memory/README.md](./memory/README.md)。
 
 ### ⏰ 定时任务系统
 - **多种调度方式**: 支持一次性定时(at)、周期定时(every)、Cron表达式(cron)
@@ -146,10 +149,12 @@ import (
     "context"
     "log"
 
-    "github.com/CoolBanHub/aggo/agent"
     "github.com/CoolBanHub/aggo/model"
     "github.com/CoolBanHub/aggo/memory"
-    memoryStorage "github.com/CoolBanHub/aggo/memory/storage"
+    "github.com/CoolBanHub/aggo/memory/builtin"
+    "github.com/CoolBanHub/aggo/memory/builtin/storage"
+    "github.com/CoolBanHub/aggo/agent"
+    "github.com/cloudwego/eino/adk"
     "github.com/cloudwego/eino/schema"
 )
 
@@ -163,27 +168,50 @@ func main() {
         model.WithModel("gpt-4"),
     )
 
-    // 创建记忆管理器
-    memoryStore := memoryStorage.NewMemoryStore()
-    memoryManager, _ := memory.NewMemoryManager(cm, memoryStore, &memory.MemoryConfig{
-        MemoryLimit: 10,
-        Retrieval:   memory.RetrievalLastN,
+    // 创建 memory provider
+    provider, _ := memory.GlobalRegistry().CreateProvider("builtin", &builtin.ProviderConfig{
+        ChatModel: cm,
+        Storage:   storage.NewMemoryStore(),
+        MemoryConfig: &builtin.MemoryConfig{
+            EnableUserMemories:   true,
+            EnableSessionSummary: true,
+            MemoryLimit:          10,
+            Retrieval:            builtin.RetrievalLastN,
+        },
     })
+    defer provider.Close()
 
-    // 创建代理
-    agent, _ := agent.NewAgent(ctx, cm,
-        agent.WithMemoryManager(memoryManager),
-        agent.WithSystemPrompt("你是一个友好的 AI 助手"),
-    )
+    ag, _ := agent.NewAgentBuilder(cm).
+        WithInstruction("你是一个友好的 AI 助手").
+        WithMemory(provider).
+        Build(ctx)
 
-    // 进行对话
-    response, _ := agent.Generate(ctx, []*schema.Message{
+    runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
+    iter := runner.Run(ctx, []*schema.Message{
         schema.UserMessage("你好，介绍一下你自己"),
-    })
+    }, adk.WithSessionValues(map[string]any{
+        "userID":    "demo-user",
+        "sessionID": "demo-session",
+    }))
 
-    log.Printf("AI: %s", response.Content)
+    for {
+        event, ok := iter.Next()
+        if !ok {
+            break
+        }
+        if event.Err != nil {
+            log.Fatal(event.Err)
+        }
+        if event.Output != nil && event.Output.MessageOutput != nil {
+            if msg, err := event.Output.MessageOutput.GetMessage(); err == nil && msg != nil {
+                log.Printf("AI: %s", msg.Content)
+            }
+        }
+    }
 }
 ```
+
+启用记忆时，需要在运行时通过 `adk.WithSessionValues(...)` 传入 `userID` 和 `sessionID`，否则 `MemoryMiddleware` 不会执行检索和写入。
 
 ### 2. 运行示例程序
 
@@ -208,35 +236,38 @@ go run example/adk_test/main.go
 AGGO 提供了灵活的代理配置选项：
 
 ```go
-agent, err := agent.NewAgent(ctx, chatModel,
-    agent.WithMemoryManager(memoryManager),       // 设置记忆管理器
-    agent.WithSystemPrompt("你是一个AI助手"),      // 设置系统提示词
-    agent.WithTools(tools...),                    // 添加工具
-    agent.WithMaxStep(10),                         // 设置最大推理步数
-)
+ag, err := agent.NewAgentBuilder(chatModel).
+    WithInstruction("你是一个AI助手").
+    WithMemory(provider).
+    WithTools(tools...).
+    WithMaxStep(10).
+    Build(ctx)
 ```
 
 ### 记忆管理配置
 
 ```go
-memoryConfig := &memory.MemoryConfig{
-    EnableSessionSummary: true,              // 启用会话摘要
-    EnableUserMemories:   true,              // 启用用户长期记忆
-    MemoryLimit:          10,                // 记忆条数限制
-    Retrieval:            memory.RetrievalLastN,  // 检索策略
+provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.ProviderConfig{
+    ChatModel: chatModel,
+    Storage:   storage.NewMemoryStore(),
+    MemoryConfig: &builtin.MemoryConfig{
+        EnableSessionSummary: true,               // 启用会话摘要
+        EnableUserMemories:   true,               // 启用用户长期记忆
+        MemoryLimit:          10,                 // 历史消息条数限制
+        Retrieval:            builtin.RetrievalLastN, // 检索策略
+    },
+})
+if err != nil {
+    panic(err)
 }
-
-memoryManager, err := memory.NewMemoryManager(
-    chatModel,
-    memoryStore,
-    memoryConfig,
-)
 ```
 
 **记忆检索策略**:
 - `RetrievalLastN`: 返回最近 N 条记忆
-- `RetrievalAll`: 返回所有记忆
-- `RetrievalSummary`: 仅返回摘要
+- `RetrievalFirstN`: 返回最早 N 条记忆
+- `RetrievalSemantic`: 基于语义相关性检索
+
+完整使用说明、provider 说明和存储差异见 [memory/README.md](./memory/README.md)。
 
 ### 定时任务系统
 
@@ -436,21 +467,22 @@ aggo/
 │       └── cron_agent.go             # CronAgent 实现
 │
 ├── memory/                     # 记忆管理系统
-│   ├── manager.go                 # 记忆管理器
-│   ├── storage.go                 # 存储接口
-│   ├── types.go                   # 类型定义
-│   ├── prompt.go                  # 提示词模板
-│   ├── session_summary_generator.go  # 会话摘要生成器
-│   ├── summary_trigger_manager.go    # 摘要触发管理器
-│   ├── user_memory_analyzer.go       # 用户记忆分析器
-│   └── storage/                   # 存储实现
-│       ├── memory.go                 # 内存存储
-│       ├── file.go                   # 文件存储
-│       ├── sql.go                    # SQL 存储 (GORM)
-│       ├── sql_models.go             # 数据模型
-│       ├── sql_session.go            # 会话存储
-│       ├── sql_summary.go            # 摘要存储
-│       └── sql_user_memory.go        # 用户记忆存储
+│   ├── provider.go                # MemoryProvider 接口
+│   ├── middleware.go              # Agent 记忆中间件
+│   ├── registry.go                # provider 注册与创建
+│   ├── compat.go                  # builtin 兼容导出
+│   ├── builtin_adapter.go         # builtin -> provider 适配层
+│   ├── README.md                  # memory 模块说明
+│   ├── builtin/                   # 内置记忆实现
+│   │   ├── manager.go                # 记忆管理器
+│   │   ├── provider.go               # builtin provider 配置
+│   │   ├── analyzer.go               # 用户记忆分析
+│   │   ├── summary.go                # 会话摘要生成
+│   │   ├── trigger.go                # 摘要触发策略
+│   │   ├── storage.go                # builtin 存储接口
+│   │   ├── types.go                  # builtin 配置与数据结构
+│   │   └── storage/                  # 内存 / 文件 / GORM 存储实现
+│   └── memu/                      # 外部 memu 服务 provider
 │
 ├── cron/                       # 定时任务系统
 │   ├── model.go                   # 任务模型定义
@@ -580,13 +612,13 @@ CREATE EXTENSION IF NOT EXISTS vector;
 \dx vector
 ```
 
-### 记忆管理器未正常关闭
+### 记忆 provider 未正常关闭
 
 **问题**: 程序退出时资源未释放
 
 **解决方案**:
 ```go
-defer memoryManager.Close()  // 确保在创建后立即添加 defer
+defer provider.Close()  // 确保在创建 provider 后立即添加 defer
 ```
 
 ## 🤝 贡献
