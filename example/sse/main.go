@@ -11,7 +11,8 @@ import (
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/memory"
-	"github.com/CoolBanHub/aggo/memory/storage"
+	"github.com/CoolBanHub/aggo/memory/builtin"
+	"github.com/CoolBanHub/aggo/memory/builtin/storage"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/pkg/adapter"
 	"github.com/CoolBanHub/aggo/pkg/sse"
@@ -38,7 +39,7 @@ type ChatResponse struct {
 
 var globalAgent adk.Agent
 var globalRunner *adk.Runner
-var globalMemoryManager *memory.MemoryManager
+var globalMemoryProvider memory.MemoryProvider
 var cm model2.ToolCallingChatModel
 
 func main() {
@@ -47,7 +48,7 @@ func main() {
 	if err := initializeBot(ctx); err != nil {
 		log.Fatalf("Failed to initialize bot: %v", err)
 	}
-	defer globalMemoryManager.Close()
+	defer globalMemoryProvider.Close()
 
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/api/chat", chatHandler)
@@ -88,11 +89,15 @@ func initializeBot(ctx context.Context) error {
 		return fmt.Errorf("new sql store fail,err:%s", err)
 	}
 
-	globalMemoryManager, err = memory.NewMemoryManager(cm, s, &memory.MemoryConfig{
-		EnableSessionSummary: false,
-		EnableUserMemories:   false,
-		MemoryLimit:          8,
-		Retrieval:            memory.RetrievalLastN,
+	globalMemoryProvider, err = memory.GlobalRegistry().CreateProvider("builtin", &builtin.ProviderConfig{
+		ChatModel: cm,
+		Storage:   s,
+		MemoryConfig: &builtin.MemoryConfig{
+			EnableSessionSummary: false,
+			EnableUserMemories:   false,
+			MemoryLimit:          8,
+			Retrieval:            builtin.RetrievalLastN,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("new manager fail,err:%s", err)
@@ -102,7 +107,7 @@ func initializeBot(ctx context.Context) error {
 		WithName("mary").
 		WithDescription("Mary 聊天助手").
 		WithInstruction("你是一名28岁的厦门女孩,名叫mary,是一名短视频剪辑师，主要剪辑电影类。喜欢养狗，家里有一只金毛，它叫小黄。喜欢宅在家里刷剧。不喜欢吃水果。性格内向高冷，别人不问的时候，一般都不回答自己的信息").
-		WithMemoryMiddleware(memory.NewMemoryMiddleware(globalMemoryManager)).
+		WithMemory(globalMemoryProvider).
 		Build(ctx)
 	if err != nil {
 		return fmt.Errorf("new agent fail,err:%s", err)

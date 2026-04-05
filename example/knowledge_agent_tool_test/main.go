@@ -10,7 +10,8 @@ import (
 	"github.com/CoolBanHub/aggo/database/milvus"
 	postgres2 "github.com/CoolBanHub/aggo/database/postgres"
 	"github.com/CoolBanHub/aggo/memory"
-	storage2 "github.com/CoolBanHub/aggo/memory/storage"
+	"github.com/CoolBanHub/aggo/memory/builtin"
+	storage2 "github.com/CoolBanHub/aggo/memory/builtin/storage"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools"
 	"github.com/CoolBanHub/aggo/utils"
@@ -114,17 +115,21 @@ func main() {
 
 	s := storage2.NewMemoryStore()
 
-	memoryManager, err := memory.NewMemoryManager(cm, s, &memory.MemoryConfig{
-		EnableSessionSummary: false,
-		EnableUserMemories:   false,
-		MemoryLimit:          8,
-		Retrieval:            memory.RetrievalLastN,
+	provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.ProviderConfig{
+		ChatModel: cm,
+		Storage:   s,
+		MemoryConfig: &builtin.MemoryConfig{
+			EnableSessionSummary: false,
+			EnableUserMemories:   false,
+			MemoryLimit:          8,
+			Retrieval:            builtin.RetrievalLastN,
+		},
 	})
 	if err != nil {
-		log.Fatalf("new manager fail,err:%s", err)
+		log.Fatalf("new provider fail,err:%s", err)
 		return
 	}
-	defer memoryManager.Close()
+	defer provider.Close()
 
 	routerRetriever, err := router.NewRetriever(ctx, &router.Config{
 		Retrievers: map[string]retriever.Retriever{
@@ -152,7 +157,7 @@ func main() {
 	})
 
 	ag, err := agent.NewAgentBuilder(cm).
-		WithMemoryMiddleware(memory.NewMemoryMiddleware(memoryManager)).
+		WithMemory(provider).
 		WithTools(knowledgeTools...).
 		WithInstruction("你是一个技术专家助手。当用户询问技术问题时，你应该使用 knowledge_reason 工具来搜索和分析相关信息，然后提供准确的回答。").
 		Build(ctx)

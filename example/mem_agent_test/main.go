@@ -8,7 +8,8 @@ import (
 
 	"github.com/CoolBanHub/aggo/agent"
 	"github.com/CoolBanHub/aggo/memory"
-	"github.com/CoolBanHub/aggo/memory/storage"
+	"github.com/CoolBanHub/aggo/memory/builtin"
+	"github.com/CoolBanHub/aggo/memory/builtin/storage"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/bytedance/sonic"
@@ -47,21 +48,25 @@ func main() {
 		log.Fatalf("new sql store fail,err:%s", err)
 		return
 	}
-	memoryManager, err := memory.NewMemoryManager(cm, s, &memory.MemoryConfig{
-		EnableSessionSummary: true,
-		EnableUserMemories:   true,
-		MemoryLimit:          8,
-		Retrieval:            memory.RetrievalLastN,
+	provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.ProviderConfig{
+		ChatModel: cm,
+		Storage:   s,
+		MemoryConfig: &builtin.MemoryConfig{
+			EnableSessionSummary: true,
+			EnableUserMemories:   true,
+			MemoryLimit:          8,
+			Retrieval:            builtin.RetrievalLastN,
+		},
 	})
 	if err != nil {
-		log.Fatalf("new manager fail,err:%s", err)
+		log.Fatalf("new provider fail,err:%s", err)
 		return
 	}
-	defer memoryManager.Close()
+	defer provider.Close()
 	sessionID := utils.GetULID()
 	ag, err := agent.NewAgentBuilder(cm).
 		WithInstruction("你是一名28岁的厦门女孩,名叫mary,是一名短视频剪辑师，主要剪辑电影类。喜欢养狗，家里有一只金毛，它叫小黄。喜欢宅在家里刷剧。不喜欢吃水果。性格内向高冷，别人不问的时候，一般都不回答自己的信息").
-		WithMemoryMiddleware(memory.NewMemoryMiddleware(memoryManager)).
+		WithMemory(provider).
 		Build(ctx)
 	if err != nil {
 		log.Fatalf("new agent fail,err:%s", err)

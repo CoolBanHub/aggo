@@ -12,7 +12,8 @@ import (
 	"github.com/CoolBanHub/aggo/agent"
 	cronPkg "github.com/CoolBanHub/aggo/cron"
 	"github.com/CoolBanHub/aggo/memory"
-	"github.com/CoolBanHub/aggo/memory/storage"
+	"github.com/CoolBanHub/aggo/memory/builtin"
+	"github.com/CoolBanHub/aggo/memory/builtin/storage"
 	"github.com/CoolBanHub/aggo/model"
 	cronTool "github.com/CoolBanHub/aggo/tools/cron"
 	"github.com/CoolBanHub/aggo/tools/shell"
@@ -114,16 +115,20 @@ func main() {
 		log.Fatalf("Failed to create sqlite storage: %v", err)
 	}
 
-	memoryManager, err := memory.NewMemoryManager(chatModel, sqliteStorage, &memory.MemoryConfig{
-		EnableUserMemories:   true,
-		EnableSessionSummary: true,
-		MemoryLimit:          20,
-		AsyncWorkerPoolSize:  3,
+	provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.ProviderConfig{
+		ChatModel: chatModel,
+		Storage:   sqliteStorage,
+		MemoryConfig: &builtin.MemoryConfig{
+			EnableUserMemories:   true,
+			EnableSessionSummary: true,
+			MemoryLimit:          20,
+			AsyncWorkerPoolSize:  3,
+		},
 	})
 	if err != nil {
-		log.Fatalf("Failed to create memory manager: %v", err)
+		log.Fatalf("Failed to create memory provider: %v", err)
 	}
-	defer memoryManager.Close()
+	defer provider.Close()
 
 	systemPrompt := `你是一个智能助手。
 
@@ -139,7 +144,7 @@ func main() {
 		WithTools(agentTools...).
 		WithMiddlewares(skillMiddleware).
 		WithSubAgents(agent.SubAgentModeDefault, cronAgentResult.Agent).
-		WithMemoryMiddleware(memory.NewMemoryMiddleware(memoryManager)).
+		WithMemory(provider).
 		Build(ctx)
 
 	if err != nil {
