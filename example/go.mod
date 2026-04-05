@@ -45,7 +45,9 @@ require (
 	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20260305011506-a75910204c1f // indirect
 	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20251117090452-bd6375a0b3cf // indirect
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f // indirect
+	github.com/cloudwego/eino-ext/components/indexer/milvus2 v0.0.0-20260331071634-4f359694d2d9 // indirect
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8 // indirect
+	github.com/cloudwego/eino-ext/components/retriever/milvus2 v0.1.0 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect
@@ -60,7 +62,6 @@ require (
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/getsentry/sentry-go v0.12.0 // indirect
 	github.com/go-co-op/gocron/v2 v2.19.1 // indirect
@@ -70,6 +71,7 @@ require (
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang-jwt/jwt/v4 v4.4.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
@@ -146,14 +148,14 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
-	go.etcd.io/bbolt v1.3.6 // indirect
-	go.etcd.io/etcd/api/v3 v3.5.5 // indirect
-	go.etcd.io/etcd/client/pkg/v3 v3.5.5 // indirect
-	go.etcd.io/etcd/client/v2 v2.305.5 // indirect
-	go.etcd.io/etcd/client/v3 v3.5.5 // indirect
-	go.etcd.io/etcd/pkg/v3 v3.5.5 // indirect
-	go.etcd.io/etcd/raft/v3 v3.5.5 // indirect
-	go.etcd.io/etcd/server/v3 v3.5.5 // indirect
+	go.etcd.io/bbolt v1.3.8 // indirect
+	go.etcd.io/etcd/api/v3 v3.5.10 // indirect
+	go.etcd.io/etcd/client/pkg/v3 v3.5.10 // indirect
+	go.etcd.io/etcd/client/v2 v2.305.10 // indirect
+	go.etcd.io/etcd/client/v3 v3.5.10 // indirect
+	go.etcd.io/etcd/pkg/v3 v3.5.10 // indirect
+	go.etcd.io/etcd/raft/v3 v3.5.10 // indirect
+	go.etcd.io/etcd/server/v3 v3.5.10 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.59.0 // indirect

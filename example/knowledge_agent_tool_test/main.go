@@ -51,7 +51,7 @@ func main() {
 		return
 	}
 
-	databaseDB := getMilvusDB(em)
+	databaseDB := getMilvusDB(ctx, em)
 
 	log.Println("开始添加数据")
 
@@ -205,15 +205,15 @@ func main() {
 	}
 }
 
-func getMilvusDB(em embedding.Embedder) database.Database {
-	client, err := milvusclient.New(context.Background(), &milvusclient.ClientConfig{
+func getMilvusDB(ctx context.Context, em embedding.Embedder) database.Database {
+	client, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
 		Address: "127.0.0.1:19530",
 		DBName:  "",
 	})
 	if err != nil {
 		return nil
 	}
-	milvusDB, err := milvus.NewMilvus(milvus.MilvusConfig{
+	milvusDB, err := milvus.NewMilvus(ctx, milvus.MilvusConfig{
 		Client:         client,
 		CollectionName: "aggo_knowledge_vectors",
 		EmbeddingDim:   1024,

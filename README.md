@@ -35,9 +35,11 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 - **自动清理**: 一次性任务执行后自动删除
 
 ### 📚 向量数据库集成
-- **Milvus**: 企业级向量数据库支持，适合大规模生产环境
+- **Milvus**: 基于 [eino-ext/milvus2](https://github.com/cloudwego/eino-ext) 官方组件，支持 ANN、Hybrid、Sparse 等多种搜索模式
 - **PostgreSQL + pgvector**: 轻量级向量搜索方案
-- **统一接口**: 提供一致的向量存储和检索 API
+- **统一接口**: 提供一致的 `Database` 接口（`indexer.Indexer` + `retriever.Retriever`）
+
+详细说明见 [database/README.md](./database/README.md)。
 
 ### 🛠️ 丰富的工具生态
 - **知识库工具**: 文档加载、语义搜索、向量检索
@@ -359,8 +361,8 @@ client, _ := milvusclient.New(ctx, &milvusclient.ClientConfig{
     DBName:  "",  // 使用默认数据库
 })
 
-// 创建向量数据库实例
-vectorDB, _ := milvus.NewMilvus(milvus.MilvusConfig{
+// 创建向量数据库实例（内部使用 eino-ext milvus2 组件）
+vectorDB, _ := milvus.NewMilvus(ctx, milvus.MilvusConfig{
     Client:         client,
     CollectionName: "knowledge_vectors",
     EmbeddingDim:   1024,
@@ -516,12 +518,11 @@ aggo/
 │   ├── store_file.go              # 文件存储实现
 │   └── store_gorm.go              # GORM 存储实现
 │
-├── database/                   # 向量数据库
-│   ├── database.go                # 数据库接口
-│   ├── milvus/                    # Milvus 实现
-│   │   ├── milvus.go                 # Milvus 客户端
-│   │   ├── option.go                 # 配置选项
-│   │   └── utils.go                  # 工具函数
+├── database/                   # 向量数据库（知识库存储层）
+│   ├── database.go                # Database 接口（indexer + retriever）
+│   ├── README.md                  # 知识库模块说明
+│   ├── milvus/                    # Milvus 实现（基于 eino-ext milvus2）
+│   │   └── milvus.go                 # Milvus 封装
 │   └── postgres/                  # PostgreSQL + pgvector 实现
 │       ├── postgres.go               # PostgreSQL 客户端
 │       ├── option.go                 # 配置选项
