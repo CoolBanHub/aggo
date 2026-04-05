@@ -19,7 +19,7 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 - **会话记忆**: 自动管理会话级别的对话历史
 - **长期记忆**: 支持用户级别的长期记忆存储
 - **智能摘要**: 自动生成会话摘要，优化上下文长度
-- **多后端支持**: 内置 `builtin` provider，并支持接入外部 `memu` 记忆服务
+- **多后端支持**: 内置 `builtin` provider，并支持接入外部 `memu`、`mem0` 记忆服务
 - **多种检索策略**: `builtin` 支持 LastN、FirstN、语义检索等策略
 - **灵活存储**: 支持内存存储和 SQL 存储（MySQL、PostgreSQL、SQLite）
 - **异步处理**: 基于工作池的异步任务处理，提升响应性能
@@ -222,6 +222,9 @@ go run example/knowledge_agent_tool_test/main.go
 # 记忆系统示例
 go run example/mem_agent_test/main.go
 
+# mem0 记忆示例
+go run example/mem0_agent_test/main.go
+
 # SSE 流式响应示例
 go run example/sse/main.go
 
@@ -268,6 +271,27 @@ if err != nil {
 - `RetrievalSemantic`: 基于语义相关性检索
 
 完整使用说明、provider 说明和存储差异见 [memory/README.md](./memory/README.md)。
+
+如果你希望把记忆托管给外部服务，也可以直接切到 `mem0` provider：
+
+```go
+import (
+    "github.com/CoolBanHub/aggo/memory"
+    "github.com/CoolBanHub/aggo/memory/mem0"
+)
+
+provider, err := memory.GlobalRegistry().CreateProvider("mem0", &mem0.ProviderConfig{
+    BaseURL:           "https://api.mem0.ai",
+    APIKey:            "your-mem0-api-key",
+    Mode:              mem0.ModeHosted,
+    SearchMsgLimit:    6,
+    SearchResultLimit: 5,
+    OutputMemoryLimit: 5,
+})
+if err != nil {
+    panic(err)
+}
+```
 
 ### 定时任务系统
 
@@ -482,7 +506,8 @@ aggo/
 │   │   ├── storage.go                # builtin 存储接口
 │   │   ├── types.go                  # builtin 配置与数据结构
 │   │   └── storage/                  # 内存 / 文件 / GORM 存储实现
-│   └── memu/                      # 外部 memu 服务 provider
+│   ├── memu/                      # 外部 memu 服务 provider
+│   └── mem0/                      # mem0 / 兼容 API provider
 │
 ├── cron/                       # 定时任务系统
 │   ├── model.go                   # 任务模型定义

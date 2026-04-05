@@ -90,10 +90,11 @@ func main() {
 
 ## 已注册的 provider
 
-当前仓库内默认注册了两个 provider：
+当前仓库内默认注册了三个 provider：
 
 - `builtin`
 - `memu`
+- `mem0`
 
 可以通过 `memory.GlobalRegistry().ListPlugins()` 查看当前已注册插件。
 
@@ -180,6 +181,65 @@ provider, err := memory.GlobalRegistry().CreateProvider("memu", &memu.ProviderCo
 - `BaseURL`: memu 服务地址，必填
 - `HistoryLimit`: 检索请求最多带多少条最近消息
 - `MaxItems`: 最多向模型注入多少条 memu 返回的记忆条目
+
+### mem0
+
+`mem0` 是一个兼容 mem0 Hosted API 和 OSS REST API 的外部记忆 provider，注册逻辑在 `memory/mem0/provider.go`。
+
+它的工作方式：
+
+- 检索阶段向 mem0 的 search API 发请求
+- 写入阶段向 mem0 的 add memories API 发请求
+- 兼容 hosted / oss 两种模式，并允许覆盖默认路径和鉴权 header
+- 检索失败时会优雅降级，返回空结果，不阻塞主流程
+- 对部分 hosted 服务，写入可能是异步完成的；新写入的记忆不一定能在下一秒立即被检索到
+
+创建方式：
+
+```go
+package main
+
+import (
+    "github.com/CoolBanHub/aggo/memory"
+    "github.com/CoolBanHub/aggo/memory/mem0"
+)
+
+provider, err := memory.GlobalRegistry().CreateProvider("mem0", &mem0.ProviderConfig{
+    BaseURL:           "https://api.mem0.ai",
+    APIKey:            "your-mem0-api-key",
+    Mode:              mem0.ModeHosted,
+    SearchMsgLimit:    6,
+    SearchResultLimit: 5,
+    OutputMemoryLimit: 5,
+})
+```
+
+如果是自建或第三方兼容接口，可以切到 OSS 模式：
+
+```go
+provider, err := memory.GlobalRegistry().CreateProvider("mem0", &mem0.ProviderConfig{
+    BaseURL: "http://127.0.0.1:8000",
+    Mode:    mem0.ModeOSS,
+    APIKey:  "optional-api-key",
+})
+```
+
+常用配置：
+
+- `BaseURL`: mem0 服务地址，必填
+- `Mode`: `mem0.ModeHosted` 或 `mem0.ModeOSS`
+- `APIKey`: API key；hosted 默认使用 `Authorization: Token <key>`，oss 默认使用 `X-API-Key`
+- `AddPath` / `SearchPath`: 覆盖默认接口路径，适配第三方兼容服务
+- `AuthHeader` / `AuthScheme`: 覆盖默认鉴权 header 或 scheme
+- `SearchMsgLimit`: 构造检索 query 时最多读取多少条最近消息
+- `SearchResultLimit`: 搜索 API 期望返回多少条结果
+- `OutputMemoryLimit`: 最多向模型注入多少条 mem0 记忆
+- `UseSessionAsRunID`: 是否把 `sessionID` 透传为 mem0 的 `run_id`
+- `SearchBySession`: 是否在检索阶段也按 `run_id` 过滤
+- `SessionMetadataKey`: 是否把 `sessionID` 同步写入 metadata，默认 key 为 `session_id`
+- `AgentID` / `AppID` / `OrgID` / `ProjectID`: 透传 mem0 的作用域字段
+- `ExtraHeaders`: 额外请求头
+- `Metadata`: 每次写入时附带的固定 metadata
 
 ## 生命周期说明
 
