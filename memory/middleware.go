@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -60,18 +61,41 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 		return ctx, state, nil
 	}
 
-	// Assemble enhanced messages
-	enhanced := make([]*schema.Message, 0)
+	if result == nil {
+		adk.AddSessionValue(ctx, m.beforeModelRewriteStateKey(), true)
+		return ctx, state, nil
+	}
 
-	if result != nil {
-		if len(result.SystemMessages) > 0 {
-			enhanced = append(enhanced, result.SystemMessages...)
-		}
-		if len(result.HistoryMessages) > 0 {
-			enhanced = append(enhanced, result.HistoryMessages...)
+	// Split state.Messages into: first system message + rest
+	var systemMsg *schema.Message
+	var restMessages []*schema.Message
+	for _, msg := range state.Messages {
+		if systemMsg == nil && msg.Role == schema.System {
+			systemMsg = msg
+		} else {
+			restMessages = append(restMessages, msg)
 		}
 	}
-	enhanced = append(enhanced, state.Messages...)
+
+	// Merge memory context into the system prompt content.
+	if len(result.SystemMessages) > 0 && systemMsg != nil {
+		var memoryBlock strings.Builder
+		for _, sm := range result.SystemMessages {
+			if sm.Content != "" {
+				memoryBlock.WriteString(sm.Content)
+				memoryBlock.WriteString("\n\n")
+			}
+		}
+		systemMsg.Content = systemMsg.Content + "\n\n" + memoryBlock.String()
+	}
+
+	// Reassemble: system prompt → history → rest of conversation.
+	enhanced := make([]*schema.Message, 0, 1+len(result.HistoryMessages)+len(restMessages))
+	if systemMsg != nil {
+		enhanced = append(enhanced, systemMsg)
+	}
+	enhanced = append(enhanced, result.HistoryMessages...)
+	enhanced = append(enhanced, restMessages...)
 	state.Messages = enhanced
 
 	adk.AddSessionValue(ctx, m.beforeModelRewriteStateKey(), true)

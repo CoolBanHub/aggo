@@ -76,7 +76,11 @@ func (p *builtinProvider) Memorize(ctx context.Context, req *MemorizeRequest) er
 
 	for _, msg := range req.Messages {
 		if msg.Role == schema.User {
-			if err := p.MemoryManager.ProcessUserMessage(ctx, req.UserID, req.SessionID, msg.Content, msg.UserInputMultiContent); err != nil {
+			content := msg.Content
+			if content == "" && len(msg.UserInputMultiContent) > 0 {
+				content = extractTextFromParts(msg.UserInputMultiContent)
+			}
+			if err := p.MemoryManager.ProcessUserMessage(ctx, req.UserID, req.SessionID, content, msg.UserInputMultiContent); err != nil {
 				return fmt.Errorf("save user message: %w", err)
 			}
 		}
@@ -96,6 +100,17 @@ func (p *builtinProvider) Memorize(ctx context.Context, req *MemorizeRequest) er
 // Close delegates to the underlying MemoryManager.
 func (p *builtinProvider) Close() error {
 	return p.MemoryManager.Close()
+}
+
+// extractTextFromParts 从多部分内容中提取纯文本，拼接为一个字符串
+func extractTextFromParts(parts []schema.MessageInputPart) string {
+	var texts []string
+	for _, part := range parts {
+		if part.Type == "text" && part.Text != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
 }
 
 func init() {
