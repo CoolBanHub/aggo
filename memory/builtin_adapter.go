@@ -34,12 +34,9 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 	if cfg.EnableUserMemories {
 		userMemory, err := p.MemoryManager.GetUserMemory(ctx, req.UserID)
 		if err == nil && userMemory != nil && userMemory.Memory != "" {
-			var builder strings.Builder
-			builder.WriteString("用户个人信息记忆（请在回复中考虑这些信息，提供个性化的响应）:\n")
-			builder.WriteString(userMemory.Memory)
 			result.SystemMessages = append(result.SystemMessages, &schema.Message{
 				Role:    schema.System,
-				Content: builder.String(),
+				Content: fmt.Sprintf("<user_memory>\n%s\n</user_memory>", userMemory.Memory),
 			})
 		}
 	}
@@ -50,7 +47,7 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 		if err == nil && summary != nil && summary.Summary != "" {
 			result.SystemMessages = append(result.SystemMessages, &schema.Message{
 				Role:    schema.System,
-				Content: fmt.Sprintf("会话背景: %s", summary.Summary),
+				Content: fmt.Sprintf("<session_context>\n%s\n</session_context>", summary.Summary),
 			})
 		}
 	}

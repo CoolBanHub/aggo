@@ -10,13 +10,14 @@ import (
 // 统一转换逻辑，避免在多处重复实现
 func (m *ConversationMessage) ToSchemaMessage() *schema.Message {
 	msg := &schema.Message{
-		Role:    schema.RoleType(m.Role),
-		Content: m.Content,
+		Role: schema.RoleType(m.Role),
 	}
+	msg.Content = m.Content
 	if len(m.Parts) > 0 {
 		multiContent := make([]schema.MessageInputPart, len(m.Parts))
 		copy(multiContent, m.Parts)
 		msg.UserInputMultiContent = multiContent
+		msg.Content = ""
 	}
 	return msg
 }

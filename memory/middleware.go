@@ -80,10 +80,13 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 	// Merge memory context into the system prompt content.
 	if len(result.SystemMessages) > 0 && systemMsg != nil {
 		var memoryBlock strings.Builder
-		for _, sm := range result.SystemMessages {
+		for i, sm := range result.SystemMessages {
 			if sm.Content != "" {
+				if i > 0 {
+					memoryBlock.WriteString("\n")
+				}
 				memoryBlock.WriteString(sm.Content)
-				memoryBlock.WriteString("\n\n")
+				memoryBlock.WriteString("\n")
 			}
 		}
 		systemMsg.Content = systemMsg.Content + "\n\n" + memoryBlock.String()

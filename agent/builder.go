@@ -101,6 +101,12 @@ func (b *AgentBuilder) Build(ctx context.Context) (adk.Agent, error) {
 		description = "adk agent"
 	}
 
+	// Append instruction formatter as the last handler to restructure
+	// framework-injected sections (sub-agent transfer, skills) with XML tags.
+	handlers := make([]adk.ChatModelAgentMiddleware, len(b.middlewares), len(b.middlewares)+1)
+	copy(handlers, b.middlewares)
+	handlers = append(handlers, &instructionFormatter{})
+
 	mainAgent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        name,
 		Description: description,
@@ -112,7 +118,7 @@ func (b *AgentBuilder) Build(ctx context.Context) (adk.Agent, error) {
 			},
 		},
 		MaxIterations: b.maxStep,
-		Handlers:      b.middlewares,
+		Handlers:      handlers,
 	})
 	if err != nil {
 		return nil, err
