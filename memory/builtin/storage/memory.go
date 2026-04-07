@@ -301,6 +301,35 @@ func (m *MemoryStore) GetMessagesAfter(ctx context.Context, sessionID string, us
 	return filtered, nil
 }
 
+// GetMessageCountAfter 获取游标之后的会话消息数量。
+func (m *MemoryStore) GetMessageCountAfter(ctx context.Context, sessionID string, userID string, afterMessageID string, afterTime time.Time) (int, error) {
+	messages, err := m.GetMessages(ctx, sessionID, userID, 0)
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, msg := range messages {
+		if !afterTime.IsZero() {
+			if msg.CreatedAt.After(afterTime) {
+				count++
+				continue
+			}
+			if msg.CreatedAt.Before(afterTime) {
+				continue
+			}
+		}
+		if afterMessageID == "" && afterTime.IsZero() {
+			count++
+			continue
+		}
+		if afterMessageID != "" && msg.ID > afterMessageID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // DeleteMessages 删除会话的消息历史
 func (m *MemoryStore) DeleteMessages(ctx context.Context, sessionID string, userID string) error {
 	if sessionID == "" {

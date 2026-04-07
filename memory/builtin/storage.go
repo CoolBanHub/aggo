@@ -81,4 +81,8 @@ type CursorMessageStorage interface {
 	// 仅 afterMessageID 存在时，返回 ID 晚于 afterMessageID 的消息。
 	// 两者都为空时，等价于 GetMessages(..., limit)。
 	GetMessagesAfter(ctx context.Context, sessionID string, userID string, afterMessageID string, afterTime time.Time, limit int) ([]*ConversationMessage, error)
+
+	// GetMessageCountAfter 获取游标之后的会话消息数量（避免加载完整消息列表）。
+	// 语义与 GetMessagesAfter 相同，但只返回数量。
+	GetMessageCountAfter(ctx context.Context, sessionID string, userID string, afterMessageID string, afterTime time.Time) (int, error)
 }

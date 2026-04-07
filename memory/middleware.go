@@ -130,7 +130,10 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 	}
 
 	// Only persist the final natural-language assistant reply for this turn.
-	if strings.TrimSpace(latestMsg.Content) == "" || len(latestMsg.ToolCalls) > 0 {
+	// Intermediate assistant messages that contain tool calls are not final
+	// user-visible answers and should never be stored as memories, even if
+	// providers/models also include explanatory text in the same message.
+	if len(latestMsg.ToolCalls) > 0 || strings.TrimSpace(latestMsg.Content) == "" {
 		return ctx, state, nil
 	}
 
@@ -148,9 +151,7 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 	if userMsg != nil {
 		messagesToMemorize = append(messagesToMemorize, userMsg)
 	}
-	if assistantMsg != nil {
-		messagesToMemorize = append(messagesToMemorize, assistantMsg)
-	}
+	messagesToMemorize = append(messagesToMemorize, assistantMsg)
 
 	if len(messagesToMemorize) > 0 {
 		go func() {

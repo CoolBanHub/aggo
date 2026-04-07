@@ -81,6 +81,9 @@ func (s *SQLStore) GetMessages(ctx context.Context, sessionID string, userID str
 }
 
 // GetMessagesAfter 获取游标之后的会话消息历史。
+// Results are returned in chronological order (oldest first). Internally the query
+// uses DESC ordering with LIMIT to fetch the most recent N messages efficiently,
+// then reverses them for caller convenience.
 func (s *SQLStore) GetMessagesAfter(ctx context.Context, sessionID string, userID string, afterMessageID string, afterTime time.Time, limit int) ([]*builtin.ConversationMessage, error) {
 	if sessionID == "" {
 		return nil, errors.New("会话ID不能为空")
@@ -118,6 +121,34 @@ func (s *SQLStore) GetMessagesAfter(ctx context.Context, sessionID string, userI
 		messages[i], messages[j] = messages[j], messages[i]
 	}
 	return messages, nil
+}
+
+// GetMessageCountAfter 获取游标之后的会话消息数量，避免加载完整消息列表。
+func (s *SQLStore) GetMessageCountAfter(ctx context.Context, sessionID string, userID string, afterMessageID string, afterTime time.Time) (int, error) {
+	if sessionID == "" {
+		return 0, errors.New("会话ID不能为空")
+	}
+	if userID == "" {
+		return 0, errors.New("用户ID不能为空")
+	}
+
+	query := s.db.WithContext(ctx).Table(s.tableNameProvider.GetConversationMessageTableName()).
+		Where("session_id = ? AND user_id = ?", sessionID, userID)
+
+	switch {
+	case !afterTime.IsZero() && afterMessageID != "":
+		query = query.Where("(created_at > ?) OR (created_at = ? AND id > ?)", afterTime, afterTime, afterMessageID)
+	case !afterTime.IsZero():
+		query = query.Where("created_at > ?", afterTime)
+	case afterMessageID != "":
+		query = query.Where("id > ?", afterMessageID)
+	}
+
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("获取游标后的消息数量失败: %v", err)
+	}
+	return int(count), nil
 }
 
 // DeleteMessages 删除会话的消息历史

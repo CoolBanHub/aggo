@@ -399,26 +399,25 @@ func (m *MemoryManager) shouldTriggerSummaryUpdate(ctx context.Context, userID, 
 	}
 
 	if existingSummary == nil {
-		allMessages, err := m.storage.GetMessages(ctx, sessionID, userID, 0)
+		totalMessageCount, err := m.storage.GetMessageCount(ctx, userID, sessionID)
 		if err != nil {
-			return false, fmt.Errorf("获取消息失败: %w", err)
+			return false, fmt.Errorf("获取消息总数失败: %w", err)
 		}
-		if len(allMessages) == 0 {
+		if totalMessageCount == 0 {
 			return false, nil
 		}
-		return m.shouldTriggerSummaryBySnapshot(time.Time{}, len(allMessages), len(allMessages), false), nil
+		return m.shouldTriggerSummaryBySnapshot(time.Time{}, totalMessageCount, totalMessageCount, false), nil
 	}
 
-	unsummarized, err := m.getMessagesAfterCursor(
+	unsummarizedCount, err := m.getUnsummarizedMessageCount(
 		ctx,
 		sessionID,
 		userID,
 		existingSummary.LastSummarizedMessageID,
 		effectiveSummaryBoundary(existingSummary),
-		0,
 	)
 	if err != nil {
-		return false, fmt.Errorf("获取未摘要消息失败: %w", err)
+		return false, fmt.Errorf("获取未摘要消息数量失败: %w", err)
 	}
 
 	totalMessageCount, err := m.storage.GetMessageCount(ctx, userID, sessionID)
@@ -426,7 +425,7 @@ func (m *MemoryManager) shouldTriggerSummaryUpdate(ctx context.Context, userID, 
 		return false, fmt.Errorf("获取消息总数失败: %w", err)
 	}
 
-	return m.shouldTriggerSummaryBySnapshot(existingSummary.UpdatedAt, len(unsummarized), totalMessageCount, true), nil
+	return m.shouldTriggerSummaryBySnapshot(existingSummary.UpdatedAt, unsummarizedCount, totalMessageCount, true), nil
 }
 
 // updateSessionSummary 更新会话摘要（使用AI生成）
@@ -592,13 +591,30 @@ func (m *MemoryManager) UpdateConfig(config *MemoryConfig) {
 		return
 	}
 
+	currentCacheTTLSeconds := 0
+	currentCacheMaxEntries := 0
+	if m.summaryCache != nil {
+		currentCacheTTLSeconds = int(m.summaryCache.ttl / time.Second)
+		currentCacheMaxEntries = m.summaryCache.maxEntries
+	} else if m.config != nil {
+		currentCacheTTLSeconds = m.config.SummaryCache.TTLSeconds
+		currentCacheMaxEntries = m.config.SummaryCache.MaxEntries
+	}
+
 	config = normalizeMemoryConfig(config)
 	m.config = config
 	m.summaryTrigger = NewSummaryTriggerManager(config.SummaryTrigger)
-	m.summaryCache = newSessionSummaryCache(
-		time.Duration(config.SummaryCache.TTLSeconds)*time.Second,
-		config.SummaryCache.MaxEntries,
-	)
+
+	// Recreate the cache only when the currently applied cache parameters
+	// differ from the requested ones. Compare against the live cache state
+	// instead of m.config so in-place mutations of GetConfig() are detected.
+	if currentCacheTTLSeconds != config.SummaryCache.TTLSeconds ||
+		currentCacheMaxEntries != config.SummaryCache.MaxEntries {
+		m.summaryCache = newSessionSummaryCache(
+			time.Duration(config.SummaryCache.TTLSeconds)*time.Second,
+			config.SummaryCache.MaxEntries,
+		)
+	}
 
 	// 停止旧的定期清理任务并等待退出
 	m.cleanupCancel()
@@ -727,6 +743,15 @@ func unsummarizedMessages(messages []*ConversationMessage, summary *SessionSumma
 	return filtered
 }
 
+// messageAfterSummary reports whether message was created after the summary cursor.
+//
+// Cursor comparison uses two fields:
+//   - LastSummarizedMessageAt (primary): timestamp of the last summarized message.
+//   - LastSummarizedMessageID (tie-breaker): string comparison by ID for messages
+//     sharing the same timestamp. This relies on IDs being lexicographically
+//     monotonically increasing (e.g., ULID, UUIDv7). Random IDs would break this.
+//
+// For legacy summaries that predate cursor fields, falls back to UpdatedAt.
 func messageAfterSummary(message *ConversationMessage, summary *SessionSummary) bool {
 	if message == nil {
 		return false
@@ -804,11 +829,17 @@ func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
 	return config
 }
 
+// getMessagesAfterCursor returns messages after the summary cursor.
+// It prefers the efficient CursorMessageStorage path when available.
+// For stores that don't implement CursorMessageStorage (e.g., in-memory),
+// it loads all messages and filters in-process — acceptable because the
+// in-memory store is only used for testing/development.
 func (m *MemoryManager) getMessagesAfterCursor(ctx context.Context, sessionID, userID, afterMessageID string, afterTime time.Time, limit int) ([]*ConversationMessage, error) {
 	if cursorStore, ok := m.storage.(CursorMessageStorage); ok {
 		return cursorStore.GetMessagesAfter(ctx, sessionID, userID, afterMessageID, afterTime, limit)
 	}
 
+	// Fallback: load all messages and filter in-process.
 	messages, err := m.storage.GetMessages(ctx, sessionID, userID, 0)
 	if err != nil {
 		return nil, err
@@ -823,4 +854,25 @@ func (m *MemoryManager) getMessagesAfterCursor(ctx context.Context, sessionID, u
 		filtered = filtered[len(filtered)-limit:]
 	}
 	return filtered, nil
+}
+
+// getUnsummarizedMessageCount returns the count of messages after the summary cursor
+// without loading the full message list. Falls back to loading all messages when
+// the storage doesn't support efficient cursor counting.
+func (m *MemoryManager) getUnsummarizedMessageCount(ctx context.Context, sessionID, userID, afterMessageID string, afterTime time.Time) (int, error) {
+	if cursorStore, ok := m.storage.(CursorMessageStorage); ok {
+		return cursorStore.GetMessageCountAfter(ctx, sessionID, userID, afterMessageID, afterTime)
+	}
+
+	// Fallback: load all messages and count in-process.
+	messages, err := m.storage.GetMessages(ctx, sessionID, userID, 0)
+	if err != nil {
+		return 0, err
+	}
+	filtered := unsummarizedMessages(messages, &SessionSummary{
+		LastSummarizedMessageID: afterMessageID,
+		LastSummarizedMessageAt: afterTime,
+		UpdatedAt:               afterTime,
+	})
+	return len(filtered), nil
 }

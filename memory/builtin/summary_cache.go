@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"container/list"
 	"sync"
 	"time"
 )
@@ -15,13 +16,14 @@ type sessionSummaryCache struct {
 	maxEntries int
 
 	mu      sync.Mutex
-	entries map[string]*sessionSummaryCacheEntry
+	entries map[string]*list.Element // key -> element
+	order   *list.List               // LRU order: front = most recent, back = least recent
 }
 
 type sessionSummaryCacheEntry struct {
-	summary    *SessionSummary
-	expiresAt  time.Time
-	lastAccess time.Time
+	key       string
+	summary   *SessionSummary
+	expiresAt time.Time
 }
 
 func newSessionSummaryCache(ttl time.Duration, maxEntries int) *sessionSummaryCache {
@@ -34,7 +36,8 @@ func newSessionSummaryCache(ttl time.Duration, maxEntries int) *sessionSummaryCa
 	return &sessionSummaryCache{
 		ttl:        ttl,
 		maxEntries: maxEntries,
-		entries:    make(map[string]*sessionSummaryCacheEntry),
+		entries:    make(map[string]*list.Element),
+		order:      list.New(),
 	}
 }
 
@@ -44,16 +47,18 @@ func (c *sessionSummaryCache) Get(key string) (*SessionSummary, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	entry, ok := c.entries[key]
+	elem, ok := c.entries[key]
 	if !ok {
 		return nil, false
 	}
+	entry := elem.Value.(*sessionSummaryCacheEntry)
 	if now.After(entry.expiresAt) {
-		delete(c.entries, key)
+		c.removeElement(elem)
 		return nil, false
 	}
 
-	entry.lastAccess = now
+	// Move to front (most recently accessed)
+	c.order.MoveToFront(elem)
 	return cloneSessionSummary(entry.summary), true
 }
 
@@ -67,46 +72,54 @@ func (c *sessionSummaryCache) Set(key string, summary *SessionSummary) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.entries[key] = &sessionSummaryCacheEntry{
-		summary:    cloneSessionSummary(summary),
-		expiresAt:  now.Add(c.ttl),
-		lastAccess: now,
+	// If key already exists, remove old entry first
+	if elem, ok := c.entries[key]; ok {
+		c.removeElement(elem)
 	}
-	c.prune(now)
+
+	entry := &sessionSummaryCacheEntry{
+		key:       key,
+		summary:   cloneSessionSummary(summary),
+		expiresAt: now.Add(c.ttl),
+	}
+	elem := c.order.PushFront(entry)
+	c.entries[key] = elem
+
+	c.evict()
 }
 
 func (c *sessionSummaryCache) Delete(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.entries, key)
+	if elem, ok := c.entries[key]; ok {
+		c.removeElement(elem)
+	}
 }
 
-func (c *sessionSummaryCache) prune(now time.Time) {
-	if len(c.entries) == 0 {
-		return
-	}
+func (c *sessionSummaryCache) removeElement(elem *list.Element) {
+	c.order.Remove(elem)
+	entry := elem.Value.(*sessionSummaryCacheEntry)
+	delete(c.entries, entry.key)
+}
 
-	for key, entry := range c.entries {
+// evict removes all expired entries and then evicts LRU entries if over capacity.
+// Must be called with c.mu held.
+func (c *sessionSummaryCache) evict() {
+	now := time.Now()
+
+	// Expiration is independent from LRU ordering, so scan the full list.
+	for elem := c.order.Back(); elem != nil; {
+		prev := elem.Prev()
+		entry := elem.Value.(*sessionSummaryCacheEntry)
 		if now.After(entry.expiresAt) {
-			delete(c.entries, key)
+			c.removeElement(elem)
 		}
+		elem = prev
 	}
 
-	for len(c.entries) > c.maxEntries {
-		var oldestKey string
-		var oldest time.Time
-		first := true
-		for key, entry := range c.entries {
-			if first || entry.lastAccess.Before(oldest) {
-				first = false
-				oldestKey = key
-				oldest = entry.lastAccess
-			}
-		}
-		if oldestKey == "" {
-			return
-		}
-		delete(c.entries, oldestKey)
+	// Evict LRU entries if still over capacity
+	for c.order.Len() > c.maxEntries {
+		c.removeElement(c.order.Back())
 	}
 }
 
