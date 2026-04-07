@@ -80,6 +80,46 @@ func (s *SQLStore) GetMessages(ctx context.Context, sessionID string, userID str
 	return messages, nil
 }
 
+// GetMessagesAfter 获取游标之后的会话消息历史。
+func (s *SQLStore) GetMessagesAfter(ctx context.Context, sessionID string, userID string, afterMessageID string, afterTime time.Time, limit int) ([]*builtin.ConversationMessage, error) {
+	if sessionID == "" {
+		return nil, errors.New("会话ID不能为空")
+	}
+	if userID == "" {
+		return nil, errors.New("用户ID不能为空")
+	}
+
+	var models []ConversationMessageModel
+	query := s.db.WithContext(ctx).Table(s.tableNameProvider.GetConversationMessageTableName()).
+		Where("session_id = ? AND user_id = ?", sessionID, userID)
+
+	switch {
+	case !afterTime.IsZero() && afterMessageID != "":
+		query = query.Where("(created_at > ?) OR (created_at = ? AND id > ?)", afterTime, afterTime, afterMessageID)
+	case !afterTime.IsZero():
+		query = query.Where("created_at > ?", afterTime)
+	case afterMessageID != "":
+		query = query.Where("id > ?", afterMessageID)
+	}
+
+	query = query.Order("created_at DESC").Order("id DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("获取游标后的消息历史失败: %v", err)
+	}
+
+	messages := make([]*builtin.ConversationMessage, 0, len(models))
+	for _, model := range models {
+		messages = append(messages, model.ToConversationMessage())
+	}
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+	return messages, nil
+}
+
 // DeleteMessages 删除会话的消息历史
 func (s *SQLStore) DeleteMessages(ctx context.Context, sessionID string, userID string) error {
 	if sessionID == "" {

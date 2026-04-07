@@ -107,6 +107,7 @@ func main() {
 - 基于 `builtin.MemoryManager` 适配到 `MemoryProvider`
 - 支持用户长期记忆、会话摘要、历史消息三类数据
 - 支持异步分析、摘要触发、周期清理
+- 会话摘要会持久化“已摘要到哪条消息”的游标；检索时优先注入摘要，再补充游标之后尚未纳入摘要的尾部消息
 - 支持内存、文件、GORM 三种存储
 
 创建方式：
@@ -134,10 +135,25 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 - `MemoryLimit`: 历史消息检索上限
 - `AsyncWorkerPoolSize`: 异步处理 worker 数量
 - `SummaryTrigger`: 摘要触发策略
+- `SummaryCache`: 会话摘要缓存配置，支持 `TTLSeconds` 与 `MaxEntries`
 - `Cleanup`: 定期清理配置
 - `TablePre`: SQL 表前缀
 
 默认配置来自 `builtin.DefaultMemoryConfig()`。
+
+#### 会话摘要行为
+
+启用 `EnableSessionSummary` 后，`builtin` provider 的会话上下文不再只依赖最近 `MemoryLimit` 条原始消息：
+
+- 已生成的会话摘要会作为 system message 注入
+- 检索时只补充“摘要游标之后”的未摘要消息尾巴
+- 摘要更新成功后会持久化最后一条已纳入摘要的消息游标，避免重启后重复摘要同一批历史消息
+- provider 会对会话摘要做本地短 TTL 缓存以减少摘要表读取；不会缓存完整 history，原始消息尾巴仍按游标从存储层查询
+
+对老数据兼容：
+
+- 如果历史摘要记录还没有游标字段，会先退化为按摘要 `updated_at` 推断未摘要尾巴
+- 一旦下一次摘要成功，新记录就会补齐真正的消息游标
 
 #### builtin 存储实现
 

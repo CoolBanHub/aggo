@@ -30,6 +30,8 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 		Metadata: make(map[string]any),
 	}
 
+	var sessionSummary *builtin.SessionSummary
+
 	// Fetch user memory as system message
 	if cfg.EnableUserMemories {
 		userMemory, err := p.MemoryManager.GetUserMemory(ctx, req.UserID)
@@ -45,6 +47,7 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 	if cfg.EnableSessionSummary {
 		summary, err := p.MemoryManager.GetSessionSummary(ctx, req.SessionID, req.UserID)
 		if err == nil && summary != nil && summary.Summary != "" {
+			sessionSummary = summary
 			result.SystemMessages = append(result.SystemMessages, &schema.Message{
 				Role:    schema.System,
 				Content: fmt.Sprintf("<session_context>\n%s\n</session_context>", summary.Summary),
@@ -57,9 +60,16 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 	if limit <= 0 {
 		limit = cfg.MemoryLimit
 	}
-	history, err := p.MemoryManager.GetMessages(ctx, req.SessionID, req.UserID, limit)
-	if err == nil && len(history) > 0 {
-		result.HistoryMessages = history
+	if cfg.EnableSessionSummary && sessionSummary != nil {
+		history, err := p.MemoryManager.GetMessagesAfterSummary(ctx, req.SessionID, req.UserID, limit)
+		if err == nil && len(history) > 0 {
+			result.HistoryMessages = history
+		}
+	} else {
+		history, err := p.MemoryManager.GetMessages(ctx, req.SessionID, req.UserID, limit)
+		if err == nil && len(history) > 0 {
+			result.HistoryMessages = history
+		}
 	}
 
 	return result, nil

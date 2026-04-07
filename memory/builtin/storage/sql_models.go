@@ -52,11 +52,13 @@ type UserMemoryModel struct {
 
 // SessionSummaryModel GORM模型 - 会话摘要表
 type SessionSummaryModel struct {
-	SessionID string    `gorm:"primaryKey;size:255" json:"sessionId"`
-	UserID    string    `gorm:"primaryKey;size:255" json:"userId"`
-	Summary   string    `gorm:"type:text;not null" json:"summary"`
-	CreatedAt time.Time `gorm:"autoCreateTime" json:"createdAt"`
-	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
+	SessionID               string    `gorm:"primaryKey;size:255" json:"sessionId"`
+	UserID                  string    `gorm:"primaryKey;size:255" json:"userId"`
+	Summary                 string    `gorm:"type:text;not null" json:"summary"`
+	LastSummarizedMessageID string    `gorm:"size:255" json:"lastSummarizedMessageId,omitempty"`
+	LastSummarizedMessageAt time.Time `json:"lastSummarizedMessageAt,omitempty"`
+	CreatedAt               time.Time `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt               time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
 // ConversationMessageModel GORM模型 - 对话消息表
@@ -95,11 +97,13 @@ func (m *UserMemoryModel) FromUserMemory(userMemory *builtin.UserMemory) {
 // ToSessionSummary 将数据库模型转换为业务模型
 func (m *SessionSummaryModel) ToSessionSummary() *builtin.SessionSummary {
 	sessionSummary := &builtin.SessionSummary{
-		SessionID: m.SessionID,
-		UserID:    m.UserID,
-		Summary:   m.Summary,
-		CreatedAt: m.CreatedAt,
-		UpdatedAt: m.UpdatedAt,
+		SessionID:               m.SessionID,
+		UserID:                  m.UserID,
+		Summary:                 m.Summary,
+		LastSummarizedMessageID: m.LastSummarizedMessageID,
+		LastSummarizedMessageAt: m.LastSummarizedMessageAt,
+		CreatedAt:               m.CreatedAt,
+		UpdatedAt:               m.UpdatedAt,
 	}
 
 	return sessionSummary
@@ -110,6 +114,8 @@ func (m *SessionSummaryModel) FromSessionSummary(sessionSummary *builtin.Session
 	m.SessionID = sessionSummary.SessionID
 	m.UserID = sessionSummary.UserID
 	m.Summary = sessionSummary.Summary
+	m.LastSummarizedMessageID = sessionSummary.LastSummarizedMessageID
+	m.LastSummarizedMessageAt = sessionSummary.LastSummarizedMessageAt
 	m.CreatedAt = sessionSummary.CreatedAt
 	m.UpdatedAt = sessionSummary.UpdatedAt
 }

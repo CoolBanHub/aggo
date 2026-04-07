@@ -71,3 +71,14 @@ type MemoryStorage interface {
 	// GetMessageCount 获取消息总数
 	GetMessageCount(ctx context.Context, userID, sessionID string) (int, error)
 }
+
+// CursorMessageStorage is an optional extension for stores that can query messages
+// directly by a persisted summary cursor without loading the full session history.
+type CursorMessageStorage interface {
+	// GetMessagesAfter 获取游标之后的会话消息。
+	// afterMessageID/afterTime 同时存在时，先按时间筛，再按消息ID打破同时间戳顺序。
+	// 仅 afterTime 存在时，返回 created_at 晚于 afterTime 的消息。
+	// 仅 afterMessageID 存在时，返回 ID 晚于 afterMessageID 的消息。
+	// 两者都为空时，等价于 GetMessages(..., limit)。
+	GetMessagesAfter(ctx context.Context, sessionID string, userID string, afterMessageID string, afterTime time.Time, limit int) ([]*ConversationMessage, error)
+}

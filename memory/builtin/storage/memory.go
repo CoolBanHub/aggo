@@ -268,6 +268,39 @@ func (m *MemoryStore) GetMessages(ctx context.Context, sessionID string, userID 
 	return messages, nil
 }
 
+// GetMessagesAfter 获取游标之后的会话消息历史。
+func (m *MemoryStore) GetMessagesAfter(ctx context.Context, sessionID string, userID string, afterMessageID string, afterTime time.Time, limit int) ([]*builtin.ConversationMessage, error) {
+	messages, err := m.GetMessages(ctx, sessionID, userID, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]*builtin.ConversationMessage, 0, len(messages))
+	for _, msg := range messages {
+		if !afterTime.IsZero() {
+			if msg.CreatedAt.After(afterTime) {
+				filtered = append(filtered, msg)
+				continue
+			}
+			if msg.CreatedAt.Before(afterTime) {
+				continue
+			}
+		}
+		if afterMessageID == "" && afterTime.IsZero() {
+			filtered = append(filtered, msg)
+			continue
+		}
+		if afterMessageID != "" && msg.ID > afterMessageID {
+			filtered = append(filtered, msg)
+		}
+	}
+
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[len(filtered)-limit:]
+	}
+	return filtered, nil
+}
+
 // DeleteMessages 删除会话的消息历史
 func (m *MemoryStore) DeleteMessages(ctx context.Context, sessionID string, userID string) error {
 	if sessionID == "" {

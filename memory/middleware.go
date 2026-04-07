@@ -120,19 +120,29 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 		return ctx, state, nil
 	}
 
-	// Find the last user and assistant messages
-	var userMsg, assistantMsg *schema.Message
-	for i := len(state.Messages) - 1; i >= 0; i-- {
-		if assistantMsg == nil && state.Messages[i].Role == schema.Assistant && state.Messages[i].Content != "" {
-			assistantMsg = state.Messages[i]
-		}
-		if userMsg == nil && state.Messages[i].Role == schema.User {
+	if len(state.Messages) == 0 {
+		return ctx, state, nil
+	}
+
+	latestMsg := state.Messages[len(state.Messages)-1]
+	if latestMsg == nil || latestMsg.Role != schema.Assistant {
+		return ctx, state, nil
+	}
+
+	// Only persist the final natural-language assistant reply for this turn.
+	if strings.TrimSpace(latestMsg.Content) == "" || len(latestMsg.ToolCalls) > 0 {
+		return ctx, state, nil
+	}
+
+	// Find the latest user message for the current turn.
+	var userMsg *schema.Message
+	for i := len(state.Messages) - 2; i >= 0; i-- {
+		if state.Messages[i].Role == schema.User {
 			userMsg = state.Messages[i]
-		}
-		if userMsg != nil && assistantMsg != nil {
 			break
 		}
 	}
+	assistantMsg := latestMsg
 
 	var messagesToMemorize []*schema.Message
 	if userMsg != nil {

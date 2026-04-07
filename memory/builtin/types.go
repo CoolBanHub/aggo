@@ -44,6 +44,10 @@ type SessionSummary struct {
 	UserID string `json:"userId"`
 	// 摘要内容
 	Summary string `json:"summary"`
+	// 上次已纳入摘要的最后一条消息ID
+	LastSummarizedMessageID string `json:"lastSummarizedMessageId,omitempty"`
+	// 上次已纳入摘要的最后一条消息时间
+	LastSummarizedMessageAt time.Time `json:"lastSummarizedMessageAt,omitempty"`
 	// 创建时间
 	CreatedAt time.Time `json:"createdAt"`
 	// 最后更新时间
@@ -97,6 +101,9 @@ type MemoryConfig struct {
 	// 摘要触发配置
 	SummaryTrigger SummaryTriggerConfig `json:"summaryTrigger"`
 
+	// 会话摘要缓存配置
+	SummaryCache SummaryCacheConfig `json:"summaryCache"`
+
 	TablePre string `json:"tablePre"`
 
 	// 清理配置
@@ -115,6 +122,14 @@ type CleanupConfig struct {
 	CleanupInterval int `json:"cleanupInterval"`
 }
 
+// SummaryCacheConfig 会话摘要缓存配置
+type SummaryCacheConfig struct {
+	// TTLSeconds 表示单条摘要缓存 TTL，单位秒
+	TTLSeconds int `json:"ttlSeconds"`
+	// MaxEntries 表示缓存最多保留多少条会话摘要
+	MaxEntries int `json:"maxEntries"`
+}
+
 // DefaultMemoryConfig 返回完整的默认配置
 func DefaultMemoryConfig() *MemoryConfig {
 	return &MemoryConfig{
@@ -127,6 +142,10 @@ func DefaultMemoryConfig() *MemoryConfig {
 			Strategy:         TriggerSmart,
 			MessageThreshold: 10,
 			MinInterval:      600, // 600秒最小间隔
+		},
+		SummaryCache: SummaryCacheConfig{
+			TTLSeconds: int(defaultSessionSummaryCacheTTL / time.Second),
+			MaxEntries: defaultSessionSummaryCacheMaxEntries,
 		},
 		Cleanup: CleanupConfig{
 			SessionCleanupInterval: 24,   // 24小时

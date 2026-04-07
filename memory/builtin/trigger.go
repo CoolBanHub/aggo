@@ -43,6 +43,28 @@ func NewSummaryTriggerManager(config SummaryTriggerConfig) *SummaryTriggerManage
 	}
 }
 
+// EnsureSessionState initializes in-memory trigger state for a session once.
+// This is used to restore coarse trigger bookkeeping for sessions that already
+// have a persisted summary when the process restarts.
+func (stm *SummaryTriggerManager) EnsureSessionState(sessionKey string, currentMessageCount int, lastSummaryTime time.Time) {
+	stm.mutex.Lock()
+	defer stm.mutex.Unlock()
+
+	if _, exists := stm.sessionStates[sessionKey]; exists {
+		return
+	}
+
+	if lastSummaryTime.IsZero() {
+		lastSummaryTime = time.Now()
+	}
+
+	stm.sessionStates[sessionKey] = &SessionState{
+		LastSummaryTime:          lastSummaryTime,
+		MessagesSinceLastSummary: 0,
+		TotalMessages:            currentMessageCount,
+	}
+}
+
 // ShouldTriggerSummary 判断是否应该触发摘要更新
 func (stm *SummaryTriggerManager) ShouldTriggerSummary(sessionKey string, currentMessageCount int) bool {
 	stm.mutex.Lock()
