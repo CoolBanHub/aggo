@@ -141,7 +141,7 @@ func (m *MemoryManager) submitAsyncTask(task asyncTask) bool {
 	taskKey := fmt.Sprintf("%s:%s:%s", task.taskType, task.userID, task.sessionID)
 	// 如果相同签名（任务类型+用户+会话）的任务已在队列中，则丢弃当前重复提交，节省开销
 	if _, loaded := m.pendingTasks.LoadOrStore(taskKey, struct{}{}); loaded {
-		slog.Debugf("异步任务去重: 已存在相同的待处理任务, 类型: %s, 用户: %s", task.taskType, task.userID)
+		//slog.Debugf("异步任务去重: 已存在相同的待处理任务, 类型: %s, 用户: %s", task.taskType, task.userID)
 		return true // 返回 true 表示"已接收处理"（虽然是去重扔掉的），不视为"队列满丢弃"
 	}
 
@@ -182,7 +182,6 @@ func (m *MemoryManager) scheduleMemoryTask(userID, sessionID string) {
 
 	// 如果已有定时器，说明窗口内已有一次请求在等待，直接返回
 	if _, loaded := m.memoryTimers.Load(timerKey); loaded {
-		slog.Debugf("记忆任务聚合: 窗口内已有待处理任务, 跳过, userID=%s\n", userID)
 		return
 	}
 
