@@ -132,6 +132,7 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
+			mgr.SetAsyncTaskContextBuilder(cfg.AsyncTaskContextBuilder)
 			return &builtinProvider{MemoryManager: mgr}, nil
 		},
 	})

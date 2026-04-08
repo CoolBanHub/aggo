@@ -53,6 +53,8 @@ type MemoryManager struct {
 	// 外部注入的清理函数
 	CleanupOldMessagesFunc     func(ctx context.Context) error // 按时间清理旧消息
 	CleanupMessagesByLimitFunc func(ctx context.Context) error // 按数量限制清理消息
+
+	asyncTaskContextBuilder AsyncTaskContextBuilder
 }
 
 // asyncTask 异步任务结构
@@ -106,6 +108,19 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 	manager.startPeriodicCleanup()
 
 	return manager, nil
+}
+
+func (m *MemoryManager) SetAsyncTaskContextBuilder(builder AsyncTaskContextBuilder) {
+	m.asyncTaskContextBuilder = builder
+}
+
+func (m *MemoryManager) newAsyncTaskContext(task asyncTask) context.Context {
+	if m.asyncTaskContextBuilder != nil {
+		if ctx := m.asyncTaskContextBuilder(task.taskType, task.userID, task.sessionID); ctx != nil {
+			return ctx
+		}
+	}
+	return context.Background()
 }
 
 // startAsyncWorkers 启动异步工作goroutine池
@@ -266,11 +281,11 @@ func (m *MemoryManager) performPeriodicCleanup(parentCtx context.Context) {
 func (m *MemoryManager) processAsyncTask(task asyncTask) {
 	switch task.taskType {
 	case "memory":
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), 30*time.Second)
 		defer cancel()
 		m.analyzeAndCreateUserMemory(ctx, task.userID, task.sessionID)
 	case "summary":
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), 30*time.Second)
 		defer cancel()
 		err := m.updateSessionSummary(ctx, task.userID, task.sessionID)
 		if err != nil {

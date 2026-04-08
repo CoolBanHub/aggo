@@ -8,6 +8,17 @@ import (
 	"github.com/cloudwego/eino/components/model"
 )
 
+func DefaultAsyncTaskTraceName(taskType string) string {
+	switch taskType {
+	case "summary":
+		return "builtin-session-summary"
+	case "memory":
+		fallthrough
+	default:
+		return "builtin-memory"
+	}
+}
+
 func withObservationName(ctx context.Context, cm model.ToolCallingChatModel, name string) context.Context {
 	runInfo := &callbacks.RunInfo{
 		Name:      name,
