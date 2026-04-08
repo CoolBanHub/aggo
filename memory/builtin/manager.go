@@ -46,6 +46,10 @@ type MemoryManager struct {
 	// 异步任务处理去重标记，防止同一(任务类型,用户,会话)多次排队
 	pendingTasks sync.Map
 
+	// 记忆任务聚合（debounce）相关
+	memoryTimers   sync.Map      // key: "memory:{userID}:{sessionID}", value: *time.Timer
+	debounceWindow time.Duration // 聚合窗口时长，0 表示不做聚合
+
 	// 外部注入的清理函数
 	CleanupOldMessagesFunc     func(ctx context.Context) error // 按时间清理旧消息
 	CleanupMessagesByLimitFunc func(ctx context.Context) error // 按数量限制清理消息
@@ -85,10 +89,11 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 			time.Duration(config.SummaryCache.TTLSeconds)*time.Second,
 			config.SummaryCache.MaxEntries,
 		),
-		ctx:           ctx,
-		cancel:        cancel,
-		cleanupCtx:    cleanupCtx,
-		cleanupCancel: cleanupCancel,
+		ctx:            ctx,
+		cancel:         cancel,
+		cleanupCtx:     cleanupCtx,
+		cleanupCancel:  cleanupCancel,
+		debounceWindow: debounceWindowFromConfig(config),
 	}
 
 	// 初始化goroutine池
@@ -155,6 +160,45 @@ func (m *MemoryManager) submitAsyncTask(task asyncTask) bool {
 			task.taskType, task.userID)
 		return false
 	}
+}
+
+// scheduleMemoryTask 调度记忆分析任务，支持聚合窗口（debounce）
+// 首次请求后启动 debounceWindow 定时器，期间的新请求不重置定时器，到期统一处理一次
+func (m *MemoryManager) scheduleMemoryTask(userID, sessionID string) {
+	// debounceWindow 为 0 时，保持原有行为：立即提交
+	if m.debounceWindow <= 0 {
+		submitted := m.submitAsyncTask(asyncTask{
+			taskType:  "memory",
+			userID:    userID,
+			sessionID: sessionID,
+		})
+		if !submitted {
+			slog.Errorf("警告: 用户记忆分析队列已满，跳过处理: userID=%s\n", userID)
+		}
+		return
+	}
+
+	timerKey := fmt.Sprintf("memory:%s:%s", userID, sessionID)
+
+	// 如果已有定时器，说明窗口内已有一次请求在等待，直接返回
+	if _, loaded := m.memoryTimers.Load(timerKey); loaded {
+		slog.Debugf("记忆任务聚合: 窗口内已有待处理任务, 跳过, userID=%s\n", userID)
+		return
+	}
+
+	// 启动延迟定时器
+	timer := time.AfterFunc(m.debounceWindow, func() {
+		m.memoryTimers.Delete(timerKey)
+		submitted := m.submitAsyncTask(asyncTask{
+			taskType:  "memory",
+			userID:    userID,
+			sessionID: sessionID,
+		})
+		if !submitted {
+			slog.Errorf("警告: 用户记忆分析队列已满，跳过处理: userID=%s\n", userID)
+		}
+	})
+	m.memoryTimers.Store(timerKey, timer)
 }
 
 // GetTaskQueueStats 获取异步任务队列统计
@@ -325,14 +369,7 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 
 	// 如果启用了用户记忆，分析消息并创建记忆（在AI回复后触发）
 	if m.config.EnableUserMemories {
-		submitted := m.submitAsyncTask(asyncTask{
-			taskType:  "memory",
-			userID:    userID,
-			sessionID: sessionID,
-		})
-		if !submitted {
-			slog.Errorf("警告: 用户记忆分析队列已满，跳过处理: userID=%s\n", userID)
-		}
+		m.scheduleMemoryTask(userID, sessionID)
 	}
 
 	return nil
@@ -604,6 +641,7 @@ func (m *MemoryManager) UpdateConfig(config *MemoryConfig) {
 	config = normalizeMemoryConfig(config)
 	m.config = config
 	m.summaryTrigger = NewSummaryTriggerManager(config.SummaryTrigger)
+	m.debounceWindow = debounceWindowFromConfig(config)
 
 	// Recreate the cache only when the currently applied cache parameters
 	// differ from the requested ones. Compare against the live cache state
@@ -662,6 +700,15 @@ func (m *MemoryManager) Close() error {
 		// 等待清理goroutine结束
 		m.cleanupWg.Wait()
 	}
+
+	// 停止所有聚合定时器，阻止新的记忆任务入队
+	m.memoryTimers.Range(func(key, value interface{}) bool {
+		if timer, ok := value.(*time.Timer); ok {
+			timer.Stop()
+		}
+		m.memoryTimers.Delete(key)
+		return true
+	})
 
 	// 通知所有 worker 退出，等待退出后再关闭 channel
 	m.cancel()
@@ -790,6 +837,14 @@ func effectiveSummaryBoundary(summary *SessionSummary) time.Time {
 	return summary.UpdatedAt
 }
 
+// debounceWindowFromConfig extracts the debounce window duration from config.
+func debounceWindowFromConfig(config *MemoryConfig) time.Duration {
+	if config.DebounceWindowSeconds != nil {
+		return time.Duration(*config.DebounceWindowSeconds) * time.Second
+	}
+	return 30 * time.Second
+}
+
 func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
 	if config == nil {
 		config = DefaultMemoryConfig()
@@ -801,6 +856,9 @@ func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
 	}
 	if config.AsyncWorkerPoolSize <= 0 {
 		config.AsyncWorkerPoolSize = defaults.AsyncWorkerPoolSize
+	}
+	if config.DebounceWindowSeconds == nil {
+		config.DebounceWindowSeconds = defaults.DebounceWindowSeconds
 	}
 	if config.SummaryTrigger.MessageThreshold <= 0 {
 		config.SummaryTrigger.MessageThreshold = defaults.SummaryTrigger.MessageThreshold

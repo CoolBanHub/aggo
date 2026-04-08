@@ -6,6 +6,11 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+// ptrTo returns a pointer to the given value.
+func ptrTo[T any](v T) *T {
+	return &v
+}
+
 // ToSchemaMessage 将 ConversationMessage 转换为 schema.Message
 // 统一转换逻辑，避免在多处重复实现
 func (m *ConversationMessage) ToSchemaMessage() *schema.Message {
@@ -97,6 +102,9 @@ type MemoryConfig struct {
 	MemoryLimit int `json:"memoryLimit"`
 	// 异步处理的goroutine池大小
 	AsyncWorkerPoolSize int `json:"asyncWorkerPoolSize"`
+	// 记忆任务聚合窗口（秒），同一用户+会话在该窗口内的多次请求只执行一次记忆分析
+	// 默认30秒，设为0则每次回复后立即执行（向后兼容）
+	DebounceWindowSeconds *int `json:"debounceWindowSeconds,omitempty"`
 
 	// 摘要触发配置
 	SummaryTrigger SummaryTriggerConfig `json:"summaryTrigger"`
@@ -133,11 +141,12 @@ type SummaryCacheConfig struct {
 // DefaultMemoryConfig 返回完整的默认配置
 func DefaultMemoryConfig() *MemoryConfig {
 	return &MemoryConfig{
-		EnableUserMemories:   true,
-		EnableSessionSummary: false,
-		Retrieval:            RetrievalLastN,
-		MemoryLimit:          20,
-		AsyncWorkerPoolSize:  5,
+		EnableUserMemories:    true,
+		EnableSessionSummary:  false,
+		Retrieval:             RetrievalLastN,
+		MemoryLimit:           20,
+		AsyncWorkerPoolSize:   5,
+		DebounceWindowSeconds: ptrTo(30),
 		SummaryTrigger: SummaryTriggerConfig{
 			Strategy:         TriggerSmart,
 			MessageThreshold: 10,

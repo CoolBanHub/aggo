@@ -61,10 +61,15 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, existingMem
 		return false, "", fmt.Errorf("分析用户记忆失败: %w", err)
 	}
 
+	content := strings.TrimSpace(response.Content)
+	if content == "" {
+		return false, "", nil
+	}
+
 	var param UserMemoryAnalyzerParam
-	err = json.Unmarshal([]byte(response.Content), &param)
+	err = json.Unmarshal([]byte(content), &param)
 	if err != nil {
-		return false, "", fmt.Errorf("解析用户记忆响应失败(raw=%q): %w", response.Content, err)
+		return false, "", fmt.Errorf("解析用户记忆响应失败(raw=%q): %w", content, err)
 	}
 
 	// 如果是 noop 操作，不需要更新
