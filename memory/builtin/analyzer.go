@@ -33,6 +33,8 @@ func (u *UserMemoryAnalyzer) SetSystemPrompt(systemPrompt string) {
 // ShouldUpdateMemory 分析对话并生成更新后的记忆内容
 // 返回值: (是否需要更新, 更新后的记忆内容, 错误)
 func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, existingMemory *UserMemory, historyMessages []*ConversationMessage) (bool, string, error) {
+	ctx = withObservationName(ctx, u.cm, "builtin-memory-analyzer")
+
 	// 替换时间占位符
 	prompt := strings.ReplaceAll(u.systemPrompt, "{{current_time}}", time.Now().Format("2006-01-02 15:04"))
 

@@ -42,6 +42,8 @@ func (s *SessionSummaryGenerator) GenerateSummary(ctx context.Context, messages 
 		return existingSummary, nil
 	}
 
+	ctx = withObservationName(ctx, s.cm, "builtin-session-summary")
+
 	// 构建提示消息
 	systemPrompt := strings.ReplaceAll(s.summaryPrompt, "{{current_time}}", time.Now().Format("2006-01-02 15:04"))
 
@@ -90,6 +92,8 @@ func (s *SessionSummaryGenerator) GenerateIncrementalSummary(ctx context.Context
 	if existingSummary == "" {
 		return s.GenerateSummary(ctx, recentMessages, "")
 	}
+
+	ctx = withObservationName(ctx, s.cm, "builtin-session-summary-incremental")
 
 	systemPrompt := strings.ReplaceAll(s.incrementalPrompt, "{{current_time}}", time.Now().Format("2006-01-02 15:04"))
 
