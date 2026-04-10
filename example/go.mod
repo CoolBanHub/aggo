@@ -9,7 +9,7 @@ require (
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.8.6
 	github.com/cloudwego/eino-ext/adk/backend/local v0.2.3
-	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20251111090228-91a10bbc864f
+	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20260331071634-4f359694d2d9
 	github.com/cloudwego/eino-ext/components/document/transformer/splitter/recursive v0.0.0-20260316121515-014a29323bbe
 	github.com/cloudwego/eino-ext/components/model/gemini v0.1.17
 	github.com/google/uuid v1.6.0
@@ -48,7 +48,7 @@ require (
 	github.com/cloudwego/eino-ext/components/indexer/milvus2 v0.0.0-20260331071634-4f359694d2d9 // indirect
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8 // indirect
 	github.com/cloudwego/eino-ext/components/retriever/milvus2 v0.1.0 // indirect
-	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b // indirect
+	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20251124083837-ce2e7e196f9f // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect

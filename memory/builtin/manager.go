@@ -68,11 +68,6 @@ type asyncTask struct {
 func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage, config *MemoryConfig) (*MemoryManager, error) {
 	config = normalizeMemoryConfig(config)
 
-	// 设置表前缀
-	if config.TablePre != "" {
-		memoryStorage.SetTablePrefix(config.TablePre)
-	}
-
 	err := memoryStorage.AutoMigrate()
 	if err != nil {
 		return nil, err

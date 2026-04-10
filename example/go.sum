@@ -64,6 +64,7 @@ github.com/cloudwego/eino-ext/adk/backend/local v0.2.3 h1:kuyWFI6VJFP8xmYrTUNzMr
 github.com/cloudwego/eino-ext/adk/backend/local v0.2.3/go.mod h1:os5Tq5FuSoz/MLqAdZER3ip49Oef9prc0kVsKsPYO48=
 github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20251111090228-91a10bbc864f h1:5KNAOIgm3RL5FBYo5vITVFxtxXgiQ+AQTo2mfPHfh4Y=
 github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20251111090228-91a10bbc864f/go.mod h1:YLoXgSmgquJeT6VaBrP5fTzM7ihm39xoEB/LQ2i9UHc=
+github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20260331071634-4f359694d2d9/go.mod h1:lrNKITZR4QUaYl9Rdz9W6qGOolHRy6mPamEZYA8uz7s=
 github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20260305011506-a75910204c1f h1:tpWc+VWnCwOfLWwW7w6nn3GfA8YvYKTxRUJlS6GiZb4=
 github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20260305011506-a75910204c1f/go.mod h1:HnxTQxmhuev6zaBl92EHUy/vEDWCuoE/OE4cTiF5JCg=
 github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20260305011506-a75910204c1f h1:ZXZN0V6wcIV9ejlFB8mznuKTcPOumvfzk7z9iVqlmBE=
@@ -84,6 +85,7 @@ github.com/cloudwego/eino-ext/components/retriever/milvus2 v0.1.0 h1:1Cu+kqGszQn
 github.com/cloudwego/eino-ext/components/retriever/milvus2 v0.1.0/go.mod h1:je6JMN7aqt+/MVzpZ+C5Y8Egl72FvA5M9SL9FqUXspM=
 github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b h1:QGOp1e7tmQEUtznQ8fD8xUam2d/RECA8oJuPam2212s=
 github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20250409060521-ba8646352e4b/go.mod h1:3U4sve/4FGASns5zXHUfBX4ZTruQEhT1t9F1cNb5czM=
+github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20251124083837-ce2e7e196f9f/go.mod h1:P3zzJTRexY0QKaE9Vn2CmOnCorIMgNzNtler8mw9IQM=
 github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 h1:z0bI5TH3nE+uDQiRhxBQMvk2HswlDUM3xP38+VSgpSQ=
 github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13/go.mod h1:1xMQZ8eE11pkEoTAEy8UlaAY817qGVMvjpDPGSIO3Ns=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=

@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"context"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -38,10 +37,6 @@ func NewGormStorage(db *gorm.DB) (*SQLStore, error) {
 	return store, nil
 }
 
-func (s *SQLStore) SetTablePrefix(prefix string) {
-	s.tableNameProvider = NewTableNameProvider(prefix)
-}
-
 // AutoMigrate 自动迁移表结构
 func (s *SQLStore) AutoMigrate() error {
 	// 使用实例的表名提供器来指定表名
@@ -68,18 +63,4 @@ func (s *SQLStore) Close() error {
 		return err
 	}
 	return sqlDB.Close()
-}
-
-// Health 检查数据库健康状态
-func (s *SQLStore) Health(ctx context.Context) error {
-	if s.db.Config.Dialector.Name() == DialectSQLite {
-		// SQLite简单检查
-		var result int
-		return s.db.WithContext(ctx).Raw("SELECT 1").Scan(&result).Error
-	}
-	sqlDB, err := s.db.DB()
-	if err != nil {
-		return err
-	}
-	return sqlDB.PingContext(ctx)
 }

@@ -112,8 +112,6 @@ type MemoryConfig struct {
 	// 会话摘要缓存配置
 	SummaryCache SummaryCacheConfig `json:"summaryCache"`
 
-	TablePre string `json:"tablePre"`
-
 	// 清理配置
 	Cleanup CleanupConfig `json:"cleanup"`
 }

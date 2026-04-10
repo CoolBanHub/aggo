@@ -10,9 +10,6 @@ import (
 type MemoryStorage interface {
 	AutoMigrate() error
 
-	//SetTablePrefix 设置表前缀
-	SetTablePrefix(prefix string)
-
 	// 用户记忆操作
 
 	// UpsertUserMemory 创建或更新用户记忆（每个用户一条记录）
@@ -56,9 +53,6 @@ type MemoryStorage interface {
 
 	// Close 关闭存储连接
 	Close() error
-
-	// Health 检查存储健康状态
-	Health(ctx context.Context) error
 
 	// 清理操作
 

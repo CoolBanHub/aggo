@@ -43,9 +43,6 @@ func (m *MemoryStore) AutoMigrate() error {
 	return nil
 }
 
-func (m *MemoryStore) SetTablePrefix(prefix string) {
-}
-
 // generateKey 生成会话相关的复合键
 func (m *MemoryStore) generateKey(sessionID, userID string) string {
 	return fmt.Sprintf("%s:%s", sessionID, userID)
@@ -349,12 +346,6 @@ func (m *MemoryStore) DeleteMessages(ctx context.Context, sessionID string, user
 
 // Close 关闭存储连接（内存存储无需关闭）
 func (m *MemoryStore) Close() error {
-	return nil
-}
-
-// Health 检查存储健康状态
-func (m *MemoryStore) Health(ctx context.Context) error {
-	// 内存存储总是健康的
 	return nil
 }
 
