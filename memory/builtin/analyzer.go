@@ -64,7 +64,7 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, existingMem
 		})
 	}
 
-	response, err := u.cm.Generate(ctx, messages)
+	response, err := generateViaStream(ctx, u.cm, messages)
 	if err != nil {
 		return false, "", fmt.Errorf("分析用户记忆失败: %w", err)
 	}
@@ -86,6 +86,15 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, existingMem
 	}
 
 	return true, param.Memory, nil
+}
+
+// generateViaStream 通过流式接口调用模型并拼接输出，等价于 Generate 但避免长耗时请求被中间代理断开。
+func generateViaStream(ctx context.Context, cm model.ToolCallingChatModel, messages []*schema.Message) (*schema.Message, error) {
+	stream, err := cm.Stream(ctx, messages)
+	if err != nil {
+		return nil, err
+	}
+	return schema.ConcatMessageStream(stream)
 }
 
 func buildConversationHistoryPlainText(historyMessages []*ConversationMessage) string {

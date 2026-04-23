@@ -73,8 +73,8 @@ func (s *SessionSummaryGenerator) GenerateSummary(ctx context.Context, messages 
 		})
 	}
 
-	// 生成摘要
-	response, err := s.cm.Generate(ctx, promptMessages)
+	// 生成摘要（使用流式请求，避免长耗时下连接被中断）
+	response, err := generateViaStream(ctx, s.cm, promptMessages)
 	if err != nil {
 		return "", fmt.Errorf("生成会话摘要失败: %w", err)
 	}
@@ -124,7 +124,7 @@ func (s *SessionSummaryGenerator) GenerateIncrementalSummary(ctx context.Context
 		})
 	}
 
-	response, err := s.cm.Generate(ctx, promptMessages)
+	response, err := generateViaStream(ctx, s.cm, promptMessages)
 	if err != nil {
 		return existingSummary, fmt.Errorf("生成增量摘要失败: %w", err)
 	}
