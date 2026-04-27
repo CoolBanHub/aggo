@@ -64,3 +64,11 @@ func (s *SQLStore) Close() error {
 	}
 	return sqlDB.Close()
 }
+
+func (s *SQLStore) ConversationDB() *gorm.DB {
+	return s.db
+}
+
+func (s *SQLStore) ConversationMessageTableName() string {
+	return s.tableNameProvider.GetConversationMessageTableName()
+}

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/CoolBanHub/aggo/memory/builtin"
+	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/gookit/slog"
 )
@@ -77,6 +79,79 @@ func (s *SQLStore) GetMessages(ctx context.Context, sessionID string, userID str
 		messages[i], messages[j] = messages[j], messages[i]
 	}
 
+	return messages, nil
+}
+
+func (s *SQLStore) SearchMessagesByKeywords(ctx context.Context, q *builtinsearch.SearchQuery) ([]*builtin.ConversationMessage, error) {
+	if q == nil {
+		return nil, errors.New("搜索参数不能为空")
+	}
+	if q.SessionID == "" {
+		return nil, errors.New("会话ID不能为空")
+	}
+	if q.UserID == "" {
+		return nil, errors.New("用户ID不能为空")
+	}
+
+	keywords := q.Keywords
+	if len(keywords) == 0 {
+		keywords = builtinsearch.InferKeywords(q.Query)
+	}
+	if len(keywords) == 0 {
+		return []*builtin.ConversationMessage{}, nil
+	}
+
+	query := s.db.WithContext(ctx).
+		Table(s.tableNameProvider.GetConversationMessageTableName()).
+		Where("session_id = ? AND user_id = ?", q.SessionID, q.UserID)
+
+	if role := strings.TrimSpace(q.Role); role != "" {
+		query = query.Where("role = ?", role)
+	}
+	if q.Since != nil {
+		query = query.Where("created_at >= ?", q.Since)
+	}
+	if q.Until != nil {
+		query = query.Where("created_at <= ?", q.Until)
+	}
+
+	switch builtinsearch.NormalizeMatch(q.Match) {
+	case builtinsearch.MatchAll:
+		for _, keyword := range keywords {
+			keyword = strings.TrimSpace(keyword)
+			if keyword == "" {
+				continue
+			}
+			query = query.Where("content LIKE ?", "%"+keyword+"%")
+		}
+	default:
+		orQuery := s.db
+		for _, keyword := range keywords {
+			keyword = strings.TrimSpace(keyword)
+			if keyword == "" {
+				continue
+			}
+			orQuery = orQuery.Or("content LIKE ?", "%"+keyword+"%")
+		}
+		query = query.Where(orQuery)
+	}
+
+	query = query.Order("created_at DESC").Order("id DESC")
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+	query = query.Limit(limit)
+
+	var models []ConversationMessageModel
+	if err := query.Find(&models).Error; err != nil {
+		return nil, fmt.Errorf("关键词搜索消息失败: %v", err)
+	}
+
+	messages := make([]*builtin.ConversationMessage, 0, len(models))
+	for _, model := range models {
+		messages = append(messages, model.ToConversationMessage())
+	}
 	return messages, nil
 }
 

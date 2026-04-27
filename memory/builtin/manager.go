@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gookit/slog"
@@ -23,6 +24,7 @@ type MemoryManager struct {
 
 	userMemoryAnalyzer      *UserMemoryAnalyzer
 	sessionSummaryGenerator *SessionSummaryGenerator
+	searcher                builtinsearch.Searcher
 
 	// 摘要触发管理
 	summaryTrigger *SummaryTriggerManager
@@ -62,6 +64,7 @@ type asyncTask struct {
 	taskType  string // "memory" 或 "summary"
 	userID    string
 	sessionID string
+	message   *ConversationMessage
 }
 
 // NewMemoryManager 创建新的记忆管理器
@@ -91,6 +94,13 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 		cleanupCtx:     cleanupCtx,
 		cleanupCancel:  cleanupCancel,
 		debounceWindow: debounceWindowFromConfig(config),
+	}
+
+	manager.searcher, err = newSearcher(memoryStorage, config.Search)
+	if err != nil {
+		cancel()
+		cleanupCancel()
+		return nil, err
 	}
 
 	// 初始化goroutine池
@@ -279,6 +289,15 @@ func (m *MemoryManager) processAsyncTask(task asyncTask) {
 		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), 30*time.Second)
 		defer cancel()
 		m.analyzeAndCreateUserMemory(ctx, task.userID, task.sessionID)
+	case "index":
+		if task.message == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), 30*time.Second)
+		defer cancel()
+		if err := m.searcher.Index(ctx, toSearchMessage(task.message)); err != nil {
+			slog.Errorf("异步建立搜索索引失败: sessionID=%s, userID=%s, err=%v\n", task.sessionID, task.userID, err)
+		}
 	case "summary":
 		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), 30*time.Second)
 		defer cancel()
@@ -582,7 +601,11 @@ func (m *MemoryManager) GetSessionSummary(ctx context.Context, sessionID, userID
 
 // SaveMessage 保存消息
 func (m *MemoryManager) SaveMessage(ctx context.Context, message *ConversationMessage) error {
-	return m.storage.SaveMessage(ctx, message)
+	if err := m.storage.SaveMessage(ctx, message); err != nil {
+		return err
+	}
+	enqueueIndexTask(m, message)
+	return nil
 }
 
 // GetMessages 获取会话消息
@@ -893,6 +916,7 @@ func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
 	if config.Cleanup.MessageHistoryLimit <= 0 {
 		config.Cleanup.MessageHistoryLimit = defaults.Cleanup.MessageHistoryLimit
 	}
+	config.Search = normalizeSearchConfig(config.Search)
 	return config
 }
 

@@ -3,6 +3,9 @@ package builtin
 import (
 	"context"
 	"time"
+
+	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
+	"gorm.io/gorm"
 )
 
 // MemoryStorage 记忆存储接口
@@ -79,4 +82,18 @@ type CursorMessageStorage interface {
 	// GetMessageCountAfter 获取游标之后的会话消息数量（避免加载完整消息列表）。
 	// 语义与 GetMessagesAfter 相同，但只返回数量。
 	GetMessageCountAfter(ctx context.Context, sessionID string, userID string, afterMessageID string, afterTime time.Time) (int, error)
+}
+
+// SearchMessageStorage is an optional extension for stores that can perform
+// keyword search efficiently in the storage layer.
+type SearchMessageStorage interface {
+	SearchMessagesByKeywords(ctx context.Context, q *builtinsearch.SearchQuery) ([]*ConversationMessage, error)
+}
+
+// GormConversationStorage exposes the underlying gorm DB and message table
+// so builtin search can construct the default vector store without depending
+// on concrete storage implementations.
+type GormConversationStorage interface {
+	ConversationDB() *gorm.DB
+	ConversationMessageTableName() string
 }

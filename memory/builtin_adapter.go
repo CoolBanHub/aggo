@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/CoolBanHub/aggo/memory/builtin"
+	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -63,12 +64,12 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 	if cfg.EnableSessionSummary && sessionSummary != nil {
 		history, err := p.MemoryManager.GetMessagesAfterSummary(ctx, req.SessionID, req.UserID, limit)
 		if err == nil && len(history) > 0 {
-			result.HistoryMessages = history
+			result.HistoryMessages = decorateHistoryMessages(history)
 		}
 	} else {
 		history, err := p.MemoryManager.GetMessages(ctx, req.SessionID, req.UserID, limit)
 		if err == nil && len(history) > 0 {
-			result.HistoryMessages = history
+			result.HistoryMessages = decorateHistoryMessages(history)
 		}
 	}
 
@@ -109,6 +110,10 @@ func (p *builtinProvider) Close() error {
 	return p.MemoryManager.Close()
 }
 
+func (p *builtinProvider) SearchMessages(ctx context.Context, q *builtinsearch.SearchQuery) ([]*builtinsearch.SearchHit, error) {
+	return p.MemoryManager.SearchMessages(ctx, q)
+}
+
 // extractTextFromParts 从多部分内容中提取纯文本，拼接为一个字符串
 func extractTextFromParts(parts []schema.MessageInputPart) string {
 	var texts []string
@@ -118,6 +123,14 @@ func extractTextFromParts(parts []schema.MessageInputPart) string {
 		}
 	}
 	return strings.Join(texts, "\n")
+}
+
+func decorateHistoryMessages(history []*schema.Message) []*schema.Message {
+	decorated := make([]*schema.Message, 0, len(history))
+	for _, msg := range history {
+		decorated = append(decorated, builtin.PrefixHistoryTimestamp(msg))
+	}
+	return decorated
 }
 
 func init() {

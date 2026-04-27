@@ -70,8 +70,10 @@ type ConversationMessageModel struct {
 	// 保留Content字段用于向后兼容
 	Content string `gorm:"type:text" json:"content,omitempty"`
 	// 多部分内容，使用自定义类型直接存储
-	Parts     MessageParts `gorm:"type:text" json:"parts,omitempty"`
-	CreatedAt time.Time    `gorm:"autoCreateTime;index:idx_user_session" json:"createdAt"`
+	Parts        MessageParts `gorm:"type:text" json:"parts,omitempty"`
+	Embedding    []byte       `gorm:"type:blob" json:"embedding,omitempty"`
+	EmbeddingDim int          `json:"embeddingDim,omitempty"`
+	CreatedAt    time.Time    `gorm:"autoCreateTime;index:idx_user_session" json:"createdAt"`
 }
 
 // 模型转换函数

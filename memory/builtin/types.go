@@ -3,7 +3,16 @@ package builtin
 import (
 	"time"
 
+	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
 	"github.com/cloudwego/eino/schema"
+)
+
+const (
+	MessageExtraIDKey        = "aggo_message_id"
+	MessageExtraSessionIDKey = "aggo_session_id"
+	MessageExtraUserIDKey    = "aggo_user_id"
+	MessageExtraRoleKey      = "aggo_role"
+	MessageExtraCreatedAtKey = "aggo_created_at"
 )
 
 // ptrTo returns a pointer to the given value.
@@ -23,6 +32,15 @@ func (m *ConversationMessage) ToSchemaMessage() *schema.Message {
 		copy(multiContent, m.Parts)
 		msg.UserInputMultiContent = multiContent
 		msg.Content = ""
+	}
+	msg.Extra = map[string]any{
+		MessageExtraIDKey:        m.ID,
+		MessageExtraSessionIDKey: m.SessionID,
+		MessageExtraUserIDKey:    m.UserID,
+		MessageExtraRoleKey:      m.Role,
+	}
+	if !m.CreatedAt.IsZero() {
+		msg.Extra[MessageExtraCreatedAtKey] = m.CreatedAt.Format(time.RFC3339)
 	}
 	return msg
 }
@@ -114,6 +132,9 @@ type MemoryConfig struct {
 
 	// 清理配置
 	Cleanup CleanupConfig `json:"cleanup"`
+
+	// 搜索配置。nil 时按 keyword 默认行为初始化。
+	Search *SearchConfig `json:"search,omitempty"`
 }
 
 // CleanupConfig 清理相关配置
@@ -159,6 +180,9 @@ func DefaultMemoryConfig() *MemoryConfig {
 			SessionRetentionTime:   168,  // 7天
 			MessageHistoryLimit:    1000, // 1000条
 			CleanupInterval:        12,   // 12小时
+		},
+		Search: &SearchConfig{
+			Mode: builtinsearch.ModeKeyword,
 		},
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/CoolBanHub/aggo/memory/builtin"
+	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/gookit/slog"
 )
@@ -263,6 +264,62 @@ func (m *MemoryStore) GetMessages(ctx context.Context, sessionID string, userID 
 	}
 
 	return messages, nil
+}
+
+func (m *MemoryStore) SearchMessagesByKeywords(ctx context.Context, q *builtinsearch.SearchQuery) ([]*builtin.ConversationMessage, error) {
+	if q == nil {
+		return nil, errors.New("搜索参数不能为空")
+	}
+
+	messages, err := m.GetMessages(ctx, q.SessionID, q.UserID, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	keywords := q.Keywords
+	if len(keywords) == 0 {
+		keywords = builtinsearch.InferKeywords(q.Query)
+	}
+	if len(keywords) == 0 {
+		return []*builtin.ConversationMessage{}, nil
+	}
+
+	filtered := make([]*builtin.ConversationMessage, 0, len(messages))
+	for _, msg := range messages {
+		if q.Role != "" && msg.Role != q.Role {
+			continue
+		}
+		if q.Since != nil && msg.CreatedAt.Before(*q.Since) {
+			continue
+		}
+		if q.Until != nil && msg.CreatedAt.After(*q.Until) {
+			continue
+		}
+
+		text := strings.TrimSpace(msg.Content)
+		if text == "" {
+			text = builtinsearch.SearchText(&builtinsearch.Message{
+				Content: msg.Content,
+				Parts:   msg.Parts,
+			})
+		}
+		if _, ok := builtinsearch.MatchesKeywords(text, keywords, q.Match); !ok {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, nil
 }
 
 // GetMessagesAfter 获取游标之后的会话消息历史。
