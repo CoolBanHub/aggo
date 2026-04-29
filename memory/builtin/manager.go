@@ -886,6 +886,9 @@ func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
 	if config.MemoryLimit <= 0 {
 		config.MemoryLimit = defaults.MemoryLimit
 	}
+	if config.SummaryRecentMessageLimit < 0 {
+		config.SummaryRecentMessageLimit = 0
+	}
 	if config.AsyncWorkerPoolSize <= 0 {
 		config.AsyncWorkerPoolSize = defaults.AsyncWorkerPoolSize
 	}

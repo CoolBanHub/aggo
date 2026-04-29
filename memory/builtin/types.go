@@ -118,6 +118,9 @@ type MemoryConfig struct {
 	Retrieval MemoryRetrieval `json:"retrieval"`
 	// 记忆数量限制
 	MemoryLimit int `json:"memoryLimit"`
+	// 启用会话摘要时，除摘要游标之后的消息外，额外保留最近N条原始消息作为短期上下文。
+	// 默认为0，表示保持仅注入摘要游标之后消息的旧行为。
+	SummaryRecentMessageLimit int `json:"summaryRecentMessageLimit,omitempty"`
 	// 异步处理的goroutine池大小
 	AsyncWorkerPoolSize int `json:"asyncWorkerPoolSize"`
 	// 记忆任务聚合窗口（秒），同一用户+会话在该窗口内的多次请求只执行一次记忆分析

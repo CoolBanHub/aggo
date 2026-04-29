@@ -133,6 +133,7 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 - `EnableSessionSummary`: 是否启用会话摘要
 - `Retrieval`: 检索方式，支持 `RetrievalLastN`、`RetrievalFirstN`、`RetrievalSemantic`
 - `MemoryLimit`: 历史消息检索上限
+- `SummaryRecentMessageLimit`: 启用会话摘要时，除摘要游标之后的消息外，额外保留最近 N 条原始消息作为短期上下文；默认 0，保持旧行为
 - `AsyncWorkerPoolSize`: 异步处理 worker 数量
 - `SummaryTrigger`: 摘要触发策略
 - `SummaryCache`: 会话摘要缓存配置，支持 `TTLSeconds` 与 `MaxEntries`
@@ -147,6 +148,7 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 
 - 已生成的会话摘要会作为 system message 注入
 - 检索时只补充“摘要游标之后”的未摘要消息尾巴
+- 如果设置了 `SummaryRecentMessageLimit`，会同时注入最近 N 条原始消息并按消息 ID 去重，避免刚被摘要折叠的最近对话丢失原文细节
 - 摘要更新成功后会持久化最后一条已纳入摘要的消息游标，避免重启后重复摘要同一批历史消息
 - provider 会对会话摘要做本地短 TTL 缓存以减少摘要表读取；不会缓存完整 history，原始消息尾巴仍按游标从存储层查询
 

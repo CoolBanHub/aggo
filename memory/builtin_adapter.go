@@ -3,7 +3,9 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
@@ -63,7 +65,16 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 	}
 	if cfg.EnableSessionSummary && sessionSummary != nil {
 		history, err := p.MemoryManager.GetMessagesAfterSummary(ctx, req.SessionID, req.UserID, limit)
-		if err == nil && len(history) > 0 {
+		if err != nil {
+			history = nil
+		}
+		if cfg.SummaryRecentMessageLimit > 0 {
+			recent, recentErr := p.MemoryManager.GetMessages(ctx, req.SessionID, req.UserID, cfg.SummaryRecentMessageLimit)
+			if recentErr == nil && len(recent) > 0 {
+				history = mergeHistoryMessages(maxInt(limit, cfg.SummaryRecentMessageLimit), recent, history)
+			}
+		}
+		if len(history) > 0 {
 			result.HistoryMessages = decorateHistoryMessages(history)
 		}
 	} else {
@@ -131,6 +142,92 @@ func decorateHistoryMessages(history []*schema.Message) []*schema.Message {
 		decorated = append(decorated, builtin.PrefixHistoryTimestamp(msg))
 	}
 	return decorated
+}
+
+func mergeHistoryMessages(limit int, histories ...[]*schema.Message) []*schema.Message {
+	type item struct {
+		msg     *schema.Message
+		order   int
+		created time.Time
+		hasTime bool
+	}
+
+	items := make([]item, 0)
+	seen := make(map[string]struct{})
+	order := 0
+	for _, history := range histories {
+		for _, msg := range history {
+			if msg == nil {
+				continue
+			}
+			if id := messageExtraString(msg, builtin.MessageExtraIDKey); id != "" {
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
+			}
+			created, hasTime := messageCreatedAt(msg)
+			items = append(items, item{
+				msg:     msg,
+				order:   order,
+				created: created,
+				hasTime: hasTime,
+			})
+			order++
+		}
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].hasTime && items[j].hasTime && !items[i].created.Equal(items[j].created) {
+			return items[i].created.Before(items[j].created)
+		}
+		return items[i].order < items[j].order
+	})
+
+	if limit > 0 && len(items) > limit {
+		items = items[len(items)-limit:]
+	}
+
+	merged := make([]*schema.Message, 0, len(items))
+	for _, item := range items {
+		merged = append(merged, item.msg)
+	}
+	return merged
+}
+
+func messageExtraString(msg *schema.Message, key string) string {
+	if msg == nil || msg.Extra == nil {
+		return ""
+	}
+	value, ok := msg.Extra[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+}
+
+func messageCreatedAt(msg *schema.Message) (time.Time, bool) {
+	raw := messageExtraString(msg, builtin.MessageExtraCreatedAtKey)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	ts, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return ts, true
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func init() {
