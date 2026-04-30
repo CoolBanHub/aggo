@@ -5,7 +5,6 @@ go 1.24.6
 require (
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.8.6
-	github.com/cloudwego/eino-ext/callbacks/langfuse v0.0.0-20260331071634-4f359694d2d9
 	github.com/cloudwego/eino-ext/components/document/loader/file v0.0.0-20260305011506-a75910204c1f
 	github.com/cloudwego/eino-ext/components/document/loader/url v0.0.0-20260305011506-a75910204c1f
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260305011506-a75910204c1f
@@ -14,7 +13,6 @@ require (
 	github.com/cloudwego/eino-ext/components/retriever/milvus2 v0.1.0
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13
 	github.com/go-co-op/gocron/v2 v2.19.1
-	github.com/go-resty/resty/v2 v2.17.2
 	github.com/google/uuid v1.6.0
 	github.com/gookit/slog v0.6.0
 	github.com/meguminnnnnnnnn/go-openai v0.1.1
@@ -38,7 +36,6 @@ require (
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/cloudwego/eino-ext/components/document/parser/html v0.0.0-20251117090452-bd6375a0b3cf // indirect
-	github.com/cloudwego/eino-ext/libs/acl/langfuse v0.0.0-20251124083837-ce2e7e196f9f // indirect
 	github.com/cockroachdb/errors v1.9.1 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect

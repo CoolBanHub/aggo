@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/CoolBanHub/aggo/agent"
 	cronPkg "github.com/CoolBanHub/aggo/cron"
@@ -15,6 +17,7 @@ import (
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	"github.com/CoolBanHub/aggo/memory/builtin/storage"
 	"github.com/CoolBanHub/aggo/model"
+	"github.com/CoolBanHub/aggo/pkg/langfuse"
 	cronTool "github.com/CoolBanHub/aggo/tools/cron"
 	"github.com/CoolBanHub/aggo/tools/shell"
 	"github.com/CoolBanHub/aggo/utils"
@@ -22,6 +25,7 @@ import (
 	"github.com/cloudwego/eino-ext/components/tool/httprequest"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/adk/middlewares/skill"
+	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/schema"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/sqlite"
@@ -34,6 +38,12 @@ func main() {
 
 	if err := godotenv.Load(); err != nil {
 		log.Printf("警告: 无法加载 .env 文件: %v", err)
+	}
+
+	closeLangfuse := setupLangfuse()
+	langfuseEnabled := closeLangfuse != nil
+	if closeLangfuse != nil {
+		defer closeLangfuse()
 	}
 
 	chatModel, err := model.NewChatModel(
@@ -162,7 +172,22 @@ func main() {
 	sessionID := utils.GetULID()
 	for i, msg := range conversations {
 		fmt.Printf("【问题 %d】: %s\n", i+1, msg)
-		iter := runner.Run(ctx, []*schema.Message{
+
+		runCtx := ctx
+		if langfuseEnabled {
+			runCtx = langfuse.SetTrace(ctx,
+				langfuse.WithID(utils.GetULID()),
+				langfuse.WithName("claw_conversation_turn"),
+				langfuse.WithUserID(userID),
+				langfuse.WithSessionID(sessionID),
+				langfuse.WithTags("example", "claw"),
+				langfuse.WithMetadata(map[string]string{
+					"turn": fmt.Sprintf("%d", i+1),
+				}),
+			)
+		}
+
+		iter := runner.Run(runCtx, []*schema.Message{
 			schema.UserMessage(msg),
 		}, adk.WithSessionValues(map[string]any{
 			"userID":    userID,
@@ -188,4 +213,57 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
+}
+
+func setupLangfuse() func() {
+	host := firstEnv("LANGFUSE_HOST", "LANGFUSE_BASE_URL")
+	publicKey := strings.TrimSpace(os.Getenv("LANGFUSE_PUBLIC_KEY"))
+	secretKey := strings.TrimSpace(os.Getenv("LANGFUSE_SECRET_KEY"))
+	if host == "" || publicKey == "" || secretKey == "" {
+		log.Println("提示: 未配置 Langfuse，跳过初始化")
+		return nil
+	}
+
+	handler, closeFn, err := langfuse.NewHandler(langfuse.Config{
+		ClientConfig: langfuse.ClientConfig{
+			Host:            host,
+			PublicKey:       publicKey,
+			SecretKey:       secretKey,
+			Release:         strings.TrimSpace(os.Getenv("LANGFUSE_RELEASE")),
+			Environment:     strings.TrimSpace(os.Getenv("LANGFUSE_ENVIRONMENT")),
+			RequestTimeout:  10 * time.Second,
+			LogIngestErrors: true,
+			IngestionMetadata: map[string]any{
+				"sdk":         "aggo-example-claw",
+				"integration": "eino",
+			},
+		},
+		Name: firstNonEmpty(os.Getenv("LANGFUSE_TRACE_NAME"), "claw_agent"),
+	})
+	if err != nil {
+		log.Printf("初始化 Langfuse 失败: %v", err)
+		return nil
+	}
+
+	callbacks.AppendGlobalHandlers(handler)
+	log.Println("Langfuse 已启用")
+	return closeFn
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
