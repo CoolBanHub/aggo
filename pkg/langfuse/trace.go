@@ -26,6 +26,21 @@ type traceOptions struct {
 	Output      any
 }
 
+type TraceContext struct {
+	ID          string
+	Name        string
+	UserID      string
+	SessionID   string
+	Release     string
+	Version     string
+	Environment string
+	Metadata    map[string]string
+	Tags        []string
+	Public      *bool
+	Input       any
+	Output      any
+}
+
 type traceState struct {
 	Body           traceBody
 	InputExplicit  bool
@@ -41,6 +56,27 @@ func SetTrace(ctx context.Context, opts ...TraceOption) context.Context {
 		}
 	}
 	return context.WithValue(ctx, traceOptionsKey{}, options)
+}
+
+func CurrentTrace(ctx context.Context) TraceContext {
+	opts, _ := ctx.Value(traceOptionsKey{}).(*traceOptions)
+	if opts == nil {
+		return TraceContext{}
+	}
+	return TraceContext{
+		ID:          opts.ID,
+		Name:        opts.Name,
+		UserID:      opts.UserID,
+		SessionID:   opts.SessionID,
+		Release:     opts.Release,
+		Version:     opts.Version,
+		Environment: opts.Environment,
+		Metadata:    cloneStringMap(opts.Metadata),
+		Tags:        append([]string(nil), opts.Tags...),
+		Public:      cloneBoolPtr(opts.Public),
+		Input:       opts.Input,
+		Output:      opts.Output,
+	}
 }
 
 func WithID(id string) TraceOption {
@@ -136,4 +172,23 @@ func (h *Handler) initTrace(ctx context.Context, defaultName string) (*traceStat
 		InputExplicit:  opts.Input != nil,
 		OutputExplicit: opts.Output != nil,
 	}, true
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneBoolPtr(in *bool) *bool {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
 }
