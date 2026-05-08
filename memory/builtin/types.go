@@ -126,6 +126,9 @@ type MemoryConfig struct {
 	// 记忆任务聚合窗口（秒），同一用户+会话在该窗口内的多次请求只执行一次记忆分析
 	// 默认30秒，设为0则每次回复后立即执行（向后兼容）
 	DebounceWindowSeconds *int `json:"debounceWindowSeconds,omitempty"`
+	// 异步任务执行超时时间（秒），用于用户记忆分析、会话摘要和索引任务。
+	// 默认120秒；设为0或负数时使用默认值。
+	AsyncTaskTimeoutSeconds int `json:"asyncTaskTimeoutSeconds,omitempty"`
 
 	// 摘要触发配置
 	SummaryTrigger SummaryTriggerConfig `json:"summaryTrigger"`
@@ -163,12 +166,13 @@ type SummaryCacheConfig struct {
 // DefaultMemoryConfig 返回完整的默认配置
 func DefaultMemoryConfig() *MemoryConfig {
 	return &MemoryConfig{
-		EnableUserMemories:    true,
-		EnableSessionSummary:  false,
-		Retrieval:             RetrievalLastN,
-		MemoryLimit:           20,
-		AsyncWorkerPoolSize:   5,
-		DebounceWindowSeconds: ptrTo(30),
+		EnableUserMemories:      true,
+		EnableSessionSummary:    false,
+		Retrieval:               RetrievalLastN,
+		MemoryLimit:             20,
+		AsyncWorkerPoolSize:     5,
+		DebounceWindowSeconds:   ptrTo(30),
+		AsyncTaskTimeoutSeconds: 120,
 		SummaryTrigger: SummaryTriggerConfig{
 			Strategy:         TriggerSmart,
 			MessageThreshold: 10,

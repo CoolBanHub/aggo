@@ -135,6 +135,7 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 - `MemoryLimit`: 历史消息检索上限
 - `SummaryRecentMessageLimit`: 启用会话摘要时，除摘要游标之后的消息外，额外保留最近 N 条原始消息作为短期上下文；默认 0，保持旧行为
 - `AsyncWorkerPoolSize`: 异步处理 worker 数量
+- `AsyncTaskTimeoutSeconds`: 异步任务执行超时时间，默认 120 秒
 - `SummaryTrigger`: 摘要触发策略
 - `SummaryCache`: 会话摘要缓存配置，支持 `TTLSeconds` 与 `MaxEntries`
 - `Cleanup`: 定期清理配置

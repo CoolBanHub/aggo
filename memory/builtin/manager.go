@@ -286,20 +286,20 @@ func (m *MemoryManager) performPeriodicCleanup(parentCtx context.Context) {
 func (m *MemoryManager) processAsyncTask(task asyncTask) {
 	switch task.taskType {
 	case "memory":
-		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), 30*time.Second)
+		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), m.asyncTaskTimeout())
 		defer cancel()
 		m.analyzeAndCreateUserMemory(ctx, task.userID, task.sessionID)
 	case "index":
 		if task.message == nil {
 			return
 		}
-		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), 30*time.Second)
+		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), m.asyncTaskTimeout())
 		defer cancel()
 		if err := m.searcher.Index(ctx, toSearchMessage(task.message)); err != nil {
 			slog.Errorf("异步建立搜索索引失败: sessionID=%s, userID=%s, err=%v\n", task.sessionID, task.userID, err)
 		}
 	case "summary":
-		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), 30*time.Second)
+		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), m.asyncTaskTimeout())
 		defer cancel()
 		err := m.updateSessionSummary(ctx, task.userID, task.sessionID)
 		if err != nil {
@@ -877,6 +877,10 @@ func debounceWindowFromConfig(config *MemoryConfig) time.Duration {
 	return 30 * time.Second
 }
 
+func (m *MemoryManager) asyncTaskTimeout() time.Duration {
+	return time.Duration(m.config.AsyncTaskTimeoutSeconds) * time.Second
+}
+
 func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
 	if config == nil {
 		config = DefaultMemoryConfig()
@@ -894,6 +898,9 @@ func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
 	}
 	if config.DebounceWindowSeconds == nil {
 		config.DebounceWindowSeconds = defaults.DebounceWindowSeconds
+	}
+	if config.AsyncTaskTimeoutSeconds <= 0 {
+		config.AsyncTaskTimeoutSeconds = defaults.AsyncTaskTimeoutSeconds
 	}
 	if config.SummaryTrigger.MessageThreshold <= 0 {
 		config.SummaryTrigger.MessageThreshold = defaults.SummaryTrigger.MessageThreshold
