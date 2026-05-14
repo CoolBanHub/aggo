@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 
+	"github.com/CoolBanHub/aggo/pkg/ailens360"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 )
@@ -33,6 +34,11 @@ func getChatByOpenai(o *Option) (model.ToolCallingChatModel, error) {
 	if o.MaxTokens > 0 {
 		param.MaxTokens = &o.MaxTokens
 	}
+
+	// If a global AILens360 decorator is installed (via ailens360.SetGlobal),
+	// route this chat model through the proxy and inject the telemetry-header
+	// RoundTripper. No-op when not configured.
+	ailens360.ApplyGlobal(param)
 
 	cm, err := openai.NewChatModel(context.Background(), param)
 	return cm, err
