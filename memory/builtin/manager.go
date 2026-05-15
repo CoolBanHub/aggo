@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -101,6 +102,16 @@ func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage
 		cancel()
 		cleanupCancel()
 		return nil, err
+	}
+
+	// 事件检索模式需要底层存储实现 UserMemoryEventStorage；否则降级提示并关闭该模式。
+	if config.EnableEventSearch {
+		if _, ok := memoryStorage.(UserMemoryEventStorage); !ok {
+			slog.Warnf("memory: EnableEventSearch=true 但当前 storage 未实现 UserMemoryEventStorage，将自动退化为兼容模式")
+			config.EnableEventSearch = false
+		} else {
+			manager.userMemoryAnalyzer.SetUseEventSearchPrompt(true)
+		}
 	}
 
 	// 初始化goroutine池
@@ -423,37 +434,92 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 		return
 	}
 
-	// 分析对话并生成更新后的记忆
-	needUpdate, newMemoryContent, err := m.userMemoryAnalyzer.ShouldUpdateMemory(
-		ctx,
-		existingMemory,
-		historyMessages,
-	)
+	useEvent := m.config.EnableEventSearch
+	req := AnalyzeRequest{
+		ExistingMemory:  existingMemory,
+		HistoryMessages: historyMessages,
+		UseEventSearch:  &useEvent,
+	}
+	if useEvent {
+		// 提供最近事件作为去重参考；条数比注入 system 时再多一点，给 LLM 足够上下文判断重复。
+		recentLimit := m.config.RecentEventLimit * 2
+		if recentLimit <= 0 {
+			recentLimit = 20
+		}
+		if recent, err := m.ListRecentUserMemoryEvents(ctx, userID, recentLimit); err == nil {
+			req.RecentEvents = recent
+		} else {
+			slog.Errorf("获取最近用户记忆事件失败: %v", err)
+		}
+	}
+
+	result, err := m.userMemoryAnalyzer.AnalyzeOnce(ctx, req)
 	if err != nil {
 		slog.Errorf("分析用户记忆失败: %v\n", err)
 		return
 	}
-
-	// 如果不需要更新，直接返回
-	if !needUpdate {
+	if result == nil || !result.NeedUpdate {
 		return
 	}
 
-	// 保存更新后的记忆
-	mem := &UserMemory{
-		UserID: userID,
-		Memory: newMemoryContent,
+	// 短文档为空表示用户没有触发约定/基础信息更新，但事件可能仍然需要写入。
+	if strings.TrimSpace(result.Memory) != "" {
+		mem := &UserMemory{
+			UserID: userID,
+			Memory: result.Memory,
+		}
+		if existingMemory != nil {
+			mem.CreatedAt = existingMemory.CreatedAt
+		}
+		if err := m.storage.UpsertUserMemory(ctx, mem); err != nil {
+			slog.Errorf("保存用户记忆失败: %v\n", err)
+		}
 	}
 
-	// 如果有现有记忆，保留创建时间
-	if existingMemory != nil {
-		mem.CreatedAt = existingMemory.CreatedAt
+	if useEvent && len(result.Events) > 0 {
+		for _, evt := range result.Events {
+			if evt == nil {
+				continue
+			}
+			evt.UserID = userID
+			if err := m.SaveUserMemoryEvent(ctx, evt); err != nil {
+				slog.Errorf("保存用户记忆事件失败: %v\n", err)
+			}
+		}
 	}
+}
 
-	err = m.storage.UpsertUserMemory(ctx, mem)
-	if err != nil {
-		slog.Errorf("保存用户记忆失败: %v\n", err)
+// userMemoryEventStorage 获取实现了事件存储接口的底层存储，未实现时返回 nil。
+func (m *MemoryManager) userMemoryEventStorage() UserMemoryEventStorage {
+	s, _ := m.storage.(UserMemoryEventStorage)
+	return s
+}
+
+// SaveUserMemoryEvent 保存一条用户记忆事件。底层 storage 未实现事件接口时返回错误。
+func (m *MemoryManager) SaveUserMemoryEvent(ctx context.Context, event *UserMemoryEvent) error {
+	store := m.userMemoryEventStorage()
+	if store == nil {
+		return fmt.Errorf("当前 storage 未实现 UserMemoryEventStorage")
 	}
+	return store.SaveUserMemoryEvent(ctx, event)
+}
+
+// ListRecentUserMemoryEvents 返回用户最近的事件
+func (m *MemoryManager) ListRecentUserMemoryEvents(ctx context.Context, userID string, limit int) ([]*UserMemoryEvent, error) {
+	store := m.userMemoryEventStorage()
+	if store == nil {
+		return nil, nil
+	}
+	return store.ListRecentUserMemoryEvents(ctx, userID, limit)
+}
+
+// SearchUserMemoryEvents 按条件检索用户事件
+func (m *MemoryManager) SearchUserMemoryEvents(ctx context.Context, query *UserMemoryEventQuery) ([]*UserMemoryEvent, error) {
+	store := m.userMemoryEventStorage()
+	if store == nil {
+		return nil, fmt.Errorf("当前 storage 未实现 UserMemoryEventStorage")
+	}
+	return store.SearchUserMemoryEvents(ctx, query)
 }
 
 // shouldTriggerSummaryUpdate 判断是否需要触发摘要更新
@@ -892,6 +958,11 @@ func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
 	}
 	if config.SummaryRecentMessageLimit < 0 {
 		config.SummaryRecentMessageLimit = 0
+	}
+	if config.RecentEventLimit < 0 {
+		config.RecentEventLimit = 0
+	} else if config.RecentEventLimit == 0 && config.EnableEventSearch {
+		config.RecentEventLimit = defaults.RecentEventLimit
 	}
 	if config.AsyncWorkerPoolSize <= 0 {
 		config.AsyncWorkerPoolSize = defaults.AsyncWorkerPoolSize

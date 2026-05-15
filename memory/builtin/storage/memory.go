@@ -29,6 +29,9 @@ type MemoryStore struct {
 
 	// 对话消息存储 map[sessionID+userID][]*ConversationMessage
 	messages map[string][]*builtin.ConversationMessage
+
+	// 用户记忆事件存储 map[userID][]*UserMemoryEvent
+	userMemoryEvents map[string][]*builtin.UserMemoryEvent
 }
 
 // NewMemoryStore 创建新的内存存储实例
@@ -37,6 +40,7 @@ func NewMemoryStore() *MemoryStore {
 		userMemories:     make(map[string]*builtin.UserMemory),
 		sessionSummaries: make(map[string]*builtin.SessionSummary),
 		messages:         make(map[string][]*builtin.ConversationMessage),
+		userMemoryEvents: make(map[string][]*builtin.UserMemoryEvent),
 	}
 }
 
@@ -404,6 +408,221 @@ func (m *MemoryStore) DeleteMessages(ctx context.Context, sessionID string, user
 // Close 关闭存储连接（内存存储无需关闭）
 func (m *MemoryStore) Close() error {
 	return nil
+}
+
+// SaveUserMemoryEvent 保存一条用户记忆事件
+func (m *MemoryStore) SaveUserMemoryEvent(ctx context.Context, event *builtin.UserMemoryEvent) error {
+	if event == nil {
+		return errors.New("事件对象不能为空")
+	}
+	if event.UserID == "" {
+		return errors.New("用户ID不能为空")
+	}
+	if strings.TrimSpace(event.Summary) == "" {
+		return errors.New("事件内容不能为空")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if event.ID == "" {
+		event.ID = utils.GetULID()
+	}
+	now := time.Now()
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = now
+	}
+	if event.EventDate.IsZero() {
+		event.EventDate = now
+	}
+	if event.Type == "" {
+		event.Type = builtin.UserMemoryEventTypeEvent
+	}
+
+	cloned := *event
+	if len(event.Keywords) > 0 {
+		cloned.Keywords = append([]string(nil), event.Keywords...)
+	}
+	m.userMemoryEvents[event.UserID] = append(m.userMemoryEvents[event.UserID], &cloned)
+	return nil
+}
+
+// ListRecentUserMemoryEvents 返回该用户最近的 limit 条事件
+func (m *MemoryStore) ListRecentUserMemoryEvents(ctx context.Context, userID string, limit int) ([]*builtin.UserMemoryEvent, error) {
+	if userID == "" {
+		return nil, errors.New("用户ID不能为空")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	events := m.userMemoryEvents[userID]
+	if len(events) == 0 {
+		return nil, nil
+	}
+
+	out := cloneEventSlice(events)
+	sortEventsDesc(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// SearchUserMemoryEvents 按查询条件检索用户事件
+func (m *MemoryStore) SearchUserMemoryEvents(ctx context.Context, query *builtin.UserMemoryEventQuery) ([]*builtin.UserMemoryEvent, error) {
+	if query == nil || query.UserID == "" {
+		return nil, errors.New("用户ID不能为空")
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	events := m.userMemoryEvents[query.UserID]
+	if len(events) == 0 {
+		return nil, nil
+	}
+
+	keywords := normalizeKeywords(query.Keywords)
+	match := strings.ToLower(strings.TrimSpace(query.Match))
+	if match != "all" {
+		match = "any"
+	}
+
+	filtered := make([]*builtin.UserMemoryEvent, 0, len(events))
+	for _, evt := range events {
+		if query.Type != "" && evt.Type != query.Type {
+			continue
+		}
+		if query.Since != nil && evt.EventDate.Before(*query.Since) {
+			continue
+		}
+		if query.Until != nil && evt.EventDate.After(*query.Until) {
+			continue
+		}
+		if len(keywords) > 0 && !matchEventKeywords(evt, keywords, match) {
+			continue
+		}
+		cloned := *evt
+		if len(evt.Keywords) > 0 {
+			cloned.Keywords = append([]string(nil), evt.Keywords...)
+		}
+		filtered = append(filtered, &cloned)
+	}
+
+	sortEventsDesc(filtered)
+	limit := query.Limit
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, nil
+}
+
+// DeleteUserMemoryEvent 删除指定事件
+func (m *MemoryStore) DeleteUserMemoryEvent(ctx context.Context, userID, eventID string) error {
+	if userID == "" {
+		return errors.New("用户ID不能为空")
+	}
+	if eventID == "" {
+		return errors.New("事件ID不能为空")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	events := m.userMemoryEvents[userID]
+	if len(events) == 0 {
+		return nil
+	}
+	kept := events[:0]
+	for _, evt := range events {
+		if evt.ID == eventID {
+			continue
+		}
+		kept = append(kept, evt)
+	}
+	if len(kept) == 0 {
+		delete(m.userMemoryEvents, userID)
+	} else {
+		m.userMemoryEvents[userID] = kept
+	}
+	return nil
+}
+
+// ClearUserMemoryEvents 清空用户的所有事件
+func (m *MemoryStore) ClearUserMemoryEvents(ctx context.Context, userID string) error {
+	if userID == "" {
+		return errors.New("用户ID不能为空")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.userMemoryEvents, userID)
+	return nil
+}
+
+func cloneEventSlice(events []*builtin.UserMemoryEvent) []*builtin.UserMemoryEvent {
+	out := make([]*builtin.UserMemoryEvent, 0, len(events))
+	for _, evt := range events {
+		cloned := *evt
+		if len(evt.Keywords) > 0 {
+			cloned.Keywords = append([]string(nil), evt.Keywords...)
+		}
+		out = append(out, &cloned)
+	}
+	return out
+}
+
+func sortEventsDesc(events []*builtin.UserMemoryEvent) {
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].EventDate.Equal(events[j].EventDate) {
+			return events[i].CreatedAt.After(events[j].CreatedAt)
+		}
+		return events[i].EventDate.After(events[j].EventDate)
+	})
+}
+
+func normalizeKeywords(keywords []string) []string {
+	if len(keywords) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(keywords))
+	seen := make(map[string]struct{}, len(keywords))
+	for _, kw := range keywords {
+		kw = strings.ToLower(strings.TrimSpace(kw))
+		if kw == "" {
+			continue
+		}
+		if _, ok := seen[kw]; ok {
+			continue
+		}
+		seen[kw] = struct{}{}
+		out = append(out, kw)
+	}
+	return out
+}
+
+func matchEventKeywords(evt *builtin.UserMemoryEvent, keywords []string, match string) bool {
+	if evt == nil {
+		return false
+	}
+	hay := strings.ToLower(evt.Summary)
+	if len(evt.Keywords) > 0 {
+		hay += "\n" + strings.ToLower(strings.Join(evt.Keywords, " "))
+	}
+
+	matched := 0
+	for _, kw := range keywords {
+		if strings.Contains(hay, kw) {
+			matched++
+			continue
+		}
+		if match == "all" {
+			return false
+		}
+	}
+	if match == "all" {
+		return matched == len(keywords)
+	}
+	return matched > 0
 }
 
 // CleanupOldMessages 清理指定时间之前的消息

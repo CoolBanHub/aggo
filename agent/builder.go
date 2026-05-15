@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/CoolBanHub/aggo/memory"
+	memorytool "github.com/CoolBanHub/aggo/tools/memory"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -62,8 +63,15 @@ func (b *AgentBuilder) WithMemoryMiddleware(mm *memory.MemoryMiddleware) *AgentB
 }
 
 // WithMemory adds a memory provider and creates the middleware automatically.
+// 如果 provider 实现了 memory.UserMemoryEventSearcher（事件检索模式），
+// 同时会自动注入 search_user_memory 工具，让 Agent 主动检索更早的事件记忆。
 func (b *AgentBuilder) WithMemory(provider memory.MemoryProvider) *AgentBuilder {
 	b.middlewares = append(b.middlewares, memory.NewMemoryMiddleware(provider))
+	if searcher, ok := provider.(memory.UserMemoryEventSearcher); ok {
+		if t, err := memorytool.SearchUserMemoryTool(searcher); err == nil && t != nil {
+			b.tools = append(b.tools, t)
+		}
+	}
 	return b
 }
 

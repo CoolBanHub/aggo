@@ -50,6 +50,54 @@ type UserMemoryModel struct {
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
+// StringSlice 自定义 GORM 类型，存储字符串切片（JSON 编码）。
+type StringSlice []string
+
+func (s StringSlice) Value() (driver.Value, error) {
+	if s == nil {
+		return nil, nil
+	}
+	return json.Marshal(s)
+}
+
+func (s *StringSlice) Scan(value interface{}) error {
+	if value == nil {
+		*s = nil
+		return nil
+	}
+	switch v := value.(type) {
+	case []byte:
+		if len(v) == 0 {
+			*s = nil
+			return nil
+		}
+		return json.Unmarshal(v, s)
+	case string:
+		if v == "" {
+			*s = nil
+			return nil
+		}
+		return json.Unmarshal([]byte(v), s)
+	default:
+		return nil
+	}
+}
+
+func (s StringSlice) GormDataType() string {
+	return "text"
+}
+
+// UserMemoryEventModel GORM 模型 - 用户记忆事件表（事件检索模式）。
+type UserMemoryEventModel struct {
+	ID        string      `gorm:"primaryKey;size:64" json:"id"`
+	UserID    string      `gorm:"size:255;not null;index:idx_user_event_date" json:"userId"`
+	Type      string      `gorm:"size:32;not null;index" json:"type"`
+	EventDate time.Time   `gorm:"not null;index:idx_user_event_date" json:"eventDate"`
+	Keywords  StringSlice `gorm:"type:text" json:"keywords,omitempty"`
+	Summary   string      `gorm:"type:text;not null" json:"summary"`
+	CreatedAt time.Time   `gorm:"autoCreateTime" json:"createdAt"`
+}
+
 // SessionSummaryModel GORM模型 - 会话摘要表
 type SessionSummaryModel struct {
 	SessionID               string    `gorm:"primaryKey;size:255" json:"sessionId"`
@@ -148,4 +196,29 @@ func (m *ConversationMessageModel) FromConversationMessage(message *builtin.Conv
 	m.Content = message.Content
 	m.Parts = message.Parts
 	m.CreatedAt = message.CreatedAt
+}
+
+// ToUserMemoryEvent 将数据库模型转为业务模型
+func (m *UserMemoryEventModel) ToUserMemoryEvent() *builtin.UserMemoryEvent {
+	keywords := []string(m.Keywords)
+	return &builtin.UserMemoryEvent{
+		ID:        m.ID,
+		UserID:    m.UserID,
+		Type:      m.Type,
+		EventDate: m.EventDate,
+		Keywords:  keywords,
+		Summary:   m.Summary,
+		CreatedAt: m.CreatedAt,
+	}
+}
+
+// FromUserMemoryEvent 业务模型 -> 数据库模型
+func (m *UserMemoryEventModel) FromUserMemoryEvent(event *builtin.UserMemoryEvent) {
+	m.ID = event.ID
+	m.UserID = event.UserID
+	m.Type = event.Type
+	m.EventDate = event.EventDate
+	m.Keywords = StringSlice(event.Keywords)
+	m.Summary = event.Summary
+	m.CreatedAt = event.CreatedAt
 }

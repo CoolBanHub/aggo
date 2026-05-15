@@ -9,9 +9,11 @@ package tools
 
 import (
 	cronPkg "github.com/CoolBanHub/aggo/cron"
+	aggomemory "github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/tools/cron"
 	"github.com/CoolBanHub/aggo/tools/database"
 	"github.com/CoolBanHub/aggo/tools/knowledge"
+	memorytool "github.com/CoolBanHub/aggo/tools/memory"
 	"github.com/CoolBanHub/aggo/tools/shell"
 	"github.com/cloudwego/eino/components/indexer"
 	"github.com/cloudwego/eino/components/retriever"
@@ -63,4 +65,19 @@ func GetExecuteTools() []tool.BaseTool {
 // GetCronTools 获取定时任务工具
 func GetCronTools(service *cronPkg.CronService, opts ...cron.CronOption) []tool.BaseTool {
 	return cron.GetTools(service, opts...)
+}
+
+// ============================================================
+// Memory 工具
+// ============================================================
+
+// GetUserMemorySearchTool 获取按事件检索用户长期记忆的工具。
+// 入参可以是 memory.MemoryProvider 也可以直接是 UserMemoryEventSearcher；
+// 如果传入的 provider 不支持事件检索（例如 mem0/memu），返回 nil 工具与无错误，由调用方决定是否注册。
+func GetUserMemorySearchTool(provider any) (tool.BaseTool, error) {
+	searcher, ok := provider.(aggomemory.UserMemoryEventSearcher)
+	if !ok {
+		return nil, nil
+	}
+	return memorytool.SearchUserMemoryTool(searcher)
 }

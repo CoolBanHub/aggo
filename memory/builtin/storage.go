@@ -90,6 +90,27 @@ type SearchMessageStorage interface {
 	SearchMessagesByKeywords(ctx context.Context, q *builtinsearch.SearchQuery) ([]*ConversationMessage, error)
 }
 
+// UserMemoryEventStorage 是可选扩展接口，提供按用户拆分的事件级记忆存储与检索。
+// 启用 MemoryConfig.EnableEventSearch 时，底层 MemoryStorage 必须实现该接口；
+// 不实现时 Provider 会退化为兼容模式（全量注入 UserMemory.Memory）。
+type UserMemoryEventStorage interface {
+	// SaveUserMemoryEvent 新增一条用户记忆事件。事件 ID 未填写时由实现侧生成（建议 ULID 单调递增）。
+	SaveUserMemoryEvent(ctx context.Context, event *UserMemoryEvent) error
+
+	// ListRecentUserMemoryEvents 返回该用户最近的 N 条事件，按 EventDate 倒序、同日按 CreatedAt 倒序。
+	// limit <= 0 时由实现侧选取一个安全的默认值（建议返回空切片以避免误注入大量数据）。
+	ListRecentUserMemoryEvents(ctx context.Context, userID string, limit int) ([]*UserMemoryEvent, error)
+
+	// SearchUserMemoryEvents 按 UserMemoryEventQuery 过滤事件，返回按 EventDate 倒序的命中列表。
+	SearchUserMemoryEvents(ctx context.Context, query *UserMemoryEventQuery) ([]*UserMemoryEvent, error)
+
+	// DeleteUserMemoryEvent 删除指定事件。eventID 为空时返回错误。
+	DeleteUserMemoryEvent(ctx context.Context, userID, eventID string) error
+
+	// ClearUserMemoryEvents 清空用户的所有事件。迁移脚本和单元测试需要。
+	ClearUserMemoryEvents(ctx context.Context, userID string) error
+}
+
 // GormConversationStorage exposes the underlying gorm DB and message table
 // so builtin search can construct the default vector store without depending
 // on concrete storage implementations.

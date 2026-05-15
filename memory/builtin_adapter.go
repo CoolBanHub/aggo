@@ -44,6 +44,17 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 				Content: fmt.Sprintf("<user_memory>\n%s\n</user_memory>", userMemory.Memory),
 			})
 		}
+
+		// 事件检索模式：再追加“最近 N 条事件”块，更早的事件由 search_user_memory 工具按需检索。
+		if cfg.EnableEventSearch && cfg.RecentEventLimit > 0 {
+			events, evtErr := p.MemoryManager.ListRecentUserMemoryEvents(ctx, req.UserID, cfg.RecentEventLimit)
+			if evtErr == nil && len(events) > 0 {
+				result.SystemMessages = append(result.SystemMessages, &schema.Message{
+					Role:    schema.System,
+					Content: formatRecentEventsBlock(events),
+				})
+			}
+		}
 	}
 
 	// Fetch session summary as system message
@@ -123,6 +134,42 @@ func (p *builtinProvider) Close() error {
 
 func (p *builtinProvider) SearchMessages(ctx context.Context, q *builtinsearch.SearchQuery) ([]*builtinsearch.SearchHit, error) {
 	return p.MemoryManager.SearchMessages(ctx, q)
+}
+
+// SearchUserMemoryEvents 让外部（如 search_user_memory 工具）按条件检索用户记忆事件。
+func (p *builtinProvider) SearchUserMemoryEvents(ctx context.Context, query *builtin.UserMemoryEventQuery) ([]*builtin.UserMemoryEvent, error) {
+	return p.MemoryManager.SearchUserMemoryEvents(ctx, query)
+}
+
+// ListRecentUserMemoryEvents 让外部读取最近事件，可用于调试或额外的工具适配。
+func (p *builtinProvider) ListRecentUserMemoryEvents(ctx context.Context, userID string, limit int) ([]*builtin.UserMemoryEvent, error) {
+	return p.MemoryManager.ListRecentUserMemoryEvents(ctx, userID, limit)
+}
+
+// formatRecentEventsBlock 把最近事件渲染为 system message 块，控制每条字数避免冲爆 prompt。
+func formatRecentEventsBlock(events []*builtin.UserMemoryEvent) string {
+	var b strings.Builder
+	b.WriteString("<user_memory_recent_events>\n")
+	b.WriteString("以下是该用户最近的任务里程碑/事件记录，按 EventDate 倒序。\n")
+	b.WriteString("如需查找更早或更宽范围的事件，请调用 search_user_memory 工具检索。\n\n")
+	for _, evt := range events {
+		if evt == nil {
+			continue
+		}
+		date := ""
+		if !evt.EventDate.IsZero() {
+			date = evt.EventDate.Format("2006-01-02")
+		}
+		summary := evt.Summary
+		// 限制单条字数，防止短文档塞满异常长的事件
+		const maxSummaryRunes = 180
+		if r := []rune(summary); len(r) > maxSummaryRunes {
+			summary = string(r[:maxSummaryRunes]) + "…"
+		}
+		b.WriteString(fmt.Sprintf("- [%s][%s] %s\n", date, evt.Type, summary))
+	}
+	b.WriteString("</user_memory_recent_events>")
+	return b.String()
 }
 
 // extractTextFromParts 从多部分内容中提取纯文本，拼接为一个字符串

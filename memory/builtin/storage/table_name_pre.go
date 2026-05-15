@@ -27,3 +27,8 @@ func (p *TableNameProvider) GetSessionSummaryTableName() string {
 func (p *TableNameProvider) GetConversationMessageTableName() string {
 	return p.tablePrefix + "_conversation_messages"
 }
+
+// GetUserMemoryEventTableName returns the table name for user memory events
+func (p *TableNameProvider) GetUserMemoryEventTableName() string {
+	return p.tablePrefix + "_user_memory_events"
+}

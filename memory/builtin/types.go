@@ -46,7 +46,8 @@ func (m *ConversationMessage) ToSchemaMessage() *schema.Message {
 }
 
 // UserMemory 用户记忆结构
-// 每个用户一条记录，使用Markdown格式存储所有记忆内容
+// 每个用户一条记录，使用Markdown格式存储“常驻短文档”（核心约定 + 基础信息）。
+// 累积型条目（任务里程碑、事件记录）请改用 UserMemoryEvent，避免短文档无限膨胀。
 type UserMemory struct {
 	// 用户ID（主键）
 	UserID string `json:"userId"`
@@ -56,6 +57,51 @@ type UserMemory struct {
 	CreatedAt time.Time `json:"createdAt"`
 	// 最后更新时间
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// 用户记忆事件类型
+const (
+	// UserMemoryEventTypeMilestone 任务里程碑
+	UserMemoryEventTypeMilestone = "milestone"
+	// UserMemoryEventTypeEvent 事件记录
+	UserMemoryEventTypeEvent = "event"
+)
+
+// UserMemoryEvent 用户记忆事件
+// 单条带时间属性的“任务里程碑/事件记录”条目，由 analyzer 增量写入、
+// retrieve 时只取最近 N 条进 system，再通过 SearchEvents 工具按需检索更早内容。
+type UserMemoryEvent struct {
+	// 主键 ID（ULID 单调递增）
+	ID string `json:"id"`
+	// 用户 ID
+	UserID string `json:"userId"`
+	// 事件类型 milestone / event
+	Type string `json:"type"`
+	// 事件发生日期（YYYY-MM-DD 起始的语义时间，不一定等于 CreatedAt）
+	EventDate time.Time `json:"eventDate"`
+	// 关键词（用于关键词检索）
+	Keywords []string `json:"keywords,omitempty"`
+	// 事件正文（精简事实陈述）
+	Summary string `json:"summary"`
+	// 入库时间
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// UserMemoryEventQuery 用户记忆事件检索条件
+type UserMemoryEventQuery struct {
+	// 用户 ID（必填）
+	UserID string
+	// 事件类型 milestone / event，留空匹配全部
+	Type string
+	// 关键词列表
+	Keywords []string
+	// 关键词匹配方式 any/all
+	Match string
+	// 起止时间（基于 EventDate）
+	Since *time.Time
+	Until *time.Time
+	// 返回条数上限，<=0 由调用方按默认处理
+	Limit int
 }
 
 // SessionSummary 会话摘要结构
@@ -114,6 +160,16 @@ type MemoryConfig struct {
 	EnableUserMemories bool `json:"enableUserMemories"`
 	// 是否启用会话摘要
 	EnableSessionSummary bool `json:"enableSessionSummary"`
+	// 是否启用“事件检索”模式：
+	//   true  - 用户记忆拆为“常驻短文档（核心约定+基础信息）”和“事件检索表”，
+	//           Retrieve 仅注入短文档 + 最近 RecentEventLimit 条事件；
+	//           更早的事件需通过 search_user_memory 工具按关键词/时间检索。
+	//   false - 兼容旧行为，整篇 UserMemory.Memory 全量注入 system。
+	// 仅当 EnableUserMemories=true 时生效。
+	EnableEventSearch bool `json:"enableEventSearch"`
+	// 常驻注入的最近事件条数，默认 20，仅在 EnableEventSearch=true 时生效。
+	// 设为 0 表示不注入任何事件，全部交给检索工具。
+	RecentEventLimit int `json:"recentEventLimit,omitempty"`
 	// 用户记忆检索方式 EnableUserMemories开启采生效
 	Retrieval MemoryRetrieval `json:"retrieval"`
 	// 记忆数量限制
@@ -168,6 +224,8 @@ func DefaultMemoryConfig() *MemoryConfig {
 	return &MemoryConfig{
 		EnableUserMemories:      true,
 		EnableSessionSummary:    false,
+		EnableEventSearch:       false,
+		RecentEventLimit:        20,
 		Retrieval:               RetrievalLastN,
 		MemoryLimit:             20,
 		AsyncWorkerPoolSize:     5,

@@ -24,16 +24,19 @@ type SQLStore struct {
 
 // NewGormStorage 创建新的SQL存储实例
 func NewGormStorage(db *gorm.DB) (*SQLStore, error) {
+	return NewGormStorageWithPrefix(db, "")
+}
 
+// NewGormStorageWithPrefix 创建带自定义表名前缀的 SQL 存储实例。
+// prefix 为空时使用默认值 "aggo_mem"。
+func NewGormStorageWithPrefix(db *gorm.DB, prefix string) (*SQLStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database instance cannot be nil")
 	}
-
 	store := &SQLStore{
 		db:                db,
-		tableNameProvider: NewTableNameProvider("aggo_mem"), // 默认前缀
+		tableNameProvider: NewTableNameProvider(prefix),
 	}
-
 	return store, nil
 }
 
@@ -47,6 +50,9 @@ func (s *SQLStore) AutoMigrate() error {
 		return err
 	}
 	if err := s.db.Table(s.tableNameProvider.GetConversationMessageTableName()).AutoMigrate(&ConversationMessageModel{}); err != nil {
+		return err
+	}
+	if err := s.db.Table(s.tableNameProvider.GetUserMemoryEventTableName()).AutoMigrate(&UserMemoryEventModel{}); err != nil {
 		return err
 	}
 	return nil

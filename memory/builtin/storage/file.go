@@ -116,6 +116,24 @@ func (f *FileStore) load() error {
 		return err
 	}
 
+	// 4. 加载用户记忆事件 (JSONL 格式)
+	if data, err := os.ReadFile(f.getFilePath("user_memory_events")); err == nil {
+		events := make(map[string][]*builtin.UserMemoryEvent)
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var evt builtin.UserMemoryEvent
+			if err := json.Unmarshal([]byte(line), &evt); err == nil {
+				events[evt.UserID] = append(events[evt.UserID], &evt)
+			}
+		}
+		f.MemoryStore.userMemoryEvents = events
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
 	return nil
 }
 
@@ -342,4 +360,72 @@ func (f *FileStore) CleanupMessagesByLimit(ctx context.Context, userID, sessionI
 		return err
 	}
 	return f.saveMessages()
+}
+
+// saveUserMemoryEvents 重新全量保存用户记忆事件到 JSONL 文件
+func (f *FileStore) saveUserMemoryEvents() error {
+	f.MemoryStore.mu.RLock()
+	var lines []string
+	for _, list := range f.MemoryStore.userMemoryEvents {
+		for _, evt := range list {
+			if b, err := json.Marshal(evt); err == nil {
+				lines = append(lines, string(b))
+			}
+		}
+	}
+	f.MemoryStore.mu.RUnlock()
+
+	data := []byte(strings.Join(lines, "\n") + "\n")
+	if len(lines) == 0 {
+		data = []byte("")
+	}
+
+	f.fileMu.Lock()
+	defer f.fileMu.Unlock()
+	return f.saveToFileB("user_memory_events", data)
+}
+
+// appendUserMemoryEvent 增量追加单条事件到 JSONL 文件
+func (f *FileStore) appendUserMemoryEvent(evt *builtin.UserMemoryEvent) error {
+	b, err := json.Marshal(evt)
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+
+	f.fileMu.Lock()
+	defer f.fileMu.Unlock()
+
+	filePath := f.getFilePath("user_memory_events")
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.Write(b)
+	return err
+}
+
+// SaveUserMemoryEvent 内存写入后追加持久化
+func (f *FileStore) SaveUserMemoryEvent(ctx context.Context, event *builtin.UserMemoryEvent) error {
+	if err := f.MemoryStore.SaveUserMemoryEvent(ctx, event); err != nil {
+		return err
+	}
+	return f.appendUserMemoryEvent(event)
+}
+
+// DeleteUserMemoryEvent 删除后全量重写
+func (f *FileStore) DeleteUserMemoryEvent(ctx context.Context, userID, eventID string) error {
+	if err := f.MemoryStore.DeleteUserMemoryEvent(ctx, userID, eventID); err != nil {
+		return err
+	}
+	return f.saveUserMemoryEvents()
+}
+
+// ClearUserMemoryEvents 清空后全量重写
+func (f *FileStore) ClearUserMemoryEvents(ctx context.Context, userID string) error {
+	if err := f.MemoryStore.ClearUserMemoryEvents(ctx, userID); err != nil {
+		return err
+	}
+	return f.saveUserMemoryEvents()
 }

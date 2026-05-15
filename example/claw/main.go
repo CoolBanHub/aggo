@@ -15,10 +15,12 @@ import (
 	cronPkg "github.com/CoolBanHub/aggo/cron"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/memory/builtin"
+	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
 	"github.com/CoolBanHub/aggo/memory/builtin/storage"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/pkg/langfuse"
 	cronTool "github.com/CoolBanHub/aggo/tools/cron"
+	memorytool "github.com/CoolBanHub/aggo/tools/memory"
 	"github.com/CoolBanHub/aggo/tools/shell"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino-ext/adk/backend/local"
@@ -131,8 +133,15 @@ func main() {
 		MemoryConfig: &builtin.MemoryConfig{
 			EnableUserMemories:   true,
 			EnableSessionSummary: true,
-			MemoryLimit:          20,
-			AsyncWorkerPoolSize:  3,
+			// 启用“事件检索”模式：常驻短文档 + 最近 N 条事件注入 system，
+			// 更早的事件通过 search_user_memory 工具按关键词/时间检索。
+			EnableEventSearch:   true,
+			RecentEventLimit:    10,
+			MemoryLimit:         20,
+			AsyncWorkerPoolSize: 3,
+			Search: &builtin.SearchConfig{
+				Mode: builtinsearch.ModeKeyword,
+			},
 		},
 	})
 	if err != nil {
@@ -140,12 +149,30 @@ func main() {
 	}
 	defer provider.Close()
 
+	// 注册 search_user_memory 工具：用于回溯更早或更宽范围的长期事件
+	if searcher, ok := any(provider).(memory.UserMemoryEventSearcher); ok {
+		memSearchTool, err := memorytool.SearchUserMemoryTool(searcher)
+		if err != nil {
+			log.Fatalf("创建 search_user_memory 工具失败: %v", err)
+		}
+		agentTools = append(agentTools, memSearchTool)
+	}
+
 	systemPrompt := `你是一个智能助手。
 
 ## 工作原则
 1. 根据需求选择合适工具
 2. 不需要经过我同意，直接做决定就行
-3. 回复简洁准确`
+3. 回复简洁准确
+
+## 用户长期记忆规则
+1. system 中已注入两块内容：
+   - <user_memory> 常驻短文档（核心约定 + 基础信息）
+   - <user_memory_recent_events> 最近若干条任务里程碑/事件记录（每条已含日期/类型/摘要）
+2. **优先使用上述常驻内容**回答；只有命中不到时才调用 search_user_memory
+3. search_user_memory 用于**结构化长期事件**（按关键词/类型/时间窗回溯旧的里程碑或事件），查的是已被提炼的事实
+4. 关键词优先传具体名词（账号ID、客户名、产品、动作）；必要时用 type=milestone/event、since、until 缩小范围
+5. 如果常驻短文档+最近事件已能回答，**不要重复调工具**；找不到时再追问用户或继续检索`
 
 	ag, err := agent.NewAgentBuilder(chatModel).
 		WithName("assistant").

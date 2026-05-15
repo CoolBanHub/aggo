@@ -13,16 +13,18 @@ import (
 
 // UserMemoryAnalyzer 分析对话并更新用户记忆
 type UserMemoryAnalyzer struct {
-	cm           model.ToolCallingChatModel
-	systemPrompt string
+	cm                   model.ToolCallingChatModel
+	systemPrompt         string
+	eventSearchPrompt    string
+	useEventSearchPrompt bool
 }
 
-// NewUserMemoryAnalyzer 创建新的用户记忆分析器
+// NewUserMemoryAnalyzer 创建新的用户记忆分析器（兼容模式：整篇 markdown）
 func NewUserMemoryAnalyzer(cm model.ToolCallingChatModel) *UserMemoryAnalyzer {
-	systemPrompt := DefaultUserMemoryPrompt
 	return &UserMemoryAnalyzer{
-		cm:           cm,
-		systemPrompt: systemPrompt,
+		cm:                cm,
+		systemPrompt:      DefaultUserMemoryPrompt,
+		eventSearchPrompt: DefaultEventSearchMemoryPrompt,
 	}
 }
 
@@ -30,13 +32,51 @@ func (u *UserMemoryAnalyzer) SetSystemPrompt(systemPrompt string) {
 	u.systemPrompt = systemPrompt
 }
 
-// ShouldUpdateMemory 分析对话并生成更新后的记忆内容
-// 返回值: (是否需要更新, 更新后的记忆内容, 错误)
-func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, existingMemory *UserMemory, historyMessages []*ConversationMessage) (bool, string, error) {
+// SetEventSearchPrompt 自定义事件检索模式下使用的 prompt
+func (u *UserMemoryAnalyzer) SetEventSearchPrompt(prompt string) {
+	u.eventSearchPrompt = prompt
+}
+
+// SetUseEventSearchPrompt 切换是否使用事件检索模式 prompt
+func (u *UserMemoryAnalyzer) SetUseEventSearchPrompt(enabled bool) {
+	u.useEventSearchPrompt = enabled
+}
+
+// MemoryAnalysisResult 是 analyzer 单次分析输出。
+// 在事件检索模式下，Memory 是常驻短文档；Events 是本轮新增事件。
+// 在兼容模式下，仅 Memory 有值，Events 为空。
+type MemoryAnalysisResult struct {
+	NeedUpdate bool
+	Memory     string
+	Events     []*UserMemoryEvent
+}
+
+// AnalyzeRequest 是 AnalyzeOnce 的输入。事件检索模式下还会附带 RecentEvents 作为去重参考。
+type AnalyzeRequest struct {
+	ExistingMemory  *UserMemory
+	HistoryMessages []*ConversationMessage
+	// RecentEvents 已落库的近期事件，作为 LLM 去重参考。仅在事件检索模式下使用。
+	RecentEvents []*UserMemoryEvent
+	// UseEventSearch 启用后使用事件检索模式 prompt 并解析事件增量。
+	// 留空时回退到 analyzer 的 useEventSearchPrompt 配置。
+	UseEventSearch *bool
+}
+
+// AnalyzeOnce 是新的统一入口，根据模式选择 prompt 并解析结构化输出。
+func (u *UserMemoryAnalyzer) AnalyzeOnce(ctx context.Context, req AnalyzeRequest) (*MemoryAnalysisResult, error) {
 	ctx = withObservationName(ctx, u.cm, "builtin-memory-analyzer")
 
-	// 替换时间占位符
-	prompt := strings.ReplaceAll(u.systemPrompt, "{{current_time}}", time.Now().Format("2006-01-02 15:04"))
+	useEvent := u.useEventSearchPrompt
+	if req.UseEventSearch != nil {
+		useEvent = *req.UseEventSearch
+	}
+
+	basePrompt := u.systemPrompt
+	if useEvent {
+		basePrompt = u.eventSearchPrompt
+	}
+
+	prompt := strings.ReplaceAll(basePrompt, "{{current_time}}", time.Now().Format("2006-01-02 15:04"))
 
 	messages := []*schema.Message{
 		{
@@ -45,16 +85,25 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, existingMem
 		},
 	}
 
-	// 添加现有记忆（如果有）
-	if existingMemory != nil && existingMemory.Memory != "" {
+	if req.ExistingMemory != nil && req.ExistingMemory.Memory != "" {
+		title := "## 现有记忆"
+		if useEvent {
+			title = "## 现有短文档"
+		}
 		messages = append(messages, &schema.Message{
 			Role:    schema.System,
-			Content: fmt.Sprintf("## 现有记忆\n%s", existingMemory.Memory),
+			Content: fmt.Sprintf("%s\n%s", title, req.ExistingMemory.Memory),
 		})
 	}
 
-	// 将历史对话压平成纯文本分析材料，避免旧 assistant 回复继续影响输出格式。
-	historyText := buildConversationHistoryPlainText(historyMessages)
+	if useEvent && len(req.RecentEvents) > 0 {
+		messages = append(messages, &schema.Message{
+			Role:    schema.System,
+			Content: "## 最近事件\n" + buildRecentEventsForPrompt(req.RecentEvents),
+		})
+	}
+
+	historyText := buildConversationHistoryPlainText(req.HistoryMessages)
 	if historyText != "" {
 		messages = append(messages, &schema.Message{
 			Role: schema.User,
@@ -66,26 +115,148 @@ func (u *UserMemoryAnalyzer) ShouldUpdateMemory(ctx context.Context, existingMem
 
 	response, err := generateViaStream(ctx, u.cm, messages)
 	if err != nil {
-		return false, "", fmt.Errorf("分析用户记忆失败: %w", err)
+		return nil, fmt.Errorf("分析用户记忆失败: %w", err)
 	}
 
 	content := strings.TrimSpace(response.Content)
 	if content == "" {
-		return false, "", nil
+		return &MemoryAnalysisResult{}, nil
 	}
 
+	if useEvent {
+		return parseEventSearchAnalyzerResponse(content)
+	}
+	return parseLegacyAnalyzerResponse(content)
+}
+
+func parseLegacyAnalyzerResponse(content string) (*MemoryAnalysisResult, error) {
 	var param UserMemoryAnalyzerParam
-	err = json.Unmarshal([]byte(content), &param)
-	if err != nil {
-		return false, "", fmt.Errorf("解析用户记忆响应失败(raw=%q): %w", content, err)
+	if err := json.Unmarshal([]byte(content), &param); err != nil {
+		return nil, fmt.Errorf("解析用户记忆响应失败(raw=%q): %w", content, err)
 	}
-
-	// 如果是 noop 操作，不需要更新
 	if param.Op == UserMemoryOpNoop {
-		return false, "", nil
+		return &MemoryAnalysisResult{}, nil
+	}
+	return &MemoryAnalysisResult{
+		NeedUpdate: true,
+		Memory:     param.Memory,
+	}, nil
+}
+
+// eventSearchAnalyzerParam 是事件检索模式下 analyzer 输出的 JSON 结构。
+type eventSearchAnalyzerParam struct {
+	Op     string                          `json:"op"`
+	Memory string                          `json:"memory,omitempty"`
+	Events []eventSearchAnalyzerEventParam `json:"events,omitempty"`
+}
+
+type eventSearchAnalyzerEventParam struct {
+	Type     string   `json:"type"`
+	Date     string   `json:"date"`
+	Summary  string   `json:"summary"`
+	Keywords []string `json:"keywords,omitempty"`
+}
+
+func parseEventSearchAnalyzerResponse(content string) (*MemoryAnalysisResult, error) {
+	var param eventSearchAnalyzerParam
+	if err := json.Unmarshal([]byte(content), &param); err != nil {
+		return nil, fmt.Errorf("解析用户记忆响应失败(raw=%q): %w", content, err)
+	}
+	if param.Op == UserMemoryOpNoop {
+		return &MemoryAnalysisResult{}, nil
 	}
 
-	return true, param.Memory, nil
+	result := &MemoryAnalysisResult{
+		NeedUpdate: true,
+		Memory:     param.Memory,
+	}
+
+	for _, raw := range param.Events {
+		summary := strings.TrimSpace(raw.Summary)
+		if summary == "" {
+			continue
+		}
+		evt := &UserMemoryEvent{
+			Type:    normalizeEventType(raw.Type),
+			Summary: summary,
+		}
+		if d, ok := parseEventDate(raw.Date); ok {
+			evt.EventDate = d
+		} else {
+			evt.EventDate = time.Now()
+		}
+		evt.Keywords = sanitizeKeywords(raw.Keywords)
+		result.Events = append(result.Events, evt)
+	}
+	return result, nil
+}
+
+func normalizeEventType(t string) string {
+	t = strings.ToLower(strings.TrimSpace(t))
+	switch t {
+	case UserMemoryEventTypeMilestone, UserMemoryEventTypeEvent:
+		return t
+	case "里程碑", "任务里程碑":
+		return UserMemoryEventTypeMilestone
+	case "事件", "事件记录":
+		return UserMemoryEventTypeEvent
+	default:
+		return UserMemoryEventTypeEvent
+	}
+}
+
+func parseEventDate(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	layouts := []string{"2006-01-02", "2006-01-02 15:04", "2006/01/02", time.RFC3339, "2006-01-02T15:04:05"}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func sanitizeKeywords(keywords []string) []string {
+	if len(keywords) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(keywords))
+	seen := make(map[string]struct{}, len(keywords))
+	for _, kw := range keywords {
+		kw = strings.TrimSpace(kw)
+		if kw == "" {
+			continue
+		}
+		key := strings.ToLower(kw)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, kw)
+	}
+	return out
+}
+
+// buildRecentEventsForPrompt 将最近事件压成 prompt 友好的简短列表，作为 LLM 去重参考。
+func buildRecentEventsForPrompt(events []*UserMemoryEvent) string {
+	if len(events) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(events))
+	for _, evt := range events {
+		if evt == nil {
+			continue
+		}
+		date := ""
+		if !evt.EventDate.IsZero() {
+			date = evt.EventDate.Format("2006-01-02")
+		}
+		lines = append(lines, fmt.Sprintf("- [%s][%s] %s", date, evt.Type, evt.Summary))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // generateViaStream 通过流式接口调用模型并拼接输出，等价于 Generate 但避免长耗时请求被中间代理断开。
