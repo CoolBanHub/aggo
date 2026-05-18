@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/CoolBanHub/aggo/memory"
-	"github.com/CoolBanHub/aggo/memory/builtin"
+	"github.com/CoolBanHub/aggo/memory/memoryevent"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -70,7 +70,7 @@ func searchUserMemory(ctx context.Context, provider memory.UserMemoryEventSearch
 		return nil, errors.New("无法确定 userID，请确保 adk session 中存在 userID 或显式传入 user_id 参数")
 	}
 
-	query := &builtin.UserMemoryEventQuery{
+	query := &memoryevent.Query{
 		UserID:   userID,
 		Type:     strings.TrimSpace(params.Type),
 		Keywords: params.Keywords,

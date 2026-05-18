@@ -4,6 +4,7 @@ import (
 	"time"
 
 	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
+	"github.com/CoolBanHub/aggo/memory/memoryevent"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -59,50 +60,20 @@ type UserMemory struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
-// 用户记忆事件类型
+// 用户记忆事件类型（兼容别名，新代码请直接用 memoryevent.TypeMilestone/TypeEvent）
 const (
 	// UserMemoryEventTypeMilestone 任务里程碑
-	UserMemoryEventTypeMilestone = "milestone"
+	UserMemoryEventTypeMilestone = memoryevent.TypeMilestone
 	// UserMemoryEventTypeEvent 事件记录
-	UserMemoryEventTypeEvent = "event"
+	UserMemoryEventTypeEvent = memoryevent.TypeEvent
 )
 
-// UserMemoryEvent 用户记忆事件
-// 单条带时间属性的“任务里程碑/事件记录”条目，由 analyzer 增量写入、
-// retrieve 时只取最近 N 条进 system，再通过 SearchEvents 工具按需检索更早内容。
-type UserMemoryEvent struct {
-	// 主键 ID（ULID 单调递增）
-	ID string `json:"id"`
-	// 用户 ID
-	UserID string `json:"userId"`
-	// 事件类型 milestone / event
-	Type string `json:"type"`
-	// 事件发生日期（YYYY-MM-DD 起始的语义时间，不一定等于 CreatedAt）
-	EventDate time.Time `json:"eventDate"`
-	// 关键词（用于关键词检索）
-	Keywords []string `json:"keywords,omitempty"`
-	// 事件正文（精简事实陈述）
-	Summary string `json:"summary"`
-	// 入库时间
-	CreatedAt time.Time `json:"createdAt"`
-}
+// UserMemoryEvent 是 memoryevent.Event 的别名，便于其他 provider 复用同一份
+// 中性类型实现 memory.UserMemoryEventSearcher 接口。
+type UserMemoryEvent = memoryevent.Event
 
-// UserMemoryEventQuery 用户记忆事件检索条件
-type UserMemoryEventQuery struct {
-	// 用户 ID（必填）
-	UserID string
-	// 事件类型 milestone / event，留空匹配全部
-	Type string
-	// 关键词列表
-	Keywords []string
-	// 关键词匹配方式 any/all
-	Match string
-	// 起止时间（基于 EventDate）
-	Since *time.Time
-	Until *time.Time
-	// 返回条数上限，<=0 由调用方按默认处理
-	Limit int
-}
+// UserMemoryEventQuery 是 memoryevent.Query 的别名。
+type UserMemoryEventQuery = memoryevent.Query
 
 // SessionSummary 会话摘要结构
 // 存储对话会话的智能摘要
