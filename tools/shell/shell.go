@@ -83,7 +83,8 @@ func (t *ShellTool) executeCommand(ctx context.Context, params ExecuteParams) (*
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(cmdCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", params.Command)
+		psCommand := `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ` + params.Command
+		cmd = exec.CommandContext(cmdCtx, "powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCommand)
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			HideWindow: true, // 👈 这一行就够了
 		}
