@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -83,6 +84,9 @@ func (t *ShellTool) executeCommand(ctx context.Context, params ExecuteParams) (*
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(cmdCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", params.Command)
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			HideWindow: true, // 👈 这一行就够了
+		}
 	} else {
 		cmd = exec.CommandContext(cmdCtx, "sh", "-c", params.Command)
 	}
