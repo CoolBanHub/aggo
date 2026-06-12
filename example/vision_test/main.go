@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/CoolBanHub/aggo/agent"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -34,29 +35,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("创建agent失败：%v", err)
 	}
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag})
 
 	link := "https://cdn.deepseek.com/logo.png"
-	msgList := []*schema.Message{
-		{
-			Role: schema.User,
-			UserInputMultiContent: []schema.MessageInputPart{
-				{
-					Type: "text",
-					Text: "这个图片里面有什么",
-				},
-				{
-					Type: "image_url",
-					Image: &schema.MessageInputImage{
-						MessagePartCommon: schema.MessagePartCommon{
-							URL: &link,
-							//Base64Data: &base64Img,
-							//MIMEType: "image/jpeg",
-						},
+	msgList := []*schema.AgenticMessage{
+		agmsg.UserMessageFromInputParts([]schema.MessageInputPart{
+			{
+				Type: schema.ChatMessagePartTypeText,
+				Text: "这个图片里面有什么",
+			},
+			{
+				Type: schema.ChatMessagePartTypeImageURL,
+				Image: &schema.MessageInputImage{
+					MessagePartCommon: schema.MessagePartCommon{
+						URL: &link,
+						//Base64Data: &base64Img,
+						//MIMEType: "image/jpeg",
 					},
 				},
 			},
-		},
+		}),
 	}
 
 	iter := runner.Run(ctx, msgList)
@@ -71,7 +69,7 @@ func main() {
 		}
 		if event.Output != nil && event.Output.MessageOutput != nil {
 			if msg, err := event.Output.MessageOutput.GetMessage(); err == nil && msg != nil {
-				response = msg.Content
+				response = agmsg.Text(msg)
 			}
 		}
 	}

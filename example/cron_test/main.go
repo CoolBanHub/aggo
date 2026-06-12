@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	cronPkg "github.com/CoolBanHub/aggo/cron"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/model"
 	cronTool "github.com/CoolBanHub/aggo/tools/cron"
 	"github.com/cloudwego/eino/adk"
@@ -56,7 +57,7 @@ func main() {
 	}
 	defer result.Service.Stop()
 
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: result.Agent})
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: result.Agent})
 
 	fmt.Println("=== Cron Agent 定时任务示例 ===")
 
@@ -69,8 +70,8 @@ func main() {
 
 	for i, msg := range conversations {
 		fmt.Printf("【问题 %d】: %s\n", i+1, msg)
-		iter := runner.Run(ctx, []*schema.Message{
-			schema.UserMessage(msg),
+		iter := runner.Run(ctx, []*schema.AgenticMessage{
+			schema.UserAgenticMessage(msg),
 		})
 		for {
 			event, ok := iter.Next()
@@ -83,7 +84,7 @@ func main() {
 			}
 			if event.Output != nil && event.Output.MessageOutput != nil {
 				if m, err := event.Output.MessageOutput.GetMessage(); err == nil && m != nil {
-					fmt.Printf("【回答】: %s\n\n", m.Content)
+					fmt.Printf("【回答】: %s\n\n", agmsg.Text(m))
 				}
 			}
 		}

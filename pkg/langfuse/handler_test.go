@@ -45,8 +45,8 @@ func TestHandlerRecordsModelToolsToolCallsAndUsage(t *testing.T) {
 	}
 
 	ctx := SetTrace(context.Background(), WithID("trace-1"), WithName("test-trace"))
-	ctx = handler.OnStart(ctx, &callbacks.RunInfo{Component: components.ComponentOfChatModel, Type: "OpenAI", Name: "chat"}, &model.CallbackInput{
-		Messages: []*schema.Message{schema.UserMessage("hello")},
+	ctx = handler.OnStart(ctx, &callbacks.RunInfo{Component: components.ComponentOfAgenticModel, Type: "OpenAI", Name: "chat"}, &model.AgenticCallbackInput{
+		Messages: []*schema.AgenticMessage{schema.UserAgenticMessage("hello")},
 		Tools: []*schema.ToolInfo{{
 			Name: "search",
 			Desc: "Search docs",
@@ -54,19 +54,18 @@ func TestHandlerRecordsModelToolsToolCallsAndUsage(t *testing.T) {
 				"query": {Type: schema.String, Desc: "query", Required: true},
 			}),
 		}},
-		Config: &model.Config{Model: "gpt-test", MaxTokens: 128, Temperature: 0.7},
+		Config: &model.AgenticConfig{Model: "gpt-test", MaxTokens: 128, Temperature: 0.7},
 	})
-	ctx = handler.OnEnd(ctx, &callbacks.RunInfo{Component: components.ComponentOfChatModel, Type: "OpenAI", Name: "chat"}, &model.CallbackOutput{
-		Message: &schema.Message{
-			Role: schema.Assistant,
-			ToolCalls: []schema.ToolCall{{
-				ID:   "call-1",
-				Type: "function",
-				Function: schema.FunctionCall{
+	ctx = handler.OnEnd(ctx, &callbacks.RunInfo{Component: components.ComponentOfAgenticModel, Type: "OpenAI", Name: "chat"}, &model.AgenticCallbackOutput{
+		Message: &schema.AgenticMessage{
+			Role: schema.AgenticRoleTypeAssistant,
+			ContentBlocks: []*schema.ContentBlock{
+				schema.NewContentBlock(&schema.FunctionToolCall{
+					CallID:    "call-1",
 					Name:      "search",
 					Arguments: `{"query":"hello"}`,
-				},
-			}},
+				}),
+			},
 		},
 		TokenUsage: &model.TokenUsage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13},
 	})
@@ -120,7 +119,7 @@ func TestHandlerRecordsModelToolsToolCallsAndUsage(t *testing.T) {
 	updateBody := eventBodyMap(t, events[3])
 	output := updateBody["output"].(map[string]any)
 	outputToolCalls := output["tool_calls"].([]any)
-	if got := outputToolCalls[0].(map[string]any)["function"].(map[string]any)["name"]; got != "search" {
+	if got := outputToolCalls[0].(map[string]any)["name"]; got != "search" {
 		t.Fatalf("tool call name = %v", got)
 	}
 	usageDetails := updateBody["usageDetails"].(map[string]any)
@@ -134,7 +133,7 @@ func TestHandlerRecordsModelToolsToolCallsAndUsage(t *testing.T) {
 	}
 	traceOutput := traceOutputBody["output"].(map[string]any)
 	traceOutputToolCalls := traceOutput["tool_calls"].([]any)
-	if got := traceOutputToolCalls[0].(map[string]any)["function"].(map[string]any)["name"]; got != "search" {
+	if got := traceOutputToolCalls[0].(map[string]any)["name"]; got != "search" {
 		t.Fatalf("trace output tool call name = %v", got)
 	}
 }
@@ -207,9 +206,9 @@ func TestHandlerRecordsNestedToolInvocation(t *testing.T) {
 	}
 
 	ctx := SetTrace(context.Background(), WithID("trace-2"), WithName("tool-trace"))
-	ctx = handler.OnStart(ctx, &callbacks.RunInfo{Component: components.ComponentOfChatModel, Type: "OpenAI", Name: "chat"}, &model.CallbackInput{
-		Messages: []*schema.Message{schema.UserMessage("hello")},
-		Config:   &model.Config{Model: "gpt-test"},
+	ctx = handler.OnStart(ctx, &callbacks.RunInfo{Component: components.ComponentOfAgenticModel, Type: "OpenAI", Name: "chat"}, &model.AgenticCallbackInput{
+		Messages: []*schema.AgenticMessage{schema.UserAgenticMessage("hello")},
+		Config:   &model.AgenticConfig{Model: "gpt-test"},
 	})
 	if !handler.Needed(ctx, &callbacks.RunInfo{Component: components.ComponentOfTool, Type: "InferTool", Name: "search"}, callbacks.TimingOnStart) {
 		t.Fatal("nested tool should be needed")

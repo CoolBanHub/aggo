@@ -76,8 +76,14 @@ func main() {
 		log.Fatalf("创建时间助手失败: %v", err)
 	}
 
-	// 2. 创建主路由 Agent，它会根据问题自动选择合适的子 Agent
-	mainAgent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+	agentTools := []tool.BaseTool{
+		adk.NewTypedAgentTool[*schema.AgenticMessage](ctx, mathAgent),
+		adk.NewTypedAgentTool[*schema.AgenticMessage](ctx, weatherAgent),
+		adk.NewTypedAgentTool[*schema.AgenticMessage](ctx, timeAgent),
+	}
+
+	// 2. 创建主路由 Agent，它会根据问题自动选择合适的专业 Agent 工具
+	routerAgent, err := adk.NewTypedChatModelAgent[*schema.AgenticMessage](ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
 		Name:        "智能助手",
 		Description: "我是一个智能助手，可以处理数学计算、天气查询和时间处理等各类问题",
 		Instruction: "你是一个智能路由助手。根据用户的问题类型，选择合适的专业助手来回答：" +
@@ -85,26 +91,19 @@ func main() {
 			"2. 天气查询相关问题，请使用天气助手；" +
 			"3. 时间日期相关问题，请使用时间助手。" +
 			"请仔细理解用户问题，选择最合适的助手进行处理。",
-		Model:         cm,
+		Model: cm,
+		ToolsConfig: adk.ToolsConfig{
+			ToolsNodeConfig: compose.ToolsNodeConfig{
+				Tools: agentTools,
+			},
+		},
 		MaxIterations: 10,
 	})
 	if err != nil {
 		log.Fatalf("创建主 Agent 失败: %v", err)
 	}
 
-	// 3. 将子 Agent 注册到主 Agent
-	routerAgent, err := adk.SetSubAgents(ctx, mainAgent, []adk.Agent{
-		adk.AgentWithOptions(ctx, mathAgent, adk.WithDisallowTransferToParent()),
-		adk.AgentWithOptions(ctx, weatherAgent, adk.WithDisallowTransferToParent()),
-		adk.AgentWithOptions(ctx, timeAgent, adk.WithDisallowTransferToParent()),
-	})
-	if err != nil {
-		log.Fatalf("设置子 Agent 失败: %v", err)
-	}
-
-	// routerAgent is already an adk.Agent, use it directly
-
-	// 4. 测试不同类型的问题，主 Agent 会自动路由到对应的子 Agent
+	// 3. 测试不同类型的问题，主 Agent 会自动路由到对应的 Agent 工具
 	testQuestions := []string{
 		"请帮我计算 123.5 + 456.8 等于多少？",
 		"北京今天的天气怎么样？",
@@ -116,6 +115,7 @@ func main() {
 
 	fmt.Println("开始测试多 Agent 路由功能...")
 	stream := true
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: routerAgent, EnableStreaming: stream})
 	for i, question := range testQuestions {
 		fmt.Printf("\n【问题 %d】: %s\n", i+1, question)
 		ctx1 := context.Background()
@@ -124,12 +124,8 @@ func main() {
 			ctx1 = langfuse.SetTrace(context.Background(), langfuse.WithID(uuid.NewString()))
 		}
 
-		// 直接调用 Agent 运行
-		out := routerAgent.Run(ctx1, &adk.AgentInput{
-			Messages: []adk.Message{
-				{Role: schema.User, Content: question},
-			},
-			EnableStreaming: stream,
+		out := runner.Run(ctx1, []*schema.AgenticMessage{
+			schema.UserAgenticMessage(question),
 		})
 		idx := 0
 		for {
@@ -187,15 +183,6 @@ func main() {
 				}
 			}
 		}
-
-		//out, err := bot.Generate(ctx, []*schema.Message{
-		//	{Role: schema.User, Content: question},
-		//})
-		//if err != nil {
-		//	log.Printf("生成失败: %v", err)
-		//}
-		//
-		//fmt.Printf("【回答】: %s\n", out.Content)
 		break
 	}
 
@@ -203,8 +190,8 @@ func main() {
 }
 
 // createMathAgent 创建数学计算专家 Agent
-func createMathAgent(ctx context.Context, cm einoModel.ToolCallingChatModel) (adk.Agent, error) {
-	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+func createMathAgent(ctx context.Context, cm einoModel.AgenticModel) (adk.TypedAgent[*schema.AgenticMessage], error) {
+	return adk.NewTypedChatModelAgent[*schema.AgenticMessage](ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
 		Name:        "数学助手",
 		Description: "专业的数学计算助手，擅长进行加减乘除等各类数学运算",
 		Instruction: "你是一个专业的数学助手，擅长使用计算器工具进行精确计算。" +
@@ -220,8 +207,8 @@ func createMathAgent(ctx context.Context, cm einoModel.ToolCallingChatModel) (ad
 }
 
 // createWeatherAgent 创建天气查询专家 Agent
-func createWeatherAgent(ctx context.Context, cm einoModel.ToolCallingChatModel) (adk.Agent, error) {
-	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+func createWeatherAgent(ctx context.Context, cm einoModel.AgenticModel) (adk.TypedAgent[*schema.AgenticMessage], error) {
+	return adk.NewTypedChatModelAgent[*schema.AgenticMessage](ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
 		Name:        "天气助手",
 		Description: "专业的天气查询助手，可以查询各个城市的天气情况",
 		Instruction: "你是一个专业的天气播报员，擅长使用天气工具为用户提供准确的天气信息。" +
@@ -237,8 +224,8 @@ func createWeatherAgent(ctx context.Context, cm einoModel.ToolCallingChatModel) 
 }
 
 // createTimeAgent 创建时间处理专家 Agent
-func createTimeAgent(ctx context.Context, cm einoModel.ToolCallingChatModel) (adk.Agent, error) {
-	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+func createTimeAgent(ctx context.Context, cm einoModel.AgenticModel) (adk.TypedAgent[*schema.AgenticMessage], error) {
+	return adk.NewTypedChatModelAgent[*schema.AgenticMessage](ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
 		Name:        "时间助手",
 		Description: "专业的时间处理助手，可以查询时间、格式化时间、计算时间差等",
 		Instruction: "你是一个专业的时间管理助手，擅长使用时间工具处理时间查询、格式化和计算。" +

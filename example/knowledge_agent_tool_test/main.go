@@ -9,6 +9,7 @@ import (
 	"github.com/CoolBanHub/aggo/database"
 	"github.com/CoolBanHub/aggo/database/milvus"
 	postgres2 "github.com/CoolBanHub/aggo/database/postgres"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	storage2 "github.com/CoolBanHub/aggo/memory/builtin/storage"
@@ -165,7 +166,7 @@ func main() {
 		log.Fatalf("创建主Agent失败: %v", err)
 	}
 
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag})
 
 	// 6. 测试对话
 	testQuestions := []string{
@@ -180,8 +181,8 @@ func main() {
 		log.Printf("\n=== 测试问题 %d ===", i+1)
 		log.Printf("用户: %s", question)
 
-		iter := runner.Run(ctx, []*schema.Message{
-			schema.UserMessage(question),
+		iter := runner.Run(ctx, []*schema.AgenticMessage{
+			schema.UserAgenticMessage(question),
 		}, adk.WithSessionValues(map[string]any{
 			"userID":    userID,
 			"sessionID": sessionId,
@@ -198,7 +199,7 @@ func main() {
 			}
 			if event.Output != nil && event.Output.MessageOutput != nil {
 				if m, err := event.Output.MessageOutput.GetMessage(); err == nil && m != nil {
-					log.Printf("AI助手: %s", m.Content)
+					log.Printf("AI助手: %s", agmsg.Text(m))
 				}
 			}
 		}

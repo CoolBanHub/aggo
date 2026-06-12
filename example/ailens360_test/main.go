@@ -32,8 +32,9 @@ import (
 	"time"
 
 	"github.com/CoolBanHub/aggo/agent"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/pkg/ailens360"
-	"github.com/cloudwego/eino-ext/components/model/openai"
+	"github.com/cloudwego/eino-ext/components/model/agenticopenai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
@@ -96,14 +97,16 @@ func main() {
 	// 2) Build an openai chat model and apply the decorator. After Apply:
 	//    - cfg.BaseURL becomes "<proxy>/<upstream>"
 	//    - cfg.HTTPClient gains a RoundTripper that stamps headers
-	chatCfg := &openai.ChatModelConfig{
+	chatCfg := &agenticopenai.ChatConfig{
 		APIKey:  apiKey,
 		BaseURL: baseURL,
 		Model:   modelName,
 	}
-	decorator.Apply(chatCfg)
+	if decorator != nil {
+		decorator.ApplyAgentic(chatCfg)
+	}
 
-	chatModel, err := openai.NewChatModel(ctx, chatCfg)
+	chatModel, err := agenticopenai.NewChatModel(ctx, chatCfg)
 	if err != nil {
 		log.Fatalf("new chat model: %v", err)
 	}
@@ -146,9 +149,10 @@ func main() {
 	log.Printf("trace_id   = %s", traceID)
 
 	// 5) Run the agent and stream the final answer.
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag, EnableStreaming: true})
-	iter := runner.Run(ctx, []*schema.Message{
-		schema.UserMessage("上海现在天气怎么样？请用中文回答。"),
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag, EnableStreaming: true})
+	userMsg := schema.UserAgenticMessage("上海现在天气怎么样？请用中文回答。")
+	iter := runner.Run(ctx, []*schema.AgenticMessage{
+		userMsg,
 	})
 
 	fmt.Println("\n--- streaming answer ---")
@@ -170,8 +174,8 @@ func main() {
 		if err != nil || msg == nil {
 			continue
 		}
-		if msg.Content != "" {
-			fmt.Print(msg.Content)
+		if text := agmsg.Text(msg); text != "" {
+			fmt.Print(text)
 		}
 	}
 	fmt.Println()

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/CoolBanHub/aggo/agent"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools/shell"
 	"github.com/cloudwego/eino/adk"
@@ -42,7 +43,7 @@ func main() {
 		return
 	}
 
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag})
 
 	conversations := []string{
 		"帮我看一下当前目录有什么文件",
@@ -51,8 +52,8 @@ func main() {
 
 	for _, conversation := range conversations {
 		log.Printf("User: %s", conversation)
-		iter := runner.Run(ctx, []*schema.Message{
-			schema.UserMessage(conversation),
+		iter := runner.Run(ctx, []*schema.AgenticMessage{
+			schema.UserAgenticMessage(conversation),
 		})
 		var response string
 		for {
@@ -65,7 +66,7 @@ func main() {
 			}
 			if event.Output != nil && event.Output.MessageOutput != nil {
 				if msg, err := event.Output.MessageOutput.GetMessage(); err == nil && msg != nil {
-					response = msg.Content
+					response = agmsg.Text(msg)
 				}
 			}
 		}

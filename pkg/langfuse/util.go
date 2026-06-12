@@ -107,6 +107,28 @@ func modelParameters(conf *model.Config, toolChoice *schema.ToolChoice) map[stri
 	return params
 }
 
+func agenticModelParameters(conf *model.AgenticConfig) map[string]any {
+	params := map[string]any{}
+	if conf != nil {
+		if conf.Model != "" {
+			params["model"] = conf.Model
+		}
+		if conf.MaxTokens > 0 {
+			params["max_tokens"] = conf.MaxTokens
+		}
+		if conf.Temperature != 0 {
+			params["temperature"] = conf.Temperature
+		}
+		if conf.TopP != 0 {
+			params["top_p"] = conf.TopP
+		}
+	}
+	if len(params) == 0 {
+		return nil
+	}
+	return params
+}
+
 func toolChoiceValue(toolChoice *schema.ToolChoice) any {
 	if toolChoice == nil {
 		return nil

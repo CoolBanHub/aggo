@@ -19,10 +19,10 @@ func DefaultAsyncTaskTraceName(taskType string) string {
 	}
 }
 
-func withObservationName(ctx context.Context, cm model.ToolCallingChatModel, name string) context.Context {
+func withObservationName(ctx context.Context, cm model.AgenticModel, name string) context.Context {
 	runInfo := &callbacks.RunInfo{
 		Name:      name,
-		Component: components.ComponentOfChatModel,
+		Component: components.ComponentOfAgenticModel,
 	}
 	if typ, ok := components.GetType(cm); ok {
 		runInfo.Type = typ

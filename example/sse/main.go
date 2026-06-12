@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/CoolBanHub/aggo/agent"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	"github.com/CoolBanHub/aggo/memory/builtin/storage"
@@ -18,7 +19,7 @@ import (
 	"github.com/CoolBanHub/aggo/pkg/sse"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/adk"
-	model2 "github.com/cloudwego/eino/components/model"
+	einoModel "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -37,10 +38,10 @@ type ChatResponse struct {
 	Done      bool   `json:"done"`
 }
 
-var globalAgent adk.Agent
-var globalRunner *adk.Runner
+var globalAgent adk.TypedAgent[*schema.AgenticMessage]
+var globalRunner *adk.TypedRunner[*schema.AgenticMessage]
 var globalMemoryProvider memory.MemoryProvider
-var cm model2.ToolCallingChatModel
+var cm einoModel.AgenticModel
 
 func main() {
 	ctx := context.Background()
@@ -113,7 +114,7 @@ func initializeBot(ctx context.Context) error {
 		return fmt.Errorf("new agent fail,err:%s", err)
 	}
 
-	globalRunner = adk.NewRunner(ctx, adk.RunnerConfig{Agent: globalAgent})
+	globalRunner = adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: globalAgent})
 
 	return nil
 }
@@ -498,8 +499,8 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer writer.Close()
 
-	iter := globalRunner.Run(ctx, []*schema.Message{
-		schema.UserMessage(req.Message),
+	iter := globalRunner.Run(ctx, []*schema.AgenticMessage{
+		schema.UserAgenticMessage(req.Message),
 	}, adk.WithSessionValues(map[string]any{
 		"userID":    "sse-user",
 		"sessionID": sessionID,
@@ -519,7 +520,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 			if err != nil || msg == nil {
 				continue
 			}
-			if msg.Content == "" && msg.ReasoningContent == "" {
+			if agmsg.Text(msg) == "" && !agmsg.HasFunctionToolCall(msg) {
 				continue
 			}
 			openaiResp := adapter.MessageToOpenaiStreamResponse(msg, 0)

@@ -10,7 +10,7 @@ type AsyncTaskContextBuilder func(taskType, userID, sessionID string) context.Co
 
 // ProviderConfig is the config for the builtin memory provider.
 type ProviderConfig struct {
-	ChatModel    model.ToolCallingChatModel
+	ChatModel    model.AgenticModel
 	Storage      MemoryStorage
 	MemoryConfig *MemoryConfig
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/CoolBanHub/aggo/agent"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	"github.com/CoolBanHub/aggo/memory/builtin/storage"
@@ -73,46 +74,43 @@ func main() {
 		return
 	}
 
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag})
 
-	conversations := []*schema.Message{
-		schema.UserMessage("你好，我是Alice"),
-		schema.UserMessage("我是一名软件工程师，专门做后端开发"),
-		schema.UserMessage("我住在北京，今年28岁"),
-		schema.UserMessage("你有什么爱好吗?"),
-		schema.UserMessage("我喜欢读书和摄影，特别是科幻小说"),
-		{
-			Role: schema.User,
-			UserInputMultiContent: []schema.MessageInputPart{
-				{
-					Type: "text",
-					Text: "这图片里面有什么？",
-				},
-				{
-					Type: "image_url",
-					Image: &schema.MessageInputImage{
-						MessagePartCommon: schema.MessagePartCommon{
-							URL: utils.ValueToPtr("https://cdn.deepseek.com/logo.png"),
-						},
+	conversations := []*schema.AgenticMessage{
+		schema.UserAgenticMessage("你好，我是Alice"),
+		schema.UserAgenticMessage("我是一名软件工程师，专门做后端开发"),
+		schema.UserAgenticMessage("我住在北京，今年28岁"),
+		schema.UserAgenticMessage("你有什么爱好吗?"),
+		schema.UserAgenticMessage("我喜欢读书和摄影，特别是科幻小说"),
+		agmsg.UserMessageFromInputParts([]schema.MessageInputPart{
+			{
+				Type: schema.ChatMessagePartTypeText,
+				Text: "这图片里面有什么？",
+			},
+			{
+				Type: schema.ChatMessagePartTypeImageURL,
+				Image: &schema.MessageInputImage{
+					MessagePartCommon: schema.MessagePartCommon{
+						URL: utils.ValueToPtr("https://cdn.deepseek.com/logo.png"),
 					},
 				},
 			},
-		},
-		//schema.UserMessage("我最近在学习Go语言和云原生技术"),
-		//schema.UserMessage("我的工作主要涉及微服务架构设计"),
-		//schema.UserMessage("周末我通常会去公园拍照或者在家看书"),
-		//schema.UserMessage("你能给我推荐一些适合我的技术书籍吗？"),
-		//schema.UserMessage("你还记得我之前说过我的职业是什么吗？"),
-		//schema.UserMessage("基于你对我的了解，你觉得我适合学习什么新技术？"),
-		//schema.UserMessage("我们年龄相差多少岁呢"),
-		//schema.UserMessage("你喜欢吃什么水果吗？我喜欢吃苹果"),
-		//schema.UserMessage("你知道我的住哪里吗"),
+		}),
+		//schema.UserAgenticMessage("我最近在学习Go语言和云原生技术"),
+		//schema.UserAgenticMessage("我的工作主要涉及微服务架构设计"),
+		//schema.UserAgenticMessage("周末我通常会去公园拍照或者在家看书"),
+		//schema.UserAgenticMessage("你能给我推荐一些适合我的技术书籍吗？"),
+		//schema.UserAgenticMessage("你还记得我之前说过我的职业是什么吗？"),
+		//schema.UserAgenticMessage("基于你对我的了解，你觉得我适合学习什么新技术？"),
+		//schema.UserAgenticMessage("我们年龄相差多少岁呢"),
+		//schema.UserAgenticMessage("你喜欢吃什么水果吗？我喜欢吃苹果"),
+		//schema.UserAgenticMessage("你知道我的住哪里吗"),
 	}
 
 	for _, conversation := range conversations {
 		j, _ := sonic.MarshalString(conversation)
 		log.Printf("User: %s", j)
-		iter := runner.Run(ctx, []*schema.Message{
+		iter := runner.Run(ctx, []*schema.AgenticMessage{
 			conversation,
 		}, adk.WithSessionValues(map[string]any{
 			"userID":    sessionID,
@@ -130,7 +128,7 @@ func main() {
 			}
 			if event.Output != nil && event.Output.MessageOutput != nil {
 				if msg, err := event.Output.MessageOutput.GetMessage(); err == nil && msg != nil {
-					response = msg.Content
+					response = agmsg.Text(msg)
 				}
 			}
 		}

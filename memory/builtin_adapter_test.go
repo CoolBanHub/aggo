@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	"github.com/CoolBanHub/aggo/memory/builtin/storage"
 )
@@ -63,17 +64,17 @@ func TestBuiltinRetrieveKeepsRecentMessagesWithSessionSummary(t *testing.T) {
 		t.Fatalf("Retrieve: %v", err)
 	}
 
-	if len(result.SystemMessages) != 1 || !strings.Contains(result.SystemMessages[0].Content, "已摘要到最新一轮") {
+	if len(result.SystemMessages) != 1 || !strings.Contains(agmsg.Text(result.SystemMessages[0]), "已摘要到最新一轮") {
 		t.Fatalf("summary was not injected: %#v", result.SystemMessages)
 	}
 	if len(result.HistoryMessages) != 2 {
 		t.Fatalf("len(HistoryMessages) = %d, want 2: %#v", len(result.HistoryMessages), result.HistoryMessages)
 	}
-	if !strings.Contains(result.HistoryMessages[0].Content, "project-19313590114") {
-		t.Fatalf("recent user message missing: %q", result.HistoryMessages[0].Content)
+	if !strings.Contains(agmsg.Text(result.HistoryMessages[0]), "project-19313590114") {
+		t.Fatalf("recent user message missing: %q", agmsg.Text(result.HistoryMessages[0]))
 	}
-	if !strings.Contains(result.HistoryMessages[1].Content, "未找到对应记录") {
-		t.Fatalf("recent assistant message missing: %q", result.HistoryMessages[1].Content)
+	if !strings.Contains(agmsg.Text(result.HistoryMessages[1]), "未找到对应记录") {
+		t.Fatalf("recent assistant message missing: %q", agmsg.Text(result.HistoryMessages[1]))
 	}
 }
 

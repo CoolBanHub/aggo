@@ -3,26 +3,21 @@ package langfuse
 import (
 	"encoding/json"
 
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
 
 type chatMessage struct {
-	Role                     schema.RoleType            `json:"role"`
-	Content                  string                     `json:"content,omitempty"`
-	MultiContent             []schema.ChatMessagePart   `json:"multi_content,omitempty"`
-	UserInputMultiContent    []schema.MessageInputPart  `json:"user_input_multi_content,omitempty"`
-	AssistantGenMultiContent []schema.MessageOutputPart `json:"assistant_output_multi_content,omitempty"`
-	Name                     string                     `json:"name,omitempty"`
-	ToolCalls                []schema.ToolCall          `json:"tool_calls,omitempty"`
-	ToolCallID               string                     `json:"tool_call_id,omitempty"`
-	ToolName                 string                     `json:"tool_name,omitempty"`
-	ResponseMeta             *schema.ResponseMeta       `json:"response_meta,omitempty"`
-	ReasoningContent         string                     `json:"reasoning_content,omitempty"`
-	Extra                    map[string]any             `json:"extra,omitempty"`
+	Role          schema.AgenticRoleType      `json:"role"`
+	Content       string                      `json:"content,omitempty"`
+	ContentBlocks []*schema.ContentBlock      `json:"content_blocks,omitempty"`
+	ToolCalls     []schema.FunctionToolCall   `json:"tool_calls,omitempty"`
+	ResponseMeta  *schema.AgenticResponseMeta `json:"response_meta,omitempty"`
+	Extra         map[string]any              `json:"extra,omitempty"`
 }
 
-func chatModelInput(input *model.CallbackInput) any {
+func chatModelInput(input *model.AgenticCallbackInput) any {
 	if input == nil {
 		return nil
 	}
@@ -43,20 +38,14 @@ func chatModelInput(input *model.CallbackInput) any {
 		if input.Config.TopP != 0 {
 			out["top_p"] = input.Config.TopP
 		}
-		if len(input.Config.Stop) > 0 {
-			out["stop"] = input.Config.Stop
-		}
 	}
 	if tools := convertTools(input.Tools); len(tools) > 0 {
 		out["tools"] = tools
 	}
-	if toolChoice := toolChoiceValue(input.ToolChoice); toolChoice != nil {
-		out["tool_choice"] = toolChoice
-	}
 	return out
 }
 
-func convertMessages(messages []*schema.Message) []any {
+func convertMessages(messages []*schema.AgenticMessage) []any {
 	converted := make([]any, 0, len(messages))
 	for _, message := range messages {
 		if message == nil {
@@ -67,23 +56,17 @@ func convertMessages(messages []*schema.Message) []any {
 	return converted
 }
 
-func convertMessage(message *schema.Message) any {
+func convertMessage(message *schema.AgenticMessage) any {
 	if message == nil {
 		return nil
 	}
 	return chatMessage{
-		Role:                     message.Role,
-		Content:                  message.Content,
-		MultiContent:             message.MultiContent,
-		UserInputMultiContent:    message.UserInputMultiContent,
-		AssistantGenMultiContent: message.AssistantGenMultiContent,
-		Name:                     message.Name,
-		ToolCalls:                message.ToolCalls,
-		ToolCallID:               message.ToolCallID,
-		ToolName:                 message.ToolName,
-		ResponseMeta:             message.ResponseMeta,
-		ReasoningContent:         message.ReasoningContent,
-		Extra:                    message.Extra,
+		Role:          message.Role,
+		Content:       agmsg.Text(message),
+		ContentBlocks: message.ContentBlocks,
+		ToolCalls:     functionToolCalls(message),
+		ResponseMeta:  message.ResponseMeta,
+		Extra:         message.Extra,
 	}
 }
 
@@ -131,21 +114,35 @@ func toolDefinitionsMetadata(tools []*schema.ToolInfo) any {
 	return converted
 }
 
-func toolCallsMetadata(message *schema.Message) []map[string]any {
-	if message == nil || len(message.ToolCalls) == 0 {
+func toolCallsMetadata(message *schema.AgenticMessage) []map[string]any {
+	calls := functionToolCalls(message)
+	if len(calls) == 0 {
 		return nil
 	}
-	out := make([]map[string]any, 0, len(message.ToolCalls))
-	for _, call := range message.ToolCalls {
+	out := make([]map[string]any, 0, len(calls))
+	for _, call := range calls {
 		out = append(out, map[string]any{
-			"id":        call.ID,
-			"name":      call.Function.Name,
-			"arguments": call.Function.Arguments,
-			"type":      call.Type,
-			"index":     call.Index,
+			"id":        call.CallID,
+			"name":      call.Name,
+			"arguments": call.Arguments,
+			"type":      "function",
 		})
 	}
 	return out
+}
+
+func functionToolCalls(message *schema.AgenticMessage) []schema.FunctionToolCall {
+	if message == nil {
+		return nil
+	}
+	calls := make([]schema.FunctionToolCall, 0)
+	for _, block := range message.ContentBlocks {
+		if block == nil || block.FunctionToolCall == nil {
+			continue
+		}
+		calls = append(calls, *block.FunctionToolCall)
+	}
+	return calls
 }
 
 func jsonRaw(value any) any {

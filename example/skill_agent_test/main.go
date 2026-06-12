@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/CoolBanHub/aggo/agent"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/CoolBanHub/aggo/tools/shell"
 	"github.com/cloudwego/eino-ext/adk/backend/local"
@@ -51,7 +52,7 @@ func main() {
 		log.Fatalf("Failed to create backend: %v", err)
 	}
 
-	skillMiddleware, err := skill.NewMiddleware(ctx, &skill.Config{
+	skillMiddleware, err := skill.NewTyped[*schema.AgenticMessage](ctx, &skill.TypedConfig[*schema.AgenticMessage]{
 		Backend: backend,
 	})
 	if err != nil {
@@ -85,11 +86,11 @@ func main() {
 		log.Fatalf("Failed to create agent: %v", err)
 	}
 
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag})
 
-	query := "请帮我创建一个用于处理 PDF 文件的 skill"
-	iter := runner.Run(ctx, []*schema.Message{
-		schema.UserMessage(query),
+	query := "请帮我创建一个用于处理 PDF 文件的 skill,并直接保存到skill目录内"
+	iter := runner.Run(ctx, []*schema.AgenticMessage{
+		schema.UserAgenticMessage(query),
 	})
 
 	for {
@@ -104,13 +105,11 @@ func main() {
 		}
 
 		if event.Output != nil && event.Output.MessageOutput != nil {
-			msg := event.Output.MessageOutput.Message
-			if msg != nil && msg.Content != "" {
-				role := event.Output.MessageOutput.Role
-				if role == "assistant" {
-					fmt.Printf("🤖 Assistant: %s\n", msg.Content)
-				} else if role == "tool" {
-					fmt.Printf("🔧 Tool [%s]: %s\n", event.Output.MessageOutput.ToolName, truncate(msg.Content, 500))
+			msg, err := event.Output.MessageOutput.GetMessage()
+			if err == nil && msg != nil {
+				text := agmsg.Text(msg)
+				if text != "" {
+					fmt.Printf("🤖 Assistant: %s\n", truncate(text, 500))
 				}
 			}
 		}
@@ -121,9 +120,6 @@ func main() {
 			}
 			if event.Action.Exit {
 				fmt.Println("✅ Agent exited")
-			}
-			if event.Action.TransferToAgent != nil {
-				fmt.Printf("🔄 Transferring to agent: %s\n", event.Action.TransferToAgent.DestAgentName)
 			}
 		}
 	}

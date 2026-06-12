@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/cloudwego/eino/schema"
 )
@@ -67,8 +68,8 @@ func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*
 		},
 	}
 	if strings.TrimSpace(memoryContext) != "" {
-		result.SystemMessages = []*schema.Message{
-			schema.SystemMessage(memoryContext),
+		result.SystemMessages = []*schema.AgenticMessage{
+			schema.SystemAgenticMessage(memoryContext),
 		}
 	}
 
@@ -79,14 +80,15 @@ func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*
 func (p *Provider) Memorize(ctx context.Context, req *memory.MemorizeRequest) error {
 	var userText, assistantText string
 	for _, msg := range req.Messages {
-		if msg == nil || strings.TrimSpace(msg.Content) == "" {
+		content := strings.TrimSpace(agmsg.Text(msg))
+		if msg == nil || content == "" {
 			continue
 		}
 		switch msg.Role {
-		case schema.User:
-			userText = strings.TrimSpace(msg.Content)
-		case schema.Assistant:
-			assistantText = strings.TrimSpace(msg.Content)
+		case schema.AgenticRoleTypeUser:
+			userText = content
+		case schema.AgenticRoleTypeAssistant:
+			assistantText = content
 		}
 	}
 
@@ -245,20 +247,20 @@ func defaultSearchPath(mode Mode) string {
 	}
 }
 
-func buildSearchQuery(messages []*schema.Message, limit, maxChars int) string {
+func buildSearchQuery(messages []*schema.AgenticMessage, limit, maxChars int) string {
 	recent := recentConversationMessages(messages, limit)
 	if len(recent) == 0 {
 		return ""
 	}
 
 	for i := len(recent) - 1; i >= 0; i-- {
-		if recent[i].Role != schema.User {
+		if recent[i].Role != schema.AgenticRoleTypeUser {
 			continue
 		}
 
-		query := recent[i].Content
+		query := agmsg.Text(recent[i])
 		if runeCount(query) < 80 && i > 0 {
-			query = recent[i-1].Content + "\n" + query
+			query = agmsg.Text(recent[i-1]) + "\n" + query
 		}
 		return truncateRunes(strings.TrimSpace(query), maxChars)
 	}
@@ -269,24 +271,22 @@ func buildSearchQuery(messages []*schema.Message, limit, maxChars int) string {
 	}
 	parts := make([]string, 0, len(recent[start:]))
 	for _, msg := range recent[start:] {
-		parts = append(parts, msg.Content)
+		parts = append(parts, agmsg.Text(msg))
 	}
 	return truncateRunes(strings.Join(parts, "\n"), maxChars)
 }
 
-func recentConversationMessages(messages []*schema.Message, limit int) []*schema.Message {
-	filtered := make([]*schema.Message, 0, len(messages))
+func recentConversationMessages(messages []*schema.AgenticMessage, limit int) []*schema.AgenticMessage {
+	filtered := make([]*schema.AgenticMessage, 0, len(messages))
 	for _, msg := range messages {
-		if msg == nil || strings.TrimSpace(msg.Content) == "" {
+		content := strings.TrimSpace(agmsg.Text(msg))
+		if msg == nil || content == "" {
 			continue
 		}
-		if msg.Role != schema.User && msg.Role != schema.Assistant {
+		if msg.Role != schema.AgenticRoleTypeUser && msg.Role != schema.AgenticRoleTypeAssistant {
 			continue
 		}
-		filtered = append(filtered, &schema.Message{
-			Role:    msg.Role,
-			Content: strings.TrimSpace(msg.Content),
-		})
+		filtered = append(filtered, msg)
 	}
 
 	if limit > 0 && len(filtered) > limit {

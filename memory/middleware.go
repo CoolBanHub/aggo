@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
@@ -13,15 +14,15 @@ import (
 // MemoryMiddleware implements adk.ChatModelAgentMiddleware.
 // It delegates to a MemoryProvider for retrieval and memorization.
 type MemoryMiddleware struct {
-	*adk.BaseChatModelAgentMiddleware
+	*adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]
 	provider MemoryProvider
 }
 
 // NewMemoryMiddleware creates a MemoryMiddleware with a MemoryProvider.
 func NewMemoryMiddleware(provider MemoryProvider) *MemoryMiddleware {
 	return &MemoryMiddleware{
-		BaseChatModelAgentMiddleware: &adk.BaseChatModelAgentMiddleware{},
-		provider:                     provider,
+		TypedBaseChatModelAgentMiddleware: &adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]{},
+		provider:                          provider,
 	}
 }
 
@@ -31,7 +32,7 @@ func (m *MemoryMiddleware) BeforeAgent(ctx context.Context, runCtx *adk.ChatMode
 }
 
 // BeforeModelRewriteState injects memory context before a model call.
-func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
+func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *adk.TypedChatModelAgentState[*schema.AgenticMessage], mc *adk.TypedModelContext[*schema.AgenticMessage]) (context.Context, *adk.TypedChatModelAgentState[*schema.AgenticMessage], error) {
 	if m.provider == nil {
 		return ctx, state, nil
 	}
@@ -67,10 +68,10 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 	}
 
 	// Split state.Messages into: first system message + rest
-	var systemMsg *schema.Message
-	var restMessages []*schema.Message
+	var systemMsg *schema.AgenticMessage
+	var restMessages []*schema.AgenticMessage
 	for _, msg := range state.Messages {
-		if systemMsg == nil && msg.Role == schema.System {
+		if systemMsg == nil && msg.Role == schema.AgenticRoleTypeSystem {
 			systemMsg = msg
 		} else {
 			restMessages = append(restMessages, msg)
@@ -81,19 +82,20 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 	if len(result.SystemMessages) > 0 && systemMsg != nil {
 		var memoryBlock strings.Builder
 		for i, sm := range result.SystemMessages {
-			if sm.Content != "" {
+			content := agmsg.Text(sm)
+			if content != "" {
 				if i > 0 {
 					memoryBlock.WriteString("\n")
 				}
-				memoryBlock.WriteString(sm.Content)
+				memoryBlock.WriteString(content)
 				memoryBlock.WriteString("\n")
 			}
 		}
-		systemMsg.Content = systemMsg.Content + "\n\n" + memoryBlock.String()
+		agmsg.AppendUserText(systemMsg, "\n\n"+memoryBlock.String())
 	}
 
 	// Reassemble: system prompt → history → rest of conversation.
-	enhanced := make([]*schema.Message, 0, 1+len(result.HistoryMessages)+len(restMessages))
+	enhanced := make([]*schema.AgenticMessage, 0, 1+len(result.HistoryMessages)+len(restMessages))
 	if systemMsg != nil {
 		enhanced = append(enhanced, systemMsg)
 	}
@@ -107,7 +109,7 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 }
 
 // AfterModelRewriteState stores assistant response after a model call.
-func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *adk.ChatModelAgentState, mc *adk.ModelContext) (context.Context, *adk.ChatModelAgentState, error) {
+func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *adk.TypedChatModelAgentState[*schema.AgenticMessage], mc *adk.TypedModelContext[*schema.AgenticMessage]) (context.Context, *adk.TypedChatModelAgentState[*schema.AgenticMessage], error) {
 	if m.provider == nil {
 		return ctx, state, nil
 	}
@@ -125,7 +127,7 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 	}
 
 	latestMsg := state.Messages[len(state.Messages)-1]
-	if latestMsg == nil || latestMsg.Role != schema.Assistant {
+	if latestMsg == nil || latestMsg.Role != schema.AgenticRoleTypeAssistant {
 		return ctx, state, nil
 	}
 
@@ -133,21 +135,21 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 	// Intermediate assistant messages that contain tool calls are not final
 	// user-visible answers and should never be stored as memories, even if
 	// providers/models also include explanatory text in the same message.
-	if len(latestMsg.ToolCalls) > 0 || strings.TrimSpace(latestMsg.Content) == "" {
+	if agmsg.HasFunctionToolCall(latestMsg) || strings.TrimSpace(agmsg.Text(latestMsg)) == "" {
 		return ctx, state, nil
 	}
 
 	// Find the latest user message for the current turn.
-	var userMsg *schema.Message
+	var userMsg *schema.AgenticMessage
 	for i := len(state.Messages) - 2; i >= 0; i-- {
-		if state.Messages[i].Role == schema.User {
+		if state.Messages[i].Role == schema.AgenticRoleTypeUser {
 			userMsg = state.Messages[i]
 			break
 		}
 	}
 	assistantMsg := latestMsg
 
-	var messagesToMemorize []*schema.Message
+	var messagesToMemorize []*schema.AgenticMessage
 	if userMsg != nil {
 		messagesToMemorize = append(messagesToMemorize, userMsg)
 	}

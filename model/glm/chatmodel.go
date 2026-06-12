@@ -7,13 +7,11 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino-ext/libs/acl/openai"
-	"github.com/cloudwego/eino/callbacks"
-	"github.com/cloudwego/eino/components"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
 
-var _ model.ToolCallingChatModel = (*ChatModel)(nil)
+var _ model.AgenticModel = (*ChatModel)(nil)
 
 // ChatModelConfig parameters detail see:
 type ChatModelConfig struct {
@@ -95,7 +93,7 @@ type ChatModelConfig struct {
 }
 
 type ChatModel struct {
-	cli *openai.Client
+	cli *openai.AgenticClient
 
 	extraOptions *options
 }
@@ -134,7 +132,7 @@ func NewChatModel(ctx context.Context, config *ChatModelConfig) (*ChatModel, err
 		User:             config.User,
 	}
 
-	cli, err := openai.NewClient(ctx, nConfig)
+	cli, err := openai.NewAgenticClient(ctx, nConfig)
 
 	if err != nil {
 		return nil, err
@@ -148,56 +146,23 @@ func NewChatModel(ctx context.Context, config *ChatModelConfig) (*ChatModel, err
 	}, nil
 }
 
-func (cm *ChatModel) Generate(ctx context.Context, in []*schema.Message, opts ...model.Option) (
-	outMsg *schema.Message, err error) {
-	ctx = callbacks.EnsureRunInfo(ctx, cm.GetType(), components.ComponentOfChatModel)
+func (cm *ChatModel) Generate(ctx context.Context, in []*schema.AgenticMessage, opts ...model.Option) (
+	outMsg *schema.AgenticMessage, err error) {
 	opts = cm.parseCustomOptions(opts...)
 	return cm.cli.Generate(ctx, in, opts...)
 }
 
-func (cm *ChatModel) Stream(ctx context.Context, in []*schema.Message, opts ...model.Option) (outStream *schema.StreamReader[*schema.Message], err error) {
-	ctx = callbacks.EnsureRunInfo(ctx, cm.GetType(), components.ComponentOfChatModel)
+func (cm *ChatModel) Stream(ctx context.Context, in []*schema.AgenticMessage, opts ...model.Option) (outStream *schema.StreamReader[*schema.AgenticMessage], err error) {
 	opts = cm.parseCustomOptions(opts...)
-	outStream, err = cm.cli.Stream(ctx, in, opts...)
+	return cm.cli.Stream(ctx, in, opts...)
+}
+
+func (cm *ChatModel) WithTools(tools []*schema.ToolInfo) (model.AgenticModel, error) {
+	cli, err := cm.cli.WithTools(tools)
 	if err != nil {
 		return nil, err
 	}
-
-	var lastIndex *int
-
-	sr := schema.StreamReaderWithConvert(outStream, func(msg *schema.Message) (*schema.Message, error) {
-		if len(msg.ToolCalls) > 0 {
-			firstToolCall := msg.ToolCalls[0]
-
-			if msg.ResponseMeta == nil || len(msg.ResponseMeta.FinishReason) == 0 {
-				lastIndex = firstToolCall.Index
-				return msg, nil
-			}
-
-			if firstToolCall.Index == nil && len(msg.ResponseMeta.FinishReason) != 0 {
-				firstToolCall.Index = lastIndex
-				msg.ToolCalls[0] = firstToolCall
-			}
-		}
-		return msg, nil
-	})
-	return sr, nil
-}
-
-func (cm *ChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
-	cli, err := cm.cli.WithToolsForClient(tools)
-	if err != nil {
-		return nil, err
-	}
-	return &ChatModel{cli: cli, extraOptions: cm.extraOptions}, nil
-}
-
-func (cm *ChatModel) BindTools(tools []*schema.ToolInfo) error {
-	return cm.cli.BindTools(tools)
-}
-
-func (cm *ChatModel) BindForcedTools(tools []*schema.ToolInfo) error {
-	return cm.cli.BindForcedTools(tools)
+	return &ChatModel{cli: cli.(*openai.AgenticClient), extraOptions: cm.extraOptions}, nil
 }
 
 func (cm *ChatModel) parseCustomOptions(opts ...model.Option) []model.Option {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gookit/slog"
@@ -187,8 +188,8 @@ func formatHistoryMessageTime(raw any) string {
 	return ts.Format("2006-01-02 15:04")
 }
 
-func PrefixHistoryTimestamp(msg *schema.Message) *schema.Message {
-	if msg == nil || strings.TrimSpace(msg.Content) == "" {
+func PrefixHistoryTimestamp(msg *schema.AgenticMessage) *schema.AgenticMessage {
+	if msg == nil || strings.TrimSpace(agmsg.Text(msg)) == "" {
 		return msg
 	}
 	if msg.Extra == nil {
@@ -198,9 +199,7 @@ func PrefixHistoryTimestamp(msg *schema.Message) *schema.Message {
 	if formatted == "" {
 		return msg
 	}
-	cloned := *msg
-	cloned.Content = fmt.Sprintf("[%s] %s", formatted, msg.Content)
-	return &cloned
+	return agmsg.PrependText(msg, fmt.Sprintf("[%s] ", formatted))
 }
 
 func enqueueIndexTask(manager *MemoryManager, msg *ConversationMessage) {

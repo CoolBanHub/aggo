@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/bytedance/sonic"
 	"github.com/cloudwego/eino/schema"
 )
@@ -150,9 +151,9 @@ func (w *Writer) WriteDone() error {
 	return nil
 }
 
-func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema.Message], fn func(output *schema.Message, index int) any) error {
+func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema.AgenticMessage], fn func(output *schema.AgenticMessage, index int) any) error {
 	if fn == nil {
-		fn = func(output *schema.Message, index int) any {
+		fn = func(output *schema.AgenticMessage, index int) any {
 			return output
 		}
 	}
@@ -178,7 +179,7 @@ func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema
 		}
 
 		// 如果 chunk 为空为空，则结束流
-		if chunk == nil || (chunk.Content == "" && chunk.ReasoningContent == "") {
+		if chunk == nil || (agmsg.Text(chunk) == "" && !agmsg.HasFunctionToolCall(chunk)) {
 			continue
 		}
 		newChunk := fn(chunk, index)

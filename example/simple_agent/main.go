@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/CoolBanHub/aggo/agent"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -36,9 +37,9 @@ func main() {
 		log.Fatalf("创建 Agent 失败: %v", err)
 	}
 
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
-	iter := runner.Run(ctx, []*schema.Message{
-		schema.UserMessage("你是什么助手"),
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag})
+	iter := runner.Run(ctx, []*schema.AgenticMessage{
+		schema.UserAgenticMessage("你是什么助手"),
 	}, adk.WithSessionValues(map[string]any{
 		"name": "大昌",
 	}))
@@ -54,7 +55,7 @@ func main() {
 		}
 		if event.Output != nil && event.Output.MessageOutput != nil {
 			if msg, err := event.Output.MessageOutput.GetMessage(); err == nil && msg != nil {
-				response = msg.Content
+				response = agmsg.Text(msg)
 			}
 		}
 	}

@@ -41,35 +41,18 @@ func TestFormatInstruction_NoFrameworkSections(t *testing.T) {
 	}
 }
 
-func TestFormatInstruction_WithTransfer(t *testing.T) {
-	input := "你是一个智能助手。\n\n## 工作原则\n1. 回复简洁\n\nAvailable other agents: \n- Agent name: cron\n  Agent description: 定时任务助手\n\nDecision rule:\n- ANSWER\n- CALL function"
+func TestFormatInstruction_IgnoresAvailableAgentsWithoutSkills(t *testing.T) {
+	input := "你是一个智能助手。\n\n## 工作原则\n1. 回复简洁\n\nAvailable other agents: \n- Agent name: cron\n  Agent description: 定时任务助手"
 	got := formatInstruction(input)
-
-	wantBase := "你是一个智能助手。\n\n## 工作原则\n1. 回复简洁"
-	if !contains(got, wantBase) {
-		t.Errorf("base instruction should be preserved, got:\n%s", got)
-	}
-	if !contains(got, "<available_agents>") {
-		t.Error("expected <available_agents> tag")
-	}
-	if !contains(got, "</available_agents>") {
-		t.Error("expected </available_agents> closing tag")
-	}
-	if !contains(got, "Agent name: cron") {
-		t.Error("expected transfer content inside tag")
+	if got != input {
+		t.Errorf("expected unchanged, got:\n%s", got)
 	}
 }
 
-func TestFormatInstruction_WithTransferAndSkill(t *testing.T) {
+func TestFormatInstruction_WithSkillAfterOtherText(t *testing.T) {
 	input := "你是一个智能助手。\n\n## 工作原则\n1. 回复简洁\n\nAvailable other agents: \n- Agent name: cron\n  Agent description: 定时任务助手\n\nDecision rule:\n- ANSWER\n\n# Skills System\n\n**How to Use Skills**\n\nSome instructions here."
 	got := formatInstruction(input)
 
-	if !contains(got, "<available_agents>") {
-		t.Error("expected <available_agents> tag")
-	}
-	if !contains(got, "</available_agents>") {
-		t.Error("expected </available_agents> closing tag")
-	}
 	if !contains(got, "<skills_system>") {
 		t.Error("expected <skills_system> tag")
 	}
@@ -79,15 +62,15 @@ func TestFormatInstruction_WithTransferAndSkill(t *testing.T) {
 	if !contains(got, "How to Use Skills") {
 		t.Error("expected skill content inside tag")
 	}
+	if !contains(got, "Available other agents") {
+		t.Error("expected non-skill text to be preserved")
+	}
 }
 
 func TestFormatInstruction_Chinese(t *testing.T) {
-	input := "你是一个智能助手。\n\n可用的其他 agent：\n- Agent 名字: cron\n  Agent 描述: 定时任务\n\n决策规则：\n- ANSWER\n\n# Skill 系统\n\n使用说明"
+	input := "你是一个智能助手。\n\n# Skill 系统\n\n使用说明"
 	got := formatInstruction(input)
 
-	if !contains(got, "<available_agents>") {
-		t.Error("expected <available_agents> tag for Chinese marker")
-	}
 	if !contains(got, "<skills_system>") {
 		t.Error("expected <skills_system> tag for Chinese marker")
 	}
@@ -182,7 +165,7 @@ func TestRemoveSkillTool(t *testing.T) {
 	tools := []tool.BaseTool{
 		&mockSkillTool{name: "shell_execute", desc: "shell tool"},
 		&mockSkillTool{name: "skill", desc: "skill tool"},
-		&mockSkillTool{name: "transfer_to_agent", desc: "transfer tool"},
+		&mockSkillTool{name: "other_tool", desc: "other tool"},
 	}
 
 	result := removeSkillTool(context.Background(), tools)
@@ -200,7 +183,7 @@ func TestRemoveSkillTool(t *testing.T) {
 func TestRemoveSkillTool_NotFound(t *testing.T) {
 	tools := []tool.BaseTool{
 		&mockSkillTool{name: "shell_execute", desc: "shell tool"},
-		&mockSkillTool{name: "transfer_to_agent", desc: "transfer tool"},
+		&mockSkillTool{name: "other_tool", desc: "other tool"},
 	}
 
 	result := removeSkillTool(context.Background(), tools)

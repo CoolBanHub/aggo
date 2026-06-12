@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/cloudwego/eino/schema"
 )
@@ -59,8 +60,8 @@ func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*
 	}
 
 	if strings.TrimSpace(memoryContext) != "" {
-		result.SystemMessages = []*schema.Message{
-			schema.SystemMessage(memoryContext),
+		result.SystemMessages = []*schema.AgenticMessage{
+			schema.SystemAgenticMessage(memoryContext),
 		}
 	}
 
@@ -72,11 +73,14 @@ func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*
 func (p *Provider) Memorize(ctx context.Context, req *memory.MemorizeRequest) error {
 	var userText, assistantText string
 	for _, msg := range req.Messages {
-		if msg.Role == schema.User {
-			userText = msg.Content
+		if msg == nil {
+			continue
 		}
-		if msg.Role == schema.Assistant {
-			assistantText = msg.Content
+		if msg.Role == schema.AgenticRoleTypeUser {
+			userText = agmsg.Text(msg)
+		}
+		if msg.Role == schema.AgenticRoleTypeAssistant {
+			assistantText = agmsg.Text(msg)
 		}
 	}
 

@@ -1,6 +1,7 @@
 package ailens360
 
 import (
+	agenticopenai "github.com/cloudwego/eino-ext/components/model/agenticopenai"
 	openai "github.com/cloudwego/eino-ext/components/model/openai"
 )
 
@@ -20,6 +21,15 @@ func (d *Decorator) Apply(cfg *openai.ChatModelConfig) {
 	cfg.HTTPClient = d.HTTPClient(cfg.HTTPClient)
 }
 
+// ApplyAgentic mutates an agentic OpenAI chat config in place.
+func (d *Decorator) ApplyAgentic(cfg *agenticopenai.ChatConfig) {
+	if d == nil || cfg == nil {
+		return
+	}
+	cfg.BaseURL = d.DecorateBaseURL(cfg.BaseURL)
+	cfg.HTTPClient = d.HTTPClient(cfg.HTTPClient)
+}
+
 // ApplyGlobal is a convenience wrapper that pulls the process-wide Decorator
 // installed via SetGlobal. Returns true when the global decorator is active.
 func ApplyGlobal(cfg *openai.ChatModelConfig) bool {
@@ -28,5 +38,15 @@ func ApplyGlobal(cfg *openai.ChatModelConfig) bool {
 		return false
 	}
 	dec.Apply(cfg)
+	return true
+}
+
+// ApplyGlobalAgentic applies the global decorator to an agentic OpenAI config.
+func ApplyGlobalAgentic(cfg *agenticopenai.ChatConfig) bool {
+	dec := Global()
+	if dec == nil {
+		return false
+	}
+	dec.ApplyAgentic(cfg)
 	return true
 }

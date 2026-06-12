@@ -6,17 +6,17 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 )
 
 // instructionFormatter is a post-processing middleware that wraps
-// framework-injected instruction sections (sub-agent transfer, skills)
-// with XML tags for better LLM comprehension.
+// framework-injected skill sections with XML tags for better LLM comprehension.
 //
 // At runtime, it detects whether actual skills are available. If no skills
 // exist, the entire # Skills System section and the skill tool are removed
 // to avoid wasting tokens and confusing the LLM.
 type instructionFormatter struct {
-	*adk.BaseChatModelAgentMiddleware
+	*adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]
 }
 
 func (f *instructionFormatter) BeforeAgent(ctx context.Context, runCtx *adk.ChatModelAgentContext) (context.Context, *adk.ChatModelAgentContext, error) {
@@ -84,88 +84,38 @@ func removeSkillSection(instruction string) string {
 	return strings.TrimRight(instruction[:skillStart], " \t\n")
 }
 
-// formatInstruction detects framework-injected sections by their known markers
-// and wraps each section with XML tags.
+// formatInstruction detects framework-injected skill sections by their known
+// markers and wraps them with XML tags.
 //
 // Before:
 //
 //	{base instruction}
 //
-// Available other agents:
-//
-//   - Agent name: cron
-//     Agent description: ...
-//     Decision rule: ...
-//
-//     # Skills System
-//     ...
+//	# Skills System
+//	...
 //
 // After:
 //
 //	{base instruction}
 //
-//	<available_agents>
-//	Available other agents:
-//	- Agent name: cron ...
-//	</available_agents>
-//
 //	<skills_system>
 //	# Skills System ...
 //	</skills_system>
 func formatInstruction(instruction string) string {
-	transferStart := findMarker(instruction,
-		"Available other agents:",
-		"可用的其他 agent",
-	)
 	skillStart := findMarker(instruction,
 		"# Skills System",
 		"# Skill 系统",
 	)
 
-	if transferStart < 0 && skillStart < 0 {
+	if skillStart < 0 {
 		return instruction
 	}
 
-	// Determine section boundaries
-	type section struct {
-		start int
-		end   int
-		tag   string
-	}
-
-	var sections []section
-
-	if transferStart >= 0 {
-		end := len(instruction)
-		if skillStart > transferStart {
-			end = skipLeadingNewlines(instruction, skillStart)
-		}
-		sections = append(sections, section{start: transferStart, end: end, tag: "available_agents"})
-	}
-
-	if skillStart >= 0 {
-		sections = append(sections, section{
-			start: skillStart,
-			end:   len(instruction),
-			tag:   "skills_system",
-		})
-	}
-
-	// Build result
 	var sb strings.Builder
-	baseEnd := sections[0].start
-	sb.WriteString(strings.TrimRight(instruction[:baseEnd], " \t\n"))
-
-	for _, sec := range sections {
-		content := strings.TrimSpace(instruction[sec.start:sec.end])
-		sb.WriteString("\n\n<")
-		sb.WriteString(sec.tag)
-		sb.WriteString(">\n")
-		sb.WriteString(content)
-		sb.WriteString("\n</")
-		sb.WriteString(sec.tag)
-		sb.WriteString(">")
-	}
+	sb.WriteString(strings.TrimRight(instruction[:skillStart], " \t\n"))
+	sb.WriteString("\n\n<skills_system>\n")
+	sb.WriteString(strings.TrimSpace(instruction[skillStart:]))
+	sb.WriteString("\n</skills_system>")
 
 	return sb.String()
 }
@@ -181,12 +131,4 @@ func findMarker(s string, markers ...string) int {
 		}
 	}
 	return first
-}
-
-// skipLeadingNewlines skips any leading newlines before the given position.
-func skipLeadingNewlines(s string, pos int) int {
-	for pos > 0 && (s[pos-1] == '\n' || s[pos-1] == '\r') {
-		pos--
-	}
-	return pos
 }

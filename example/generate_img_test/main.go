@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/cloudwego/eino-ext/components/model/gemini"
+	"github.com/cloudwego/eino-ext/components/model/agenticgemini"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gookit/slog"
 	"github.com/joho/godotenv"
@@ -24,33 +24,28 @@ func main() {
 		slog.Error("创建gemini模型失败", "err", err)
 		return
 	}
-	cm, err := gemini.NewChatModel(ctx, &gemini.Config{
+	cm, err := agenticgemini.New(ctx, &agenticgemini.Config{
 		Client: client,
 		Model:  "gemini-2.5-flash-image",
-		ResponseModalities: []gemini.GeminiResponseModality{
-			gemini.GeminiResponseModalityImage,
+		ResponseModalities: []genai.Modality{
+			genai.ModalityImage,
 		},
 	})
 	if err != nil {
 		slog.Error("创建gemini模型失败", "err", err)
 		return
 	}
-	m, err := cm.Generate(ctx, []*schema.Message{
-		&schema.Message{
-			Role: schema.User,
-			UserInputMultiContent: []schema.MessageInputPart{
-				{
-					Type: "text",
-					Text: "生成一张超写实的美食级芝士汉堡信息图表，将其解构以展示烤布里欧修面包的质地、肉饼的焦香外壳以及奶酪晶莹的融化状态。",
-				},
-			},
-		},
+	m, err := cm.Generate(ctx, []*schema.AgenticMessage{
+		schema.UserAgenticMessage("生成一张超写实的美食级芝士汉堡信息图表，将其解构以展示烤布里欧修面包的质地、肉饼的焦香外壳以及奶酪晶莹的融化状态。"),
 	})
 	if err != nil {
 		slog.Error("创建gemini模型失败", "err", err)
 		return
 	}
-	for _, v := range m.AssistantGenMultiContent {
-		slog.Debugf("图片,类型:%s,basedata:%s", v.Image.MIMEType, *v.Image.Base64Data)
+	for _, block := range m.ContentBlocks {
+		if block == nil || block.AssistantGenImage == nil {
+			continue
+		}
+		slog.Debugf("图片,类型:%s,basedata:%s", block.AssistantGenImage.MIMEType, block.AssistantGenImage.Base64Data)
 	}
 }

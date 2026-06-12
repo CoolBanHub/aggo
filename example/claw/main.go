@@ -13,6 +13,7 @@ import (
 
 	"github.com/CoolBanHub/aggo/agent"
 	cronPkg "github.com/CoolBanHub/aggo/cron"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory"
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
@@ -108,7 +109,7 @@ func main() {
 		log.Fatalf("Failed to create skill backend: %v", err)
 	}
 
-	skillMiddleware, err := skill.NewMiddleware(ctx, &skill.Config{
+	skillMiddleware, err := skill.NewTyped[*schema.AgenticMessage](ctx, &skill.TypedConfig[*schema.AgenticMessage]{
 		Backend: skillBackend,
 	})
 	if err != nil {
@@ -157,6 +158,7 @@ func main() {
 		}
 		agentTools = append(agentTools, memSearchTool)
 	}
+	agentTools = append(agentTools, adk.NewTypedAgentTool[*schema.AgenticMessage](ctx, cronAgentResult.Agent))
 
 	systemPrompt := `你是一个智能助手。
 
@@ -180,7 +182,6 @@ func main() {
 		WithInstruction(systemPrompt).
 		WithTools(agentTools...).
 		WithMiddlewares(skillMiddleware).
-		WithSubAgents(agent.SubAgentModeDefault, cronAgentResult.Agent).
 		WithMemory(provider).
 		Build(ctx)
 
@@ -188,7 +189,7 @@ func main() {
 		log.Fatalf("Failed to create agent: %v", err)
 	}
 
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag})
 
 	conversations := []string{
 		"帮我创建一个google搜索的skill",
@@ -214,8 +215,8 @@ func main() {
 			)
 		}
 
-		iter := runner.Run(runCtx, []*schema.Message{
-			schema.UserMessage(msg),
+		iter := runner.Run(runCtx, []*schema.AgenticMessage{
+			schema.UserAgenticMessage(msg),
 		}, adk.WithSessionValues(map[string]any{
 			"userID":    userID,
 			"sessionID": sessionID,
@@ -231,7 +232,7 @@ func main() {
 			}
 			if event.Output != nil && event.Output.MessageOutput != nil {
 				if m, err := event.Output.MessageOutput.GetMessage(); err == nil && m != nil {
-					fmt.Printf("【回答】: %s\n\n", m.Content)
+					fmt.Printf("【回答】: %s\n\n", agmsg.Text(m))
 				}
 			}
 		}

@@ -10,23 +10,22 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/schema"
 )
 
 // AgentBuilder 辅助构建 adk.Agent，不重新实现任何执行方法，只做配置透传
 type AgentBuilder struct {
-	name         string
-	description  string
-	instruction  string
-	cm           model.ToolCallingChatModel
-	tools        []tool.BaseTool
-	middlewares  []adk.ChatModelAgentMiddleware
-	maxStep      int
-	subAgents    []adk.Agent
-	subAgentMode string
+	name        string
+	description string
+	instruction string
+	cm          model.AgenticModel
+	tools       []tool.BaseTool
+	middlewares []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
+	maxStep     int
 }
 
 // NewAgentBuilder 创建 AgentBuilder
-func NewAgentBuilder(cm model.ToolCallingChatModel) *AgentBuilder {
+func NewAgentBuilder(cm model.AgenticModel) *AgentBuilder {
 	return &AgentBuilder{
 		cm: cm,
 	}
@@ -76,7 +75,7 @@ func (b *AgentBuilder) WithMemory(provider memory.MemoryProvider) *AgentBuilder 
 }
 
 // WithMiddlewares 添加自定义 Middleware
-func (b *AgentBuilder) WithMiddlewares(mw ...adk.ChatModelAgentMiddleware) *AgentBuilder {
+func (b *AgentBuilder) WithMiddlewares(mw ...adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]) *AgentBuilder {
 	b.middlewares = append(b.middlewares, mw...)
 	return b
 }
@@ -87,15 +86,8 @@ func (b *AgentBuilder) WithMaxStep(maxStep int) *AgentBuilder {
 	return b
 }
 
-// WithSubAgents 设置子 Agents
-func (b *AgentBuilder) WithSubAgents(mode string, agents ...adk.Agent) *AgentBuilder {
-	b.subAgentMode = mode
-	b.subAgents = append(b.subAgents, agents...)
-	return b
-}
-
 // Build 构建 adk.Agent
-func (b *AgentBuilder) Build(ctx context.Context) (adk.Agent, error) {
+func (b *AgentBuilder) Build(ctx context.Context) (adk.TypedAgent[*schema.AgenticMessage], error) {
 	if b.cm == nil {
 		return nil, fmt.Errorf("chat model 不能为空")
 	}
@@ -110,12 +102,12 @@ func (b *AgentBuilder) Build(ctx context.Context) (adk.Agent, error) {
 	}
 
 	// Append instruction formatter as the last handler to restructure
-	// framework-injected sections (sub-agent transfer, skills) with XML tags.
-	handlers := make([]adk.ChatModelAgentMiddleware, len(b.middlewares), len(b.middlewares)+1)
+	// framework-injected skill sections with XML tags.
+	handlers := make([]adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage], len(b.middlewares), len(b.middlewares)+1)
 	copy(handlers, b.middlewares)
 	handlers = append(handlers, &instructionFormatter{})
 
-	mainAgent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+	return adk.NewTypedChatModelAgent[*schema.AgenticMessage](ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
 		Name:        name,
 		Description: description,
 		Instruction: b.instruction,
@@ -128,25 +120,4 @@ func (b *AgentBuilder) Build(ctx context.Context) (adk.Agent, error) {
 		MaxIterations: b.maxStep,
 		Handlers:      handlers,
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	// 如果有子 agents，设置它们
-	if len(b.subAgents) > 0 {
-		subAgents := b.subAgents
-		if b.subAgentMode == SubAgentModeSupervisor {
-			subAgents = make([]adk.Agent, 0, len(b.subAgents))
-			supervisorName := mainAgent.Name(ctx)
-			for _, subAgent := range b.subAgents {
-				subAgents = append(subAgents, adk.AgentWithDeterministicTransferTo(ctx, &adk.DeterministicTransferConfig{
-					Agent:        subAgent,
-					ToAgentNames: []string{supervisorName},
-				}))
-			}
-		}
-		return adk.SetSubAgents(ctx, mainAgent, subAgents)
-	}
-
-	return mainAgent, nil
 }

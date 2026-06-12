@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/schema"
 )
@@ -35,13 +36,12 @@ func TestChatModel(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	msg, err := cm.Generate(ctx, []*schema.Message{
-		schema.UserMessage("hello"),
+	msg, err := cm.Generate(ctx, []*schema.AgenticMessage{
+		schema.UserAgenticMessage("hello"),
 	})
 	if err != nil {
 		t.Errorf("Generate failed: %v", err)
 		return
 	}
-	t.Logf("Thinking result: %s", msg.ReasoningContent)
-	t.Logf("Generate result: %s", msg.Content)
+	t.Logf("Generate result: %s", agmsg.Text(msg))
 }

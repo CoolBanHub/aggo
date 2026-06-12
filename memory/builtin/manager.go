@@ -69,7 +69,7 @@ type asyncTask struct {
 }
 
 // NewMemoryManager 创建新的记忆管理器
-func NewMemoryManager(cm model.ToolCallingChatModel, memoryStorage MemoryStorage, config *MemoryConfig) (*MemoryManager, error) {
+func NewMemoryManager(cm model.AgenticModel, memoryStorage MemoryStorage, config *MemoryConfig) (*MemoryManager, error) {
 	config = normalizeMemoryConfig(config)
 
 	err := memoryStorage.AutoMigrate()
@@ -675,22 +675,22 @@ func (m *MemoryManager) SaveMessage(ctx context.Context, message *ConversationMe
 }
 
 // GetMessages 获取会话消息
-func (m *MemoryManager) GetMessages(ctx context.Context, sessionID, userID string, limit int) ([]*schema.Message, error) {
+func (m *MemoryManager) GetMessages(ctx context.Context, sessionID, userID string, limit int) ([]*schema.AgenticMessage, error) {
 	messages, err := m.storage.GetMessages(ctx, sessionID, userID, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	list := make([]*schema.Message, len(messages))
+	list := make([]*schema.AgenticMessage, len(messages))
 	for i, v := range messages {
-		list[i] = v.ToSchemaMessage()
+		list[i] = v.ToAgenticMessage()
 	}
 	return list, nil
 }
 
 // GetMessagesAfterSummary returns only the messages that have not yet been folded into the persisted session summary.
 // For legacy summaries without a cursor, it falls back to messages created after the summary update time.
-func (m *MemoryManager) GetMessagesAfterSummary(ctx context.Context, sessionID, userID string, limit int) ([]*schema.Message, error) {
+func (m *MemoryManager) GetMessagesAfterSummary(ctx context.Context, sessionID, userID string, limit int) ([]*schema.AgenticMessage, error) {
 	summary, err := m.GetSessionSummary(ctx, sessionID, userID)
 	if err != nil {
 		return nil, err
@@ -708,9 +708,9 @@ func (m *MemoryManager) GetMessagesAfterSummary(ctx context.Context, sessionID, 
 		return nil, err
 	}
 
-	list := make([]*schema.Message, len(messages))
+	list := make([]*schema.AgenticMessage, len(messages))
 	for i, v := range messages {
-		list[i] = v.ToSchemaMessage()
+		list[i] = v.ToAgenticMessage()
 	}
 	return list, nil
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components"
@@ -121,10 +122,10 @@ func (h *Handler) OnStart(ctx context.Context, info *callbacks.RunInfo, input ca
 		),
 	}
 
-	if info.Component == components.ComponentOfChatModel {
-		if in := model.ConvCallbackInput(input); in != nil {
+	if info.Component == components.ComponentOfAgenticModel {
+		if in := model.ConvAgenticCallbackInput(input); in != nil {
 			body.Input = chatModelInput(in)
-			body.ModelParameters = modelParameters(in.Config, in.ToolChoice)
+			body.ModelParameters = agenticModelParameters(in.Config)
 			if in.Config != nil {
 				body.Model = in.Config.Model
 			}
@@ -132,8 +133,7 @@ func (h *Handler) OnStart(ctx context.Context, info *callbacks.RunInfo, input ca
 				body.Metadata.(map[string]any),
 				in.Extra,
 				map[string]any{
-					"tools":       toolDefinitionsMetadata(in.Tools),
-					"tool_choice": toolChoiceValue(in.ToolChoice),
+					"tools": toolDefinitionsMetadata(in.Tools),
 				},
 			)
 		} else {
@@ -172,8 +172,8 @@ func (h *Handler) OnEnd(ctx context.Context, info *callbacks.RunInfo, output cal
 		Environment: firstNonEmpty(h.cfg.Environment, defaultEnvironment),
 	}
 
-	if info.Component == components.ComponentOfChatModel {
-		if out := model.ConvCallbackOutput(output); out != nil {
+	if info.Component == components.ComponentOfAgenticModel {
+		if out := model.ConvAgenticCallbackOutput(output); out != nil {
 			body.Output = convertMessage(out.Message)
 			body.CompletionStartTime = formatTime(st.StartTime)
 			body.Metadata = mergeMetadata(out.Extra, map[string]any{
@@ -182,7 +182,7 @@ func (h *Handler) OnEnd(ctx context.Context, info *callbacks.RunInfo, output cal
 			body.Usage, body.UsageDetails = usageFromModel(out.TokenUsage)
 			if out.Config != nil {
 				body.Model = out.Config.Model
-				body.ModelParameters = modelParameters(out.Config, nil)
+				body.ModelParameters = agenticModelParameters(out.Config)
 			}
 		} else {
 			body.Output = normalizeOutput(output)
@@ -344,7 +344,7 @@ func (h *Handler) consumeStreamOutput(st *state, info *callbacks.RunInfo, output
 		Environment: firstNonEmpty(h.cfg.Environment, defaultEnvironment),
 	}
 
-	if info.Component == components.ComponentOfChatModel {
+	if info.Component == components.ComponentOfAgenticModel {
 		usage, msg, extra := concatModelOutput(raw)
 		body.Output = convertMessage(msg)
 		body.Metadata = mergeMetadata(extra, map[string]any{"tool_calls": toolCallsMetadata(msg)})
@@ -381,7 +381,7 @@ func (h *Handler) finishStreamError(st *state, err error) {
 	} else {
 		h.client.Enqueue(eventTypeSpanUpdate, body)
 	}
-	if st.Component == string(components.ComponentOfChatModel) {
+	if st.Component == string(components.ComponentOfAgenticModel) {
 		h.updateTraceOutput(st, msg)
 	}
 }
@@ -399,7 +399,7 @@ func eventKind(info *callbacks.RunInfo) string {
 		return "span"
 	}
 	switch info.Component {
-	case components.ComponentOfChatModel:
+	case components.ComponentOfAgenticModel:
 		return "generation"
 	case components.ComponentOfTool:
 		return "generation"
@@ -415,7 +415,7 @@ func shouldRecord(info *callbacks.RunInfo) bool {
 		return false
 	}
 	switch info.Component {
-	case components.ComponentOfChatModel, components.ComponentOfTool:
+	case components.ComponentOfAgenticModel, components.ComponentOfTool:
 		return true
 	default:
 		return false
@@ -455,7 +455,7 @@ func normalizeInput(input callbacks.CallbackInput) any {
 	switch v := input.(type) {
 	case *schema.ToolArgument:
 		return v
-	case []*schema.Message:
+	case []*schema.AgenticMessage:
 		return convertMessages(v)
 	case string:
 		return v
@@ -468,7 +468,7 @@ func normalizeInput(input callbacks.CallbackInput) any {
 
 func normalizeOutput(output callbacks.CallbackOutput) any {
 	switch v := output.(type) {
-	case *schema.Message:
+	case *schema.AgenticMessage:
 		return convertMessage(v)
 	case *schema.ToolResult:
 		return v
@@ -481,14 +481,14 @@ func normalizeOutput(output callbacks.CallbackOutput) any {
 	}
 }
 
-func concatModelOutput(raw []callbacks.CallbackOutput) (*model.TokenUsage, *schema.Message, map[string]any) {
+func concatModelOutput(raw []callbacks.CallbackOutput) (*model.TokenUsage, *schema.AgenticMessage, map[string]any) {
 	var (
 		usage    *model.TokenUsage
-		messages []*schema.Message
+		messages []*schema.AgenticMessage
 		extra    map[string]any
 	)
 	for _, item := range raw {
-		out := model.ConvCallbackOutput(item)
+		out := model.ConvAgenticCallbackOutput(item)
 		if out == nil {
 			continue
 		}
@@ -505,9 +505,9 @@ func concatModelOutput(raw []callbacks.CallbackOutput) (*model.TokenUsage, *sche
 	if len(messages) == 0 {
 		return usage, nil, extra
 	}
-	msg, err := schema.ConcatMessages(messages)
+	msg, err := schema.ConcatAgenticMessages(messages)
 	if err != nil {
-		return usage, &schema.Message{Role: schema.Assistant, Content: strings.TrimSpace(safeJSON(messages))}, extra
+		return usage, agmsg.AssistantMessage(strings.TrimSpace(safeJSON(messages))), extra
 	}
 	return usage, msg, extra
 }

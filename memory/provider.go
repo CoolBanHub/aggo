@@ -29,7 +29,7 @@ type RetrieveRequest struct {
 	SessionID string
 
 	// Messages are the current conversation messages used as context for retrieval.
-	Messages []*schema.Message
+	Messages []*schema.AgenticMessage
 
 	// Limit is the maximum number of memory items to return.
 	// A value of 0 means the provider should use its own default.
@@ -39,10 +39,10 @@ type RetrieveRequest struct {
 // RetrieveResult is the output of the Retrieve operation.
 type RetrieveResult struct {
 	// SystemMessages are injected as system context before the conversation.
-	SystemMessages []*schema.Message
+	SystemMessages []*schema.AgenticMessage
 
 	// HistoryMessages are injected as conversation history.
-	HistoryMessages []*schema.Message
+	HistoryMessages []*schema.AgenticMessage
 
 	// Metadata holds provider-specific data.
 	Metadata map[string]any
@@ -57,7 +57,7 @@ type MemorizeRequest struct {
 	SessionID string
 
 	// Messages are the conversation turn(s) to store.
-	Messages []*schema.Message
+	Messages []*schema.AgenticMessage
 }
 
 // HookEvent represents a lifecycle event in the memory provider.

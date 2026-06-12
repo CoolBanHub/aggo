@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 
 	"github.com/CoolBanHub/aggo/agent"
+	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/model"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/callbacks"
@@ -46,7 +47,7 @@ func main() {
 		return
 	}
 
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag, EnableStreaming: true})
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag, EnableStreaming: true})
 
 	conversations := []string{
 		"你好，我是Alice",
@@ -65,8 +66,8 @@ func main() {
 	}
 	for _, conversation := range conversations {
 		log.Printf("User: %s", conversation)
-		iter := runner.Run(context.Background(), []*schema.Message{
-			schema.UserMessage(conversation),
+		iter := runner.Run(context.Background(), []*schema.AgenticMessage{
+			schema.UserAgenticMessage(conversation),
 		})
 		for {
 			event, ok := iter.Next()
@@ -84,10 +85,10 @@ func main() {
 						if err2 != nil {
 							break
 						}
-						log.Printf("AI:%s", msg.Content)
+						log.Printf("AI:%s", agmsg.Text(msg))
 					}
 				} else if msg, err2 := event.Output.MessageOutput.GetMessage(); err2 == nil && msg != nil {
-					log.Printf("AI:%s", msg.Content)
+					log.Printf("AI:%s", agmsg.Text(msg))
 				}
 			}
 		}
@@ -137,8 +138,10 @@ func (this *ChatModelCallback) OnEndWithStreamOutput(ctx context.Context, runInf
 				break
 			}
 			outs = append(outs, chunk)
-			_chunk := chunk.(*model2.CallbackOutput)
-			content += _chunk.Message.Content
+			_chunk := model2.ConvAgenticCallbackOutput(chunk)
+			if _chunk != nil && _chunk.Message != nil {
+				content += agmsg.Text(_chunk.Message)
+			}
 		}
 		log.Printf("content: %s", content)
 	}()
