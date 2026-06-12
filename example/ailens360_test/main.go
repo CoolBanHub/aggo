@@ -8,7 +8,10 @@
 //     from the caller's context. The RoundTripper reads req.Context() on
 //     every call, so one ChatModel can serve different users/sessions
 //     without being rebuilt — just stamp ctx before agent.Run.
-//  3. Tool calling. The ReAct agent loops:
+//  3. metadata in the model request body via agenticopenai.WithExtraFields.
+//     Because it is passed to runner.Run, every model call in this agent run
+//     carries the same metadata.
+//  4. Tool calling. The ReAct agent loops:
 //     model.Stream() → if tool_calls present → run tool → feed result back
 //     → model.Stream() … until the model produces a final answer.
 //     Each model call inside one run shares the same trace_id.
@@ -17,7 +20,6 @@
 //
 //	BaseUrl                  upstream OpenAI-compatible base URL
 //	APIKey                   upstream API key (透传给上游, AILens360 不持有)
-//	Model                    model name on the upstream
 //	AILENS360_PROXY_PREFIX   e.g. https://ailens360.example.com/p
 //	AILENS360_PROJECT_KEY    64-char project key from AILens360 console
 package main
@@ -36,6 +38,7 @@ import (
 	"github.com/CoolBanHub/aggo/pkg/ailens360"
 	"github.com/cloudwego/eino-ext/components/model/agenticopenai"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
 	"github.com/joho/godotenv"
@@ -111,7 +114,7 @@ func main() {
 		log.Fatalf("new chat model: %v", err)
 	}
 
-	// 3) Build a typed tool. aggo's agent builder accepts the same eino
+	// 3) Build a typed tool. aggo  agent builder accepts the same eino
 	//    tool interface, so InferTool works directly.
 	weatherTool, err := utils.InferTool(
 		"get_weather",
@@ -136,15 +139,16 @@ func main() {
 	//    shares the trace_id, grouped as one Langfuse-style trace.
 	sessionID := fmt.Sprintf("sess_%d", time.Now().Unix())
 	traceID := fmt.Sprintf("trace_%d", time.Now().UnixNano())
+	userID := "user_alice_42"
 	ctx = ailens360.WithTrace(ctx, ailens360.TraceConfig{
 		ID:        traceID,
 		Name:      "weather_demo_turn",
-		UserID:    "user_alice_42",
+		UserID:    userID,
 		SessionID: sessionID,
 		Tag:       "demo,react-agent",
 	})
 
-	log.Printf("user_id    = user_alice_42")
+	log.Printf("user_id    = %s", userID)
 	log.Printf("session_id = %s", sessionID)
 	log.Printf("trace_id   = %s", traceID)
 
@@ -153,7 +157,11 @@ func main() {
 	userMsg := schema.UserAgenticMessage("上海现在天气怎么样？请用中文回答。")
 	iter := runner.Run(ctx, []*schema.AgenticMessage{
 		userMsg,
-	})
+	}, adk.WithChatModelOptions([]model.Option{
+		agenticopenai.WithExtraFields(map[string]any{
+			"user_id": userID,
+		}),
+	}))
 
 	fmt.Println("\n--- streaming answer ---")
 	for {
