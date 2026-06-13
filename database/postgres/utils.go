@@ -11,41 +11,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// postgresDocumentToDocument 将PostgreSQL文档转换为知识库文档
-func (p *Postgres) postgresDocumentToDocument(pgDoc *PostgresVectorDocument) (*schema.Document, error) {
-	// 反序列化metadata
-	var metadata map[string]interface{}
-	if pgDoc.Metadata != "" {
-		if err := sonic.Unmarshal([]byte(pgDoc.Metadata), &metadata); err != nil {
-			return nil, fmt.Errorf("反序列化元数据失败: %w", err)
-		}
-	}
-
-	// 解析向量
-	vector, err := utils.StringToVector(pgDoc.Vector)
-	if err != nil {
-		return nil, fmt.Errorf("解析向量失败: %w", err)
-	}
-
-	// 创建文档
-	doc := &schema.Document{
-		ID:       pgDoc.ID,
-		Content:  pgDoc.Content,
-		MetaData: metadata,
-	}
-
-	// 设置向量和时间信息
-	if len(vector) > 0 {
-		doc.WithDenseVector(utils.Float32ToFloat64(vector))
-	}
-	doc.WithDSLInfo(map[string]any{
-		"created_at": pgDoc.CreatedAt,
-		"updated_at": pgDoc.UpdatedAt,
-	})
-
-	return doc, nil
-}
-
 // mapToDocument 将查询结果map转换为Document
 func (p *Postgres) mapToDocument(result map[string]interface{}) (*schema.Document, error) {
 	id, ok := result["id"].(string)

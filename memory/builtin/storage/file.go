@@ -168,28 +168,6 @@ func (f *FileStore) saveUserMemories() error {
 	return f.saveToFileB("user_memories", data)
 }
 
-// appendUserMemory 增量追加用户记忆到 JSONL 文件
-func (f *FileStore) appendUserMemory(mem *builtin.UserMemory) error {
-	b, err := json.Marshal(mem)
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-
-	f.fileMu.Lock()
-	defer f.fileMu.Unlock()
-
-	filePath := f.getFilePath("user_memories")
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	_, err = file.Write(b)
-	return err
-}
-
 // saveSessionSummaries 重新全量保存会话摘要到 JSONL 文件
 func (f *FileStore) saveSessionSummaries() error {
 	f.MemoryStore.mu.RLock()

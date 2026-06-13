@@ -26,8 +26,8 @@ import (
 // ============================================================
 
 // GetDatabaseTools 获取通用数据库执行工具（支持所有gorm兼容的数据库，如MySQL, PostgreSQL等）
-func GetDatabaseTools(db *gorm.DB) []tool.BaseTool {
-	return database.GetTools(db)
+func GetDatabaseTools(db *gorm.DB, opts ...database.Option) []tool.BaseTool {
+	return database.GetTools(db, opts...)
 }
 
 // ============================================================
@@ -49,13 +49,13 @@ func GetKnowledgeReasoningTools(r retriever.Retriever, retrieverOptions []retrie
 // ============================================================
 
 // GetShellTools 获取全部 Shell 工具
-func GetShellTools() []tool.BaseTool {
-	return shell.GetTools()
+func GetShellTools(opts ...shell.Option) []tool.BaseTool {
+	return shell.GetTools(opts...)
 }
 
 // GetExecuteTools 获取命令执行工具
-func GetExecuteTools() []tool.BaseTool {
-	return shell.GetExecuteTools()
+func GetExecuteTools(opts ...shell.Option) []tool.BaseTool {
+	return shell.GetExecuteTools(opts...)
 }
 
 // ============================================================

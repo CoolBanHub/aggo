@@ -130,6 +130,10 @@ func (c *Client) Enqueue(eventType string, body any) {
 }
 
 func (c *Client) Flush() {
+	c.FlushContext(context.Background())
+}
+
+func (c *Client) FlushContext(ctx context.Context) {
 	if c == nil {
 		return
 	}
@@ -138,7 +142,10 @@ func (c *Client) Flush() {
 		if len(batch) == 0 {
 			return
 		}
-		c.send(context.Background(), batch)
+		if err := c.send(ctx, batch); err != nil {
+			c.requeueFront(batch)
+			return
+		}
 	}
 }
 
@@ -153,6 +160,19 @@ func (c *Client) Close() {
 	}
 	c.mu.Unlock()
 	c.Flush()
+}
+
+func (c *Client) CloseContext(ctx context.Context) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if !c.closed {
+		c.closed = true
+		close(c.done)
+	}
+	c.mu.Unlock()
+	c.FlushContext(ctx)
 }
 
 func (c *Client) loop() {
@@ -175,7 +195,9 @@ func (c *Client) flushOne() {
 	if len(batch) == 0 {
 		return
 	}
-	c.send(context.Background(), batch)
+	if err := c.send(context.Background(), batch); err != nil {
+		c.requeueFront(batch)
+	}
 }
 
 func (c *Client) takeBatch(limit int) []ingestionEvent {
@@ -193,6 +215,25 @@ func (c *Client) takeBatch(limit int) []ingestionEvent {
 	return batch
 }
 
+func (c *Client) requeueFront(batch []ingestionEvent) {
+	if len(batch) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	available := c.cfg.MaxQueueSize - len(c.queue)
+	if available <= 0 {
+		return
+	}
+	if len(batch) > available {
+		batch = batch[len(batch)-available:]
+	}
+	c.queue = append(append([]ingestionEvent(nil), batch...), c.queue...)
+}
+
 func (c *Client) signal() {
 	select {
 	case c.wake <- struct{}{}:
@@ -200,9 +241,9 @@ func (c *Client) signal() {
 	}
 }
 
-func (c *Client) send(ctx context.Context, batch []ingestionEvent) {
+func (c *Client) send(ctx context.Context, batch []ingestionEvent) error {
 	if len(batch) == 0 {
-		return
+		return nil
 	}
 
 	payload, err := json.Marshal(ingestionRequest{
@@ -213,7 +254,7 @@ func (c *Client) send(ctx context.Context, batch []ingestionEvent) {
 		if c.cfg.LogIngestErrors {
 			log.Printf("langfuse marshal ingestion batch: %v", err)
 		}
-		return
+		return err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(payload))
@@ -221,7 +262,7 @@ func (c *Client) send(ctx context.Context, batch []ingestionEvent) {
 		if c.cfg.LogIngestErrors {
 			log.Printf("langfuse create ingestion request: %v", err)
 		}
-		return
+		return err
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Basic "+basicAuth(c.cfg.PublicKey, c.cfg.SecretKey))
@@ -231,7 +272,7 @@ func (c *Client) send(ctx context.Context, batch []ingestionEvent) {
 		if c.cfg.LogIngestErrors {
 			log.Printf("langfuse send ingestion batch: %v", err)
 		}
-		return
+		return err
 	}
 	defer resp.Body.Close()
 
@@ -240,13 +281,14 @@ func (c *Client) send(ctx context.Context, batch []ingestionEvent) {
 		if c.cfg.LogIngestErrors {
 			log.Printf("langfuse ingestion status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
-		return
+		return fmt.Errorf("langfuse ingestion status=%d", resp.StatusCode)
 	}
 
 	var parsed ingestionResponse
 	if len(body) > 0 && json.Unmarshal(body, &parsed) == nil && len(parsed.Errors) > 0 && c.cfg.LogIngestErrors {
 		log.Printf("langfuse ingestion partial errors: %+v", parsed.Errors)
 	}
+	return nil
 }
 
 func basicAuth(user, pass string) string {

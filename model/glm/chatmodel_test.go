@@ -1,3 +1,5 @@
+//go:build integration
+
 /*
  * Copyright 2024 CloudWeGo Authors
  *

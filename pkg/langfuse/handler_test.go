@@ -56,7 +56,7 @@ func TestHandlerRecordsModelToolsToolCallsAndUsage(t *testing.T) {
 		}},
 		Config: &model.AgenticConfig{Model: "gpt-test", MaxTokens: 128, Temperature: 0.7},
 	})
-	ctx = handler.OnEnd(ctx, &callbacks.RunInfo{Component: components.ComponentOfAgenticModel, Type: "OpenAI", Name: "chat"}, &model.AgenticCallbackOutput{
+	_ = handler.OnEnd(ctx, &callbacks.RunInfo{Component: components.ComponentOfAgenticModel, Type: "OpenAI", Name: "chat"}, &model.AgenticCallbackOutput{
 		Message: &schema.AgenticMessage{
 			Role: schema.AgenticRoleTypeAssistant,
 			ContentBlocks: []*schema.ContentBlock{
@@ -170,7 +170,7 @@ func TestHandlerSkipsTopLevelToolInvocation(t *testing.T) {
 		t.Fatal("top-level tool should not be needed")
 	}
 	ctx = handler.OnStart(ctx, &callbacks.RunInfo{Component: components.ComponentOfTool, Type: "InferTool", Name: "search"}, `{"query":"hello"}`)
-	ctx = handler.OnEnd(ctx, &callbacks.RunInfo{Component: components.ComponentOfTool, Type: "InferTool", Name: "search"}, "result text")
+	_ = handler.OnEnd(ctx, &callbacks.RunInfo{Component: components.ComponentOfTool, Type: "InferTool", Name: "search"}, "result text")
 	flush()
 
 	if events := flattenEvents(requests); len(events) != 0 {
@@ -214,7 +214,7 @@ func TestHandlerRecordsNestedToolInvocation(t *testing.T) {
 		t.Fatal("nested tool should be needed")
 	}
 	ctx = handler.OnStart(ctx, &callbacks.RunInfo{Component: components.ComponentOfTool, Type: "InferTool", Name: "search"}, `{"query":"hello"}`)
-	ctx = handler.OnEnd(ctx, &callbacks.RunInfo{Component: components.ComponentOfTool, Type: "InferTool", Name: "search"}, "result text")
+	_ = handler.OnEnd(ctx, &callbacks.RunInfo{Component: components.ComponentOfTool, Type: "InferTool", Name: "search"}, "result text")
 	flush()
 
 	events := flattenEvents(requests)
@@ -275,7 +275,7 @@ func TestHandlerSkipsWorkflowAndLambda(t *testing.T) {
 		t.Fatal("lambda should not be needed")
 	}
 	ctx = handler.OnStart(ctx, lambda, "input")
-	ctx = handler.OnEnd(ctx, lambda, "output")
+	_ = handler.OnEnd(ctx, lambda, "output")
 	flush()
 
 	if events := flattenEvents(requests); len(events) != 0 {

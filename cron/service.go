@@ -427,14 +427,3 @@ func generateID() string {
 	}
 	return hex.EncodeToString(b)
 }
-
-// 辅助方法：解析 UUID（处理 gocron 的 ID 类型）
-func parseUUID(s string) uuid.UUID {
-	// gocron.JobID is uuid.UUID
-	id, err := uuid.Parse(s)
-	if err != nil {
-		log.Printf("[cron] failed to parse UUID string '%s': %v", s, err)
-		return uuid.Nil // Return a nil UUID on error
-	}
-	return id
-}

@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"fmt"
+	"time"
 
 	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory"
@@ -32,6 +33,7 @@ type cronConfig struct {
 	memoryProvider memory.MemoryProvider
 	name           string
 	systemPrompt   string
+	jobTimeout     time.Duration
 }
 
 // WithFileStore 使用文件存储
@@ -118,6 +120,13 @@ func WithCronSystemPrompt(prompt string) CronAgentOption {
 	}
 }
 
+// WithCronJobTimeout caps the model call used to process triggered jobs.
+func WithCronJobTimeout(timeout time.Duration) CronAgentOption {
+	return func(c *cronConfig) {
+		c.jobTimeout = timeout
+	}
+}
+
 // CronAgentResult 定时任务 Agent 创建结果
 type CronAgentResult struct {
 	Agent   adk.TypedAgent[*schema.AgenticMessage]
@@ -133,6 +142,7 @@ type cronServiceProvider interface {
 func NewCronAgent(ctx context.Context, cm model.AgenticModel, cronTools []tool.BaseTool, opts ...CronAgentOption) (*CronAgentResult, error) {
 	cfg := &cronConfig{
 		maxJobsPerUser: defaultMaxJobsPerUser,
+		jobTimeout:     time.Minute,
 	}
 	for _, opt := range opts {
 		opt(cfg)
@@ -213,8 +223,18 @@ func NewCronAgent(ctx context.Context, cm model.AgenticModel, cronTools []tool.B
 		})
 	} else {
 		onProcessed := cfg.onJobProcessed
+		jobTimeout := cfg.jobTimeout
 		service.SetOnJob(func(job *CronJob) (string, error) {
-			resp, err := cm.Generate(context.Background(), []*schema.AgenticMessage{
+			jobCtx := context.Background()
+			var cancel context.CancelFunc
+			if jobTimeout > 0 {
+				jobCtx, cancel = context.WithTimeout(jobCtx, jobTimeout)
+			} else {
+				jobCtx, cancel = context.WithCancel(jobCtx)
+			}
+			defer cancel()
+
+			resp, err := cm.Generate(jobCtx, []*schema.AgenticMessage{
 				schema.SystemAgenticMessage("你是一个提醒助手。请将以下定时任务消息转换为简洁、友好的提醒通知。直接输出一句话。"),
 				schema.UserAgenticMessage(job.Payload.Message),
 			})

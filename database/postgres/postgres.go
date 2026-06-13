@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/CoolBanHub/aggo/utils"
@@ -16,6 +18,8 @@ import (
 	"github.com/gookit/slog"
 	"gorm.io/gorm"
 )
+
+var postgresIdentifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$`)
 
 type Postgres struct {
 	db              *gorm.DB
@@ -58,6 +62,9 @@ func NewPostgres(config PostgresConfig) (*Postgres, error) {
 	if config.CollectionName == "" {
 		config.CollectionName = "aggo_knowledge_vectors"
 	}
+	if err := validatePostgresIdentifier(config.CollectionName); err != nil {
+		return nil, err
+	}
 
 	vectorDB := &Postgres{
 		db:              config.Client,
@@ -87,7 +94,8 @@ func (p *Postgres) initTable() error {
 
 // Create 创建向量表
 func (p *Postgres) Create() error {
-	tableName := p.collectionName
+	tableName := quotePostgresIdentifier(p.collectionName)
+	indexName := quotePostgresIdentifier(strings.ReplaceAll(p.collectionName, ".", "_") + "_vector_idx")
 
 	// 检查pgvector扩展是否已安装
 	var count int64
@@ -106,14 +114,14 @@ func (p *Postgres) Create() error {
 
 	// 创建表
 	createTableSQL := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s (
+			CREATE TABLE IF NOT EXISTS %s (
 			id VARCHAR(255) PRIMARY KEY,
 			content TEXT NOT NULL,
 			vector vector(%d) NOT NULL,
 			metadata TEXT,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-		)`, tableName, p.vectorDimension)
+			)`, tableName, p.vectorDimension)
 
 	err = p.db.Exec(createTableSQL).Error
 	if err != nil {
@@ -121,8 +129,8 @@ func (p *Postgres) Create() error {
 	}
 
 	// 创建向量索引以提高查询性能
-	indexSQL := fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s_vector_idx ON %s USING ivfflat (vector vector_cosine_ops) WITH (lists = 100)`,
-		tableName, tableName)
+	indexSQL := fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s USING ivfflat (vector vector_cosine_ops) WITH (lists = 100)`,
+		indexName, tableName)
 
 	err = p.db.Exec(indexSQL).Error
 	if err != nil {
@@ -138,7 +146,8 @@ func (p *Postgres) Exists() bool {
 	tableName := p.collectionName
 
 	var count int64
-	err := p.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?", tableName).Scan(&count).Error
+	schemaName, bareTableName := splitPostgresIdentifier(tableName)
+	err := p.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?", schemaName, bareTableName).Scan(&count).Error
 	if err != nil {
 		return false
 	}
@@ -163,7 +172,7 @@ func (p *Postgres) Store(ctx context.Context, docs []*schema.Document, opts ...i
 		return nil, err
 	}
 
-	tableName := p.collectionName
+	tableName := quotePostgresIdentifier(p.collectionName)
 	ids := make([]string, len(docs))
 
 	// 使用PostgreSQL的ON CONFLICT进行批量Upsert
@@ -200,7 +209,7 @@ func (p *Postgres) Store(ctx context.Context, docs []*schema.Document, opts ...i
 
 // Search 向量搜索
 func (p *Postgres) Search(ctx context.Context, queryVector []float32, limit int, filters map[string]interface{}, threshold float64) ([]*schema.Document, error) {
-	tableName := p.collectionName
+	tableName := quotePostgresIdentifier(p.collectionName)
 	// 将float32向量转换为字符串格式
 	vectorStr := utils.VectorToString(queryVector)
 
@@ -208,12 +217,11 @@ func (p *Postgres) Search(ctx context.Context, queryVector []float32, limit int,
 	query := p.db.WithContext(ctx).Table(tableName)
 
 	// 添加相似度计算和过滤
-	selectSQL := fmt.Sprintf("*, (1 - (vector <=> '%s')) as similarity", vectorStr)
-	query = query.Select(selectSQL)
+	query = query.Select("*, (1 - (vector <=> ?::vector)) as similarity", vectorStr)
 
 	// 添加相似度阈值过滤
 	if threshold > 0 {
-		query = query.Where(fmt.Sprintf("(1 - (vector <=> '%s')) >= ?", vectorStr), threshold)
+		query = query.Where("(1 - (vector <=> ?::vector)) >= ?", vectorStr, threshold)
 	}
 
 	// 添加元数据过滤
@@ -225,7 +233,7 @@ func (p *Postgres) Search(ctx context.Context, queryVector []float32, limit int,
 	}
 
 	// 按相似度排序并限制结果数量
-	query = query.Order(fmt.Sprintf("(vector <=> '%s') ASC", vectorStr)).Limit(limit)
+	query = query.Order(gorm.Expr("(vector <=> ?::vector) ASC", vectorStr)).Limit(limit)
 
 	// 执行查询
 	var results []map[string]interface{}
@@ -325,4 +333,27 @@ func (p *Postgres) Retrieve(ctx context.Context, query string, opts ...retriever
 // GetType 返回组件类型
 func (p *Postgres) GetType() string {
 	return "Postgres"
+}
+
+func validatePostgresIdentifier(identifier string) error {
+	if !postgresIdentifierPattern.MatchString(identifier) {
+		return fmt.Errorf("invalid postgres collection name %q: only simple identifiers or schema.table are allowed", identifier)
+	}
+	return nil
+}
+
+func quotePostgresIdentifier(identifier string) string {
+	parts := strings.Split(identifier, ".")
+	for i, part := range parts {
+		parts[i] = `"` + strings.ReplaceAll(part, `"`, `""`) + `"`
+	}
+	return strings.Join(parts, ".")
+}
+
+func splitPostgresIdentifier(identifier string) (schemaName, tableName string) {
+	parts := strings.Split(identifier, ".")
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "public", identifier
 }

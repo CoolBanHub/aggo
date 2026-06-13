@@ -8,11 +8,6 @@ import (
 	"sync"
 )
 
-// cronFileStore JSON 文件存储
-type cronFileStore struct {
-	version int
-}
-
 // fileStoreData JSON 文件存储结构
 type fileStoreData struct {
 	Version int       `json:"version"`

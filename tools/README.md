@@ -127,7 +127,7 @@ Analysis: "搜索结果包含了深度学习和传统机器学习的对比信息
 
 | 工具名称                   | 描述     | 主要功能              |
 |------------------------|--------|-------------------|
-| `shell_execute`        | 命令执行工具 | 执行系统命令，支持超时和错误处理  |
+| `shell_execute`        | 命令执行工具 | 执行系统命令，支持超时、输出截断、工作目录限制和高危命令拦截 |
 | `shell_system_info`    | 系统信息工具 | 获取OS、环境变量、内存等系统信息 |
 | `shell_list_processes` | 进程管理工具 | 列出系统运行中的进程        |
 | `shell_directory`      | 目录操作工具 | 获取和切换工作目录         |
@@ -139,8 +139,11 @@ Analysis: "搜索结果包含了深度学习和传统机器学习的对比信息
 mysqlTools := tools.GetMySQLTools(mysqlConfig)
 postgresTools := tools.GetPostgreSQLTools(postgresConfig)
 
-// 获取系统工具
-shellTools := tools.GetSellTool()
+// 获取系统工具。默认工作目录限制在当前进程启动目录下，并拒绝 rm、sudo 等高危命令。
+shellTools := tools.GetShellTools()
+
+// 如需进一步收紧权限，可以配置命令 allowlist。
+shellTools = tools.GetShellTools(shell.WithAllowedCommands("ls", "pwd", "cat"))
 
 // 执行命令
 executeParams := tools.ExecuteParams{
@@ -317,8 +320,9 @@ toolResult, err := tool.InvokableRun(ctx, `{
 
 ## 🔒 安全考虑
 
-- **命令验证**: 系统命令执行前进行安全检查
+- **命令验证**: Shell 工具默认拒绝高危命令；可通过 `shell.WithAllowedCommands(...)` 配置命令白名单
 - **路径验证**: 文件路径操作防止目录遍历攻击
+- **数据库保护**: `database_execute` 默认只允许只读查询；写操作需显式使用 `database.WithAllowWrite(true)`
 - **权限控制**: 根据执行环境限制工具权限
 - **输入清理**: 防止命令注入攻击
 

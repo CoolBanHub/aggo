@@ -39,16 +39,7 @@ func (c *Client) Add(ctx context.Context, req AddRequest) error {
 	var body any
 	switch c.config.Mode {
 	case ModeOSS:
-		body = ossAddRequest{
-			Messages:  req.Messages,
-			UserID:    req.UserID,
-			RunID:     req.RunID,
-			AgentID:   req.AgentID,
-			AppID:     req.AppID,
-			OrgID:     req.OrgID,
-			ProjectID: req.ProjectID,
-			Metadata:  req.Metadata,
-		}
+		body = ossAddRequest(req)
 	default:
 		body = hostedAddRequest{
 			Messages:  req.Messages,

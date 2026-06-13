@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
+
+const defaultMemorizeTimeout = 2 * time.Minute
 
 // MemoryMiddleware implements adk.ChatModelAgentMiddleware.
 // It delegates to a MemoryProvider for retrieval and memorization.
@@ -156,8 +159,10 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 	messagesToMemorize = append(messagesToMemorize, assistantMsg)
 
 	if len(messagesToMemorize) > 0 {
+		messagesToMemorize = append([]*schema.AgenticMessage(nil), messagesToMemorize...)
 		go func() {
-			bgCtx := context.Background()
+			bgCtx, cancel := context.WithTimeout(context.Background(), defaultMemorizeTimeout)
+			defer cancel()
 			if err := m.provider.Memorize(bgCtx, &MemorizeRequest{
 				UserID:    uid,
 				SessionID: sid,
