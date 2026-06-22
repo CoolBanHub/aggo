@@ -12,11 +12,3 @@ type ToPtr interface {
 func ValueToPtr[T ToPtr](f T) *T {
 	return &f
 }
-
-func PtrToValue[T ToPtr](ptr *T) T {
-	if ptr == nil {
-		var zero T
-		return zero
-	}
-	return *ptr
-}

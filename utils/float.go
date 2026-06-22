@@ -5,18 +5,6 @@ import (
 	"strings"
 )
 
-func Float64ToFloat32(src []float64) []float32 {
-	if src == nil {
-		return nil
-	}
-
-	dst := make([]float32, len(src))
-	for i, v := range src {
-		dst[i] = float32(v)
-	}
-	return dst
-}
-
 func Float32ToFloat64(src []float32) []float64 {
 	if src == nil {
 		return nil

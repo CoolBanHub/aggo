@@ -1,4 +1,4 @@
-# Memory 模块说明
+# 记忆模块说明
 
 `memory` 包已经从单一 `MemoryManager` 入口演进为 provider + middleware 的组合式设计：
 
@@ -136,7 +136,7 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 - `Retrieval`: 检索方式，支持 `RetrievalLastN`、`RetrievalFirstN`、`RetrievalSemantic`
 - `MemoryLimit`: 历史消息检索上限
 - `SummaryRecentMessageLimit`: 启用会话摘要时，除摘要游标之后的消息外，额外保留最近 N 条原始消息作为短期上下文；默认 0，保持旧行为
-- `AsyncWorkerPoolSize`: 异步处理 worker 数量
+- `AsyncWorkerPoolSize`: 异步处理工作线程数量
 - `AsyncTaskTimeoutSeconds`: 异步任务执行超时时间，默认 120 秒
 - `SummaryTrigger`: 摘要触发策略
 - `SummaryCache`: 会话摘要缓存配置，支持 `TTLSeconds` 与 `MaxEntries`
@@ -170,11 +170,11 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 
 启用 `EnableSessionSummary` 后，`builtin` provider 的会话上下文不再只依赖最近 `MemoryLimit` 条原始消息：
 
-- 已生成的会话摘要会作为 system message 注入
+- 已生成的会话摘要会作为系统消息注入
 - 检索时只补充“摘要游标之后”的未摘要消息尾巴
 - 如果设置了 `SummaryRecentMessageLimit`，会同时注入最近 N 条原始消息并按消息 ID 去重，避免刚被摘要折叠的最近对话丢失原文细节
 - 摘要更新成功后会持久化最后一条已纳入摘要的消息游标，避免重启后重复摘要同一批历史消息
-- provider 会对会话摘要做本地短 TTL 缓存以减少摘要表读取；不会缓存完整 history，原始消息尾巴仍按游标从存储层查询
+- provider 会对会话摘要做本地短 TTL 缓存以减少摘要表读取；不会缓存完整历史记录，原始消息尾巴仍按游标从存储层查询
 
 对老数据兼容：
 
@@ -230,11 +230,11 @@ provider, err := memory.GlobalRegistry().CreateProvider("memu", &memu.ProviderCo
 
 它的工作方式：
 
-- 检索阶段向 mem0 的 search API 发请求
-- 写入阶段向 mem0 的 add memories API 发请求
-- 兼容 hosted / oss 两种模式，并允许覆盖默认路径和鉴权 header
+- 检索阶段向 mem0 的搜索接口发请求
+- 写入阶段向 mem0 的记忆写入接口发请求
+- 兼容托管版和自建版两种模式，并允许覆盖默认路径和鉴权请求头
 - 检索失败时会优雅降级，返回空结果，不阻塞主流程
-- 对部分 hosted 服务，写入可能是异步完成的；新写入的记忆不一定能在下一秒立即被检索到
+- 对部分托管服务，写入可能是异步完成的；新写入的记忆不一定能在下一秒立即被检索到
 
 创建方式：
 
@@ -270,9 +270,9 @@ provider, err := memory.GlobalRegistry().CreateProvider("mem0", &mem0.ProviderCo
 
 - `BaseURL`: mem0 服务地址，必填
 - `Mode`: `mem0.ModeHosted` 或 `mem0.ModeOSS`
-- `APIKey`: API key；hosted 默认使用 `Authorization: Token <key>`，oss 默认使用 `X-API-Key`
+- `APIKey`: API key；托管版默认使用 `Authorization: Token <key>`，自建版默认使用 `X-API-Key`
 - `AddPath` / `SearchPath`: 覆盖默认接口路径，适配第三方兼容服务
-- `AuthHeader` / `AuthScheme`: 覆盖默认鉴权 header 或 scheme
+- `AuthHeader` / `AuthScheme`: 覆盖默认鉴权请求头或鉴权 scheme
 - `SearchMsgLimit`: 构造检索 query 时最多读取多少条最近消息
 - `SearchResultLimit`: 搜索 API 期望返回多少条结果
 - `OutputMemoryLimit`: 最多向模型注入多少条 mem0 记忆

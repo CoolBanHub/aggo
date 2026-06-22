@@ -1,7 +1,7 @@
-# AGGO - AI Agent Go Framework
+# AGGO - Go AI Agent 框架
 
-[![Go Version](https://img.shields.io/badge/Go-%3E%3D%201.24-blue)](https://golang.org/)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Go 版本](https://img.shields.io/badge/Go-%3E%3D%201.24-blue)](https://golang.org/)
+[![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CloudWeGo Eino](https://img.shields.io/badge/powered%20by-CloudWeGo%20Eino-orange)](https://github.com/cloudwego/eino)
 
 AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架构建的企业级 AI Agent 框架，提供完整的对话 AI、知识管理、记忆系统、定时任务和工具调用能力。
@@ -9,7 +9,7 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 ## ✨ 核心特性
 
 ### 🤖 智能代理系统
-- **React 模式代理**: 基于 CloudWeGo Eino ADK 的 ReAct (Reasoning + Acting) 模式实现
+- **ReAct 模式代理**: 基于 CloudWeGo Eino ADK 的 ReAct (Reasoning + Acting) 模式实现
 - **工具调用**: 原生支持多种工具集成，包括知识库、数据库、Shell 命令等
 - **多轮对话**: 上下文感知的多轮对话能力
 - **流式响应**: 基于 SSE (Server-Sent Events) 的实时流式输出
@@ -61,56 +61,15 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 ## 🏗️ 系统架构
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        AGGO Framework                             │
-│                                                                   │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
-│  │   Agent Layer   │  │  Memory Layer   │  │   Tool Layer    │  │
-│  │                 │  │                 │  │                 │  │
-│  │ • ReAct Agent   │◄─┤ • Session Mem   │  │ • Knowledge     │  │
-│  │ • CronAgent     │  │ • Long-term Mem │  │ • Database      │  │
-│  │ • Multi-turn    │  │ • Auto Summary  │  │ • Shell Exec    │  │
-│  │ • Streaming     │  │ • Async Process │  │ • Cron Tools    │  │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  │
-│           │                    │                    │            │
-│           └────────────────────┼────────────────────┘            │
-│                                │                                 │
-│           ┌────────────────────┴────────────────────┐            │
-│           │         Storage & Vector Layer          │            │
-│           │                                          │            │
-│           │  ┌──────────────┐  ┌─────────────────┐  │            │
-│           │  │   Vector DB  │  │  Memory Store   │  │            │
-│           │  │              │  │                 │  │            │
-│           │  │ • Milvus     │  │ • In-Memory     │  │            │
-│           │  │ • PostgreSQL │  │ • SQL (GORM)    │  │            │
-│           │  └──────────────┘  └─────────────────┘  │            │
-│           └──────────────────────────────────────────┘            │
-│                                                                   │
-│           ┌──────────────────────────────────────────┐            │
-│           │         Cron Schedule Layer              │            │
-│           │                                          │            │
-│           │  • One-time (at)   • Periodic (every)    │            │
-│           │  • Cron Expression  • File/GORM Store    │            │
-│           └──────────────────────────────────────────┘            │
-│                                                                   │
-│           ┌──────────────────────────────────────────┐            │
-│           │         Model & Embedding Layer          │            │
-│           │                                          │            │
-│           │  • OpenAI Compatible Chat Models         │            │
-│           │  • GLM Models (with Thinking Mode)       │            │
-│           │  • OpenAI Compatible Embedding Models    │            │
-│           │  • Support Reasoning Parameters          │            │
-│           └──────────────────────────────────────────┘            │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
-                                 │
-                    ┌────────────┴────────────┐
-                    │   Observability Layer   │
-                    │                         │
-                    │  • Langfuse Tracing     │
-                    │  • Structured Logging   │
-                    │  • SSE Event Streaming  │
-                    └─────────────────────────┘
+┌──────────────────────────── AGGO 框架 ────────────────────────────┐
+│  代理层：ReAct Agent、CronAgent、多轮对话、流式响应                 │
+│  记忆层：会话记忆、长期记忆、自动摘要、异步处理                     │
+│  工具层：知识库、数据库、Shell、定时任务工具                        │
+│  存储与向量层：Milvus、PostgreSQL、内存存储、SQL/GORM 存储           │
+│  调度层：一次性任务、周期任务、Cron 表达式、文件/GORM 存储           │
+│  模型与嵌入层：OpenAI 兼容模型、GLM、Embedding、推理参数             │
+│  可观测层：Langfuse 追踪、结构化日志、SSE 事件流                    │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 ## 📦 安装
@@ -170,7 +129,7 @@ func main() {
         model.WithModel("gpt-4"),
     )
 
-    // 创建 memory provider
+    // 创建记忆 provider
     provider, _ := memory.GlobalRegistry().CreateProvider("builtin", &builtin.ProviderConfig{
         ChatModel: cm,
         Storage:   storage.NewMemoryStore(),
@@ -218,21 +177,25 @@ func main() {
 ### 2. 运行示例程序
 
 ```bash
+cd example
+
 # 知识库代理示例
-go run example/knowledge_agent_tool_test/main.go
+go run ./knowledge_agent_tool_test
 
 # 记忆系统示例
-go run example/mem_agent_test/main.go
+go run ./mem_agent_test
 
 # mem0 记忆示例
-go run example/mem0_agent_test/main.go
+go run ./mem0_agent_test
 
 # SSE 流式响应示例
-go run example/sse/main.go
+go run ./sse
 
 # ADK 使用示例
-go run example/adk_test/main.go
+go run ./adk_test
 ```
+
+示例是独立 Go 模块，更多运行方式见 [example/README.md](./example/README.md)。
 
 ## 💡 核心功能详解
 
@@ -272,9 +235,9 @@ if err != nil {
 - `RetrievalFirstN`: 返回最早 N 条记忆
 - `RetrievalSemantic`: 基于语义相关性检索
 
-完整使用说明、provider 说明和存储差异见 [memory/README.md](./memory/README.md)。
+完整使用说明、provider 约定和存储差异见 [memory/README.md](./memory/README.md)。
 
-如果你希望把记忆托管给外部服务，也可以直接切到 `mem0` provider：
+如果你希望把记忆托管给外部服务，也可以直接切到 `mem0` 提供器：
 
 ```go
 import (
@@ -301,28 +264,20 @@ if err != nil {
 
 ```go
 import (
-    "github.com/CoolBanHub/aggo/agent/cron_agent"
+    cronPkg "github.com/CoolBanHub/aggo/cron"
+    cronTool "github.com/CoolBanHub/aggo/tools/cron"
 )
 
-// 使用文件存储
-cronAgent, _ := cron_agent.New(ctx, chatModel,
-    cron_agent.WithFileStore("/path/to/cron_jobs.json"),
+store := cronPkg.NewFileStore("/path/to/cron_jobs.json")
+service := cronPkg.NewCronService(store, nil)
+cronTools := cronTool.GetTools(service)
+
+result, _ := cronPkg.NewCronAgent(ctx, chatModel, cronTools,
+    cronPkg.WithMaxJobsPerUser(20),
 )
 
-// 使用 GORM 存储
-cronAgent, _ := cron_agent.New(ctx, chatModel,
-    cron_agent.WithGormStore(gormDB),
-    cron_agent.WithMaxJobsPerUser(20),  // 单用户最多20个任务
-)
-
-// 启动服务
-cronAgent.Start()
-defer cronAgent.Stop()
-
-// 使用代理
-response, _ := cronAgent.Generate(ctx, []*schema.Message{
-    schema.UserMessage("10分钟后提醒我开会"),
-})
+_ = result.Service.Start()
+defer result.Service.Stop()
 ```
 
 #### 调度方式
@@ -336,10 +291,8 @@ response, _ := cronAgent.Generate(ctx, []*schema.Message{
 #### 自定义任务触发
 
 ```go
-cronAgent, _ := cron_agent.New(ctx, chatModel,
-    cron_agent.WithFileStore("/path/to/cron_jobs.json"),
-    cron_agent.WithOnJobTriggered(func(job *cronPkg.CronJob) {
-        // 自定义处理逻辑
+result, _ := cronPkg.NewCronAgent(ctx, chatModel, cronTools,
+    cronPkg.WithOnJobTriggered(func(job *cronPkg.CronJob) {
         fmt.Printf("任务触发: %s\n", job.Payload.Message)
     }),
 )
@@ -430,17 +383,31 @@ knowledgeTools := tools.GetKnowledgeTools(vectorDB, retriever, &retriever.Option
 #### 数据库工具
 
 ```go
-// MySQL 工具
-mysqlTool := tools.GetMySQLTool(mysqlDB)
+import (
+    "github.com/CoolBanHub/aggo/tools"
+    "github.com/CoolBanHub/aggo/tools/database"
+)
 
-// PostgreSQL 工具
-postgresTool := tools.GetPostgresTool(postgresDB)
+// 默认只允许 SELECT/SHOW/DESCRIBE/EXPLAIN/PRAGMA/WITH 等只读查询
+dbTools := tools.GetDatabaseTools(gormDB)
+
+// 如确需写操作，必须显式开启
+writeTools := tools.GetDatabaseTools(gormDB, database.WithAllowWrite(true))
 ```
 
 #### Shell 工具
 
 ```go
-shellTool := tools.GetShellTool()  // 安全的系统命令执行
+import (
+    "github.com/CoolBanHub/aggo/tools"
+    "github.com/CoolBanHub/aggo/tools/shell"
+)
+
+// 默认限制工作目录并拒绝高危命令
+shellTools := tools.GetShellTools()
+
+// 生产环境建议进一步配置命令白名单
+restrictedShellTools := tools.GetShellTools(shell.WithAllowedCommands("ls", "pwd", "cat"))
 ```
 
 ### SSE 流式响应
@@ -449,7 +416,7 @@ shellTool := tools.GetShellTool()  // 安全的系统命令执行
 import "github.com/CoolBanHub/aggo/pkg/sse"
 
 // 创建 SSE 写入器
-writer := sse.NewSSEWriter(w, r)
+writer := sse.NewWriter("session-id", w)
 defer writer.WriteDone()
 
 // 流式生成
@@ -485,12 +452,9 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 aggo/
 ├── agent/                      # AI 代理系统
-│   ├── agent.go                   # ReAct 代理实现
-│   ├── option.go                  # 代理配置选项
-│   ├── utils.go                   # 工具函数
-│   ├── agent_memory.go            # 代理记忆管理
-│   └── cron_agent/                # 定时任务代理
-│       └── cron_agent.go             # CronAgent 实现
+│   ├── builder.go                 # AgentBuilder
+│   ├── instruction_formatter.go    # 指令格式整理
+│   └── instruction_formatter_test.go
 │
 ├── memory/                     # 记忆管理系统
 │   ├── provider.go                # MemoryProvider 接口
@@ -512,6 +476,7 @@ aggo/
 │   └── mem0/                      # mem0 / 兼容 API provider
 │
 ├── cron/                       # 定时任务系统
+│   ├── agent.go                   # CronAgent 构建入口
 │   ├── model.go                   # 任务模型定义
 │   ├── service.go                 # 调度服务
 │   ├── store.go                   # 存储接口
@@ -526,7 +491,8 @@ aggo/
 │   └── postgres/                  # PostgreSQL + pgvector 实现
 │       ├── postgres.go               # PostgreSQL 客户端
 │       ├── option.go                 # 配置选项
-│       └── utils.go                  # 工具函数
+│       ├── utils.go                  # 工具函数
+│       └── postgres_test.go
 │
 ├── model/                      # AI 模型封装
 │   ├── chat.go                    # 聊天模型 (支持推理强度参数)
@@ -548,31 +514,32 @@ aggo/
 │   │   ├── shell.go                 # Shell 执行
 │   │   ├── shell_process_unix.go    # Unix 进程管理
 │   │   └── shell_process_windows.go # Windows 进程管理
-│   └── cron/                      # 定时任务工具
-│       └── cron.go                  # Cron 操作工具
+│   ├── cron/                      # 定时任务工具
+│   │   └── cron.go                  # Cron 操作工具
+│   └── memory/                    # 记忆检索工具
+│       └── memory.go                # 用户记忆搜索工具
 │
-├── pkg/                        # 公共包
+├── pkg/                        # 公共集成包（稳定 import path）
+│   ├── README.md                  # pkg 公共 API 约定
+│   ├── adapter/                   # Eino -> OpenAI 响应适配
+│   ├── ailens360/                 # AILens360 代理与追踪集成
 │   ├── sse/                       # Server-Sent Events
 │   │   ├── sse.go                    # SSE 核心实现
 │   │   ├── event.go                  # 事件定义
 │   │   └── writer.go                 # SSE 写入器
 │   └── langfuse/                  # Langfuse 可观测性
-│       └── langfuse.go               # Langfuse 客户端
+│       ├── client.go                 # Langfuse 数据上报客户端
+│       ├── handler.go                # Eino 回调处理器
+│       └── prompt.go                 # Prompt 接口
 │
 ├── utils/                      # 工具函数
-│   ├── utils.go                   # 通用工具
-│   ├── uuid.go                    # UUID 生成
 │   ├── ulid.go                    # ULID 生成
 │   ├── float.go                   # 浮点数处理
 │   └── convert.go                 # 类型转换
 │
-├── state/                      # 状态管理
-│   └── chat.go                    # 聊天状态
-│
-├── config/                     # 配置管理
-│   └── config.go                  # 配置定义
-│
-└── example/                    # 示例代码
+└── example/                    # 独立示例 Go 模块
+    ├── README.md                  # 示例运行说明
+    ├── go.mod                     # 示例模块定义
     ├── knowledge_agent_tool_test/ # 知识库代理示例
     ├── mem_agent_test/            # 记忆系统示例
     ├── sse/                       # SSE 流式响应示例
@@ -583,7 +550,7 @@ aggo/
     ├── vision_test/               # 视觉能力示例
     ├── generate_img_test/         # 图像生成示例
     ├── skill_agent_test/          # 技能代理示例
-    └── claw/                      # Claw 示例
+    └── claw/                      # 独立 Claw 示例模块
 ```
 
 ### 构建和测试
@@ -600,10 +567,15 @@ go test -v ./agent/...
 go test -v ./memory/...
 go test -v ./database/...
 
-# 运行示例
-go run example/knowledge_agent_tool_test/main.go
-go run example/mem_agent_test/main.go
-go run example/sse/main.go
+# 验证示例模块
+cd example
+go test ./...
+go run ./mem_agent_test
+go run ./sse
+
+# 验证独立 Claw 示例模块
+cd claw
+go test ./...
 ```
 
 ## 🐛 故障排除
@@ -668,7 +640,7 @@ defer provider.Close()  // 确保在创建 provider 后立即添加 defer
 
 ## 📄 许可证
 
-本项目采用 [MIT License](LICENSE) 开源许可证。
+本项目采用 [MIT 许可证](LICENSE) 开源。
 
 ## 🙏 致谢
 
@@ -690,6 +662,6 @@ defer provider.Close()  // 确保在创建 provider 后立即添加 defer
 
 [开始使用](#-快速开始) · [查看示例](./example) · [贡献代码](#-贡献)
 
-Made with ❤️ by the AGGO Team
+由 AGGO Team 构建
 
 </div>

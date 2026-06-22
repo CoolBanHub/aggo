@@ -1,4 +1,4 @@
-# Database - 向量数据库（知识库存储层）
+# 数据库模块 - 向量数据库（知识库存储层）
 
 `database` 模块提供统一的向量存储和检索接口，是 AGGO 知识库系统的底层存储抽象。
 
@@ -87,7 +87,7 @@ Milvus 实现是对 eino-ext 官方组件的薄封装：
 - 批量 Embedding（非逐文档调用）
 - 正确的 Upsert ID 返回
 - 集合状态检查、索引创建 Await 等最佳实践
-- 未来可按需扩展 Sparse Vector、Hybrid Search、BM25 等高级模式
+- 未来可按需扩展稀疏向量、混合检索、BM25 等高级模式
 
 ## PostgreSQL + pgvector
 
