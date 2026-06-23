@@ -118,20 +118,34 @@ func TestAnalyzerPutsDynamicContextInUserMessage(t *testing.T) {
 	useEvent := true
 	_, err := analyzer.AnalyzeOnce(context.Background(), AnalyzeRequest{
 		ExistingMemory: &UserMemory{
-			Memory: "# 用户记忆\n\n### 基础信息\n- 喜欢脆苹果",
+			Memory: "# 用户记忆\n\n### 基础信息\n- 测试偏好：榴莲披萨",
 		},
 		RecentEvents: []*UserMemoryEvent{
-			{Type: UserMemoryEventTypeEvent, EventDate: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), Summary: "测试事件"},
+			{Type: UserMemoryEventTypeEvent, EventDate: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), Summary: "项目X-999验收完成"},
 		},
 		HistoryMessages: []*ConversationMessage{
-			{Role: "user", Content: "明天提醒我买苹果"},
+			{Role: "user", Content: "明天提醒我复核项目X-999"},
 		},
 		UseEventSearch: &useEvent,
 	})
 	if err != nil {
 		t.Fatalf("AnalyzeOnce: %v", err)
 	}
-	assertDynamicContextOnlyInUser(t, cm.input, "喜欢脆苹果", "测试事件", "明天提醒我买苹果")
+	if len(cm.input) != 3 {
+		t.Fatalf("len(messages) = %d, want system + memory user + analysis user: %#v", len(cm.input), cm.input)
+	}
+	memoryText := agmsg.Text(cm.input[1])
+	if strings.Contains(memoryText, "## 现有短文档") || strings.Contains(memoryText, "## 现有记忆") {
+		t.Fatalf("memory user message should not include wrapper heading: %q", memoryText)
+	}
+	if !strings.HasPrefix(memoryText, "# 用户记忆") || !strings.Contains(memoryText, "榴莲披萨") {
+		t.Fatalf("memory user message should contain raw memory document: %q", memoryText)
+	}
+	analysisText := agmsg.Text(cm.input[2])
+	if strings.Contains(analysisText, "## 最近对话记录") {
+		t.Fatalf("analysis user message should not include recent-history wrapper heading: %q", analysisText)
+	}
+	assertDynamicContextOnlyInUser(t, cm.input, "榴莲披萨", "项目X-999验收完成", "明天提醒我复核项目X-999")
 }
 
 func TestSummaryPutsDynamicContextInUserMessage(t *testing.T) {
@@ -165,31 +179,58 @@ func TestIncrementalSummaryPutsDynamicContextInUserMessage(t *testing.T) {
 	assertDynamicContextOnlyInUser(t, cm.input, "旧摘要内容", "刚完成订单处理")
 }
 
+func TestBuiltinPromptLengthsSupportPromptCaching(t *testing.T) {
+	prompts := map[string]string{
+		"DefaultUserMemoryPrompt":                DefaultUserMemoryPrompt,
+		"DefaultEventSearchMemoryPrompt":         DefaultEventSearchMemoryPrompt,
+		"DefaultSessionSummaryPrompt":            DefaultSessionSummaryPrompt,
+		"DefaultIncrementalSessionSummaryPrompt": DefaultIncrementalSessionSummaryPrompt,
+	}
+	for name, prompt := range prompts {
+		if len(prompt) < 5000 {
+			t.Fatalf("%s is too short for reliable prompt-cache prefixing: %d bytes, %d runes", name, len(prompt), len([]rune(prompt)))
+		}
+	}
+}
+
 func assertDynamicContextOnlyInUser(t *testing.T, messages []*schema.AgenticMessage, dynamicNeedles ...string) {
 	t.Helper()
-	if len(messages) != 2 {
-		t.Fatalf("len(messages) = %d, want 2: %#v", len(messages), messages)
+	if len(messages) < 2 {
+		t.Fatalf("len(messages) = %d, want at least 2: %#v", len(messages), messages)
 	}
 	if messages[0].Role != schema.AgenticRoleTypeSystem {
 		t.Fatalf("message[0].Role = %s, want system", messages[0].Role)
 	}
-	if messages[1].Role != schema.AgenticRoleTypeUser {
-		t.Fatalf("message[1].Role = %s, want user", messages[1].Role)
+	for i := 1; i < len(messages); i++ {
+		if messages[i].Role != schema.AgenticRoleTypeUser {
+			t.Fatalf("message[%d].Role = %s, want user", i, messages[i].Role)
+		}
 	}
 	systemText := agmsg.Text(messages[0])
-	userText := agmsg.Text(messages[1])
+	userTexts := make([]string, 0, len(messages)-1)
+	for _, msg := range messages[1:] {
+		userTexts = append(userTexts, agmsg.Text(msg))
+	}
+	allUserText := strings.Join(userTexts, "\n\n")
+	lastUserText := userTexts[len(userTexts)-1]
 	if strings.Contains(systemText, "<current_time>") {
 		t.Fatalf("system contains current_time: %q", systemText)
 	}
-	if !strings.Contains(userText, "<current_time>") {
-		t.Fatalf("user missing current_time: %q", userText)
+	if !strings.Contains(allUserText, "<current_time>") {
+		t.Fatalf("user missing current_time: %q", allUserText)
+	}
+	if !strings.Contains(lastUserText, "\n\n-----\n<current_time>") {
+		t.Fatalf("current_time should be appended after runtime divider in last user message: %q", lastUserText)
+	}
+	if !strings.HasSuffix(lastUserText, "</current_time>") {
+		t.Fatalf("current_time should be the last user section: %q", lastUserText)
 	}
 	for _, needle := range dynamicNeedles {
 		if strings.Contains(systemText, needle) {
 			t.Fatalf("system contains dynamic content %q: %q", needle, systemText)
 		}
-		if !strings.Contains(userText, needle) {
-			t.Fatalf("user missing dynamic content %q: %q", needle, userText)
+		if !strings.Contains(allUserText, needle) {
+			t.Fatalf("user missing dynamic content %q: %q", needle, allUserText)
 		}
 	}
 }
