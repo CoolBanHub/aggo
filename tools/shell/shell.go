@@ -197,7 +197,8 @@ func (t *ShellTool) executeCommand(ctx context.Context, params ExecuteParams) (*
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(cmdCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", params.Command)
+		psCommand := "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; " + params.Command
+		cmd = exec.CommandContext(cmdCtx, "powershell", "-NoProfile", "-NonInteractive", "-Command", psCommand)
 	} else {
 		cmd = exec.CommandContext(cmdCtx, "sh", "-c", params.Command)
 	}

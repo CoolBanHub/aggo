@@ -5,10 +5,14 @@ package shell
 import (
 	"os/exec"
 	"strconv"
+	"syscall"
 )
 
 func prepareCommandForTermination(cmd *exec.Cmd) {
-	// no-op on Windows
+	if cmd == nil {
+		return
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 }
 
 func terminateProcessTree(cmd *exec.Cmd) error {
@@ -21,7 +25,9 @@ func terminateProcessTree(cmd *exec.Cmd) error {
 		return nil
 	}
 
-	_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()
+	taskkill := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid))
+	taskkill.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	_ = taskkill.Run()
 	_ = cmd.Process.Kill()
 	return nil
 }
