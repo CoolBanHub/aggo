@@ -3,8 +3,13 @@
 [![Go 版本](https://img.shields.io/badge/Go-%3E%3D%201.24-blue)](https://golang.org/)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CloudWeGo Eino](https://img.shields.io/badge/powered%20by-CloudWeGo%20Eino-orange)](https://github.com/cloudwego/eino)
+[![Eino 版本](https://img.shields.io/badge/Eino-0.9-blue)](https://github.com/cloudwego/eino)
 
 AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架构建的企业级 AI Agent 框架，提供完整的对话 AI、知识管理、记忆系统、定时任务和工具调用能力。
+
+> **⚠️ 版本兼容性说明**: 本项目使用 **Eino 0.9** 版本。由于 Eino 框架的 API 重大变更，采用了最新的 AgenticMessage 设计，**AGGO 0.3 版本与 0.2 版本不兼容**，升级前请确保使用正确的 Eino 版本。
+>
+> **为什么不保持兼容？** 新版本的设计更符合 Agent 的语义规范，且引入兼容层会增加代码复杂度、影响可维护性。在 AI 辅助编程普及的当下，升级现有项目的成本已大幅降低。
 
 ## ✨ 核心特性
 
