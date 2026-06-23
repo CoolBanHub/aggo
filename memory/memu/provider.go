@@ -60,8 +60,8 @@ func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*
 	}
 
 	if strings.TrimSpace(memoryContext) != "" {
-		result.SystemMessages = []*schema.AgenticMessage{
-			schema.SystemAgenticMessage(memoryContext),
+		result.ContextMessages = []*schema.AgenticMessage{
+			schema.UserAgenticMessage(memoryContext),
 		}
 	}
 

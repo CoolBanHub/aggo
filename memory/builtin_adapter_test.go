@@ -64,8 +64,8 @@ func TestBuiltinRetrieveKeepsRecentMessagesWithSessionSummary(t *testing.T) {
 		t.Fatalf("Retrieve: %v", err)
 	}
 
-	if len(result.SystemMessages) != 1 || !strings.Contains(agmsg.Text(result.SystemMessages[0]), "已摘要到最新一轮") {
-		t.Fatalf("summary was not injected: %#v", result.SystemMessages)
+	if len(result.ContextMessages) != 1 || !strings.Contains(agmsg.Text(result.ContextMessages[0]), "已摘要到最新一轮") {
+		t.Fatalf("summary was not injected as context: %#v", result.ContextMessages)
 	}
 	if len(result.HistoryMessages) != 2 {
 		t.Fatalf("len(HistoryMessages) = %d, want 2: %#v", len(result.HistoryMessages), result.HistoryMessages)

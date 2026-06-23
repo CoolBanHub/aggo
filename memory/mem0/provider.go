@@ -68,8 +68,8 @@ func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*
 		},
 	}
 	if strings.TrimSpace(memoryContext) != "" {
-		result.SystemMessages = []*schema.AgenticMessage{
-			schema.SystemAgenticMessage(memoryContext),
+		result.ContextMessages = []*schema.AgenticMessage{
+			schema.UserAgenticMessage(memoryContext),
 		}
 	}
 
@@ -132,7 +132,7 @@ func (p *Provider) Close() error {
 	return nil
 }
 
-// FormatMemoryContext turns search results into a system message payload.
+// FormatMemoryContext turns search results into a dynamic context payload.
 func FormatMemoryContext(items []SearchItem, limit int) string {
 	if limit <= 0 {
 		limit = defaultOutputMemoryLimit

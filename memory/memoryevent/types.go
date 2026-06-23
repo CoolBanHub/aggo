@@ -23,7 +23,7 @@ const (
 
 // Event 用户记忆事件
 // 单条带时间属性的“任务里程碑/事件记录”条目，retrieve 时只取最近 N 条进
-// system prompt，再通过 search_user_memory 工具按需检索更早内容。
+// 动态上下文，再通过 search_user_memory 工具按需检索更早内容。
 type Event struct {
 	// 主键 ID（ULID 单调递增；非内置 provider 可用任意稳定字符串）
 	ID string `json:"id"`

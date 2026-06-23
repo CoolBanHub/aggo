@@ -36,28 +36,30 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 
 	var sessionSummary *builtin.SessionSummary
 
-	// Fetch user memory as system message
+	// Fetch user memory as dynamic context messages. Keeping it out of the
+	// system prompt preserves provider-side prompt caching for the stable
+	// instruction.
 	if cfg.EnableUserMemories {
 		userMemory, err := p.MemoryManager.GetUserMemory(ctx, req.UserID)
 		if err == nil && userMemory != nil && userMemory.Memory != "" {
-			result.SystemMessages = append(result.SystemMessages, schema.SystemAgenticMessage(fmt.Sprintf("<user_memory>\n%s\n</user_memory>", userMemory.Memory)))
+			result.ContextMessages = append(result.ContextMessages, schema.UserAgenticMessage(fmt.Sprintf("<user_memory>\n%s\n</user_memory>", userMemory.Memory)))
 		}
 
 		// 事件检索模式：再追加“最近 N 条事件”块，更早的事件由 search_user_memory 工具按需检索。
 		if cfg.EnableEventSearch && cfg.RecentEventLimit > 0 {
 			events, evtErr := p.MemoryManager.ListRecentUserMemoryEvents(ctx, req.UserID, cfg.RecentEventLimit)
 			if evtErr == nil && len(events) > 0 {
-				result.SystemMessages = append(result.SystemMessages, schema.SystemAgenticMessage(formatRecentEventsBlock(events)))
+				result.ContextMessages = append(result.ContextMessages, schema.UserAgenticMessage(formatRecentEventsBlock(events)))
 			}
 		}
 	}
 
-	// Fetch session summary as system message
+	// Fetch session summary as dynamic context.
 	if cfg.EnableSessionSummary {
 		summary, err := p.MemoryManager.GetSessionSummary(ctx, req.SessionID, req.UserID)
 		if err == nil && summary != nil && summary.Summary != "" {
 			sessionSummary = summary
-			result.SystemMessages = append(result.SystemMessages, schema.SystemAgenticMessage(fmt.Sprintf("<session_context>\n%s\n</session_context>", summary.Summary)))
+			result.ContextMessages = append(result.ContextMessages, schema.UserAgenticMessage(fmt.Sprintf("<session_context>\n%s\n</session_context>", summary.Summary)))
 		}
 	}
 
@@ -143,7 +145,7 @@ func (p *builtinProvider) ListRecentUserMemoryEvents(ctx context.Context, userID
 	return p.MemoryManager.ListRecentUserMemoryEvents(ctx, userID, limit)
 }
 
-// formatRecentEventsBlock 把最近事件渲染为 system message 块，控制每条字数避免冲爆 prompt。
+// formatRecentEventsBlock 把最近事件渲染为上下文块，控制每条字数避免冲爆 prompt。
 func formatRecentEventsBlock(events []*builtin.UserMemoryEvent) string {
 	var b strings.Builder
 	b.WriteString("<user_memory_recent_events>\n")

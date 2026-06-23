@@ -38,7 +38,13 @@ type RetrieveRequest struct {
 
 // RetrieveResult is the output of the Retrieve operation.
 type RetrieveResult struct {
+	// ContextMessages are injected as dynamic context before the conversation.
+	// Providers should use this for user/session-specific retrieved data so the
+	// base system prompt remains cacheable.
+	ContextMessages []*schema.AgenticMessage
+
 	// SystemMessages are injected as system context before the conversation.
+	// Deprecated: use ContextMessages for dynamic memory or retrieval results.
 	SystemMessages []*schema.AgenticMessage
 
 	// HistoryMessages are injected as conversation history.

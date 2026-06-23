@@ -171,12 +171,12 @@ func waitForMemory(ctx context.Context, provider memory.MemoryProvider, userID, 
 	return context.DeadlineExceeded
 }
 
-func systemMessageContents(result *memory.RetrieveResult) []string {
-	if result == nil || len(result.SystemMessages) == 0 {
+func contextMessageContents(result *memory.RetrieveResult) []string {
+	if result == nil || len(result.ContextMessages) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(result.SystemMessages))
-	for _, msg := range result.SystemMessages {
+	out := make([]string, 0, len(result.ContextMessages))
+	for _, msg := range result.ContextMessages {
 		if msg == nil {
 			continue
 		}
@@ -186,7 +186,7 @@ func systemMessageContents(result *memory.RetrieveResult) []string {
 }
 
 func containsExpectedMemory(result *memory.RetrieveResult, expected ...string) bool {
-	contents := strings.Join(systemMessageContents(result), "\n")
+	contents := strings.Join(contextMessageContents(result), "\n")
 	if strings.TrimSpace(contents) == "" {
 		return false
 	}

@@ -194,7 +194,7 @@ type MemoryConfig struct {
 	//   true  - 用户记忆拆为“常驻短文档（核心约定+基础信息）”和“事件检索表”，
 	//           Retrieve 仅注入短文档 + 最近 RecentEventLimit 条事件；
 	//           更早的事件需通过 search_user_memory 工具按关键词/时间检索。
-	//   false - 兼容旧行为，整篇 UserMemory.Memory 全量注入 system。
+	//   false - 兼容旧行为，整篇 UserMemory.Memory 全量注入模型上下文。
 	// 仅当 EnableUserMemories=true 时生效。
 	EnableEventSearch bool `json:"enableEventSearch"`
 	// 常驻注入的最近事件条数，默认 20，仅在 EnableEventSearch=true 时生效。

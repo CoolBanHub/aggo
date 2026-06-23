@@ -22,7 +22,7 @@ type MemoryProvider interface {
 
 其中：
 
-- `Retrieve` 在模型调用前执行，返回要注入的系统消息和历史消息
+- `Retrieve` 在模型调用前执行，返回要注入的动态上下文和历史消息
 - `Memorize` 在模型返回后执行，保存本轮对话
 - `Close` 用于释放底层资源
 
@@ -148,7 +148,7 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 #### 事件检索模式（EnableEventSearch）
 
 旧版 user_memory 把核心约定、基础信息、任务里程碑、事件记录全部塞在一篇 Markdown 里，
-每次对话都整篇注入 system。事件越多，prompt 越长。
+每次对话都整篇注入模型上下文。事件越多，prompt 越长。
 
 启用 `EnableEventSearch=true` 之后：
 
@@ -170,7 +170,7 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 
 启用 `EnableSessionSummary` 后，`builtin` provider 的会话上下文不再只依赖最近 `MemoryLimit` 条原始消息：
 
-- 已生成的会话摘要会作为系统消息注入
+- 已生成的会话摘要会作为动态上下文注入
 - 检索时只补充“摘要游标之后”的未摘要消息尾巴
 - 如果设置了 `SummaryRecentMessageLimit`，会同时注入最近 N 条原始消息并按消息 ID 去重，避免刚被摘要折叠的最近对话丢失原文细节
 - 摘要更新成功后会持久化最后一条已纳入摘要的消息游标，避免重启后重复摘要同一批历史消息
@@ -288,7 +288,7 @@ provider, err := memory.GlobalRegistry().CreateProvider("mem0", &mem0.ProviderCo
 `MemoryMiddleware` 的行为比较直接：
 
 1. `BeforeModelRewriteState` 阶段调用 `provider.Retrieve`
-2. 把 `SystemMessages` 和 `HistoryMessages` 拼到当前 `state.Messages`
+2. 把 `ContextMessages`（兼容旧 `SystemMessages`）和 `HistoryMessages` 拼到当前 `state.Messages`
 3. `AfterModelRewriteState` 阶段提取最近一轮 `user + assistant` 消息
 4. 异步调用 `provider.Memorize`
 

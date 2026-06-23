@@ -441,7 +441,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 		UseEventSearch:  &useEvent,
 	}
 	if useEvent {
-		// 提供最近事件作为去重参考；条数比注入 system 时再多一点，给 LLM 足够上下文判断重复。
+		// 提供最近事件作为去重参考；条数比注入模型上下文时再多一点，给 LLM 足够上下文判断重复。
 		recentLimit := m.config.RecentEventLimit * 2
 		if recentLimit <= 0 {
 			recentLimit = 20

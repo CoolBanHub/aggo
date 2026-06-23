@@ -137,8 +137,7 @@ func BuildConversationTurn(userText, assistantText string) string {
 }
 
 // FormatMemoryContext formats a RetrieveResponse into a human-readable string
-// suitable for injection as a system message. It limits output to maxItems per
-// category.
+// suitable for injection as dynamic context. It limits output to maxItems per category.
 func FormatMemoryContext(resp RetrieveResponse, maxItems int) string {
 	hasMemory := len(resp.Categories) > 0 || len(resp.Items) > 0 || len(resp.Resources) > 0
 	if !hasMemory {

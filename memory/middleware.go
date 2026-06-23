@@ -70,7 +70,7 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 		return ctx, state, nil
 	}
 
-	// Split state.Messages into: first system message + rest
+	// Split state.Messages into: first system message + rest.
 	var systemMsg *schema.AgenticMessage
 	var restMessages []*schema.AgenticMessage
 	for _, msg := range state.Messages {
@@ -81,27 +81,14 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 		}
 	}
 
-	// Merge memory context into the system prompt content.
-	if len(result.SystemMessages) > 0 && systemMsg != nil {
-		var memoryBlock strings.Builder
-		for i, sm := range result.SystemMessages {
-			content := agmsg.Text(sm)
-			if content != "" {
-				if i > 0 {
-					memoryBlock.WriteString("\n")
-				}
-				memoryBlock.WriteString(content)
-				memoryBlock.WriteString("\n")
-			}
-		}
-		agmsg.AppendUserText(systemMsg, "\n\n"+memoryBlock.String())
-	}
+	contextMessages := mergeContextMessages(result.ContextMessages, result.SystemMessages)
 
-	// Reassemble: system prompt → history → rest of conversation.
-	enhanced := make([]*schema.AgenticMessage, 0, 1+len(result.HistoryMessages)+len(restMessages))
+	// Reassemble: stable system prompt → dynamic context → history → rest of conversation.
+	enhanced := make([]*schema.AgenticMessage, 0, 1+len(contextMessages)+len(result.HistoryMessages)+len(restMessages))
 	if systemMsg != nil {
 		enhanced = append(enhanced, systemMsg)
 	}
+	enhanced = append(enhanced, contextMessages...)
 	enhanced = append(enhanced, result.HistoryMessages...)
 	enhanced = append(enhanced, restMessages...)
 	state.Messages = enhanced
@@ -178,4 +165,24 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 
 func (m *MemoryMiddleware) beforeModelRewriteStateKey() string {
 	return fmt.Sprintf("__aggo_memory_middleware_prepared_%p", m)
+}
+
+func mergeContextMessages(messageGroups ...[]*schema.AgenticMessage) []*schema.AgenticMessage {
+	var b strings.Builder
+	for _, messages := range messageGroups {
+		for _, msg := range messages {
+			content := strings.TrimSpace(agmsg.Text(msg))
+			if content == "" {
+				continue
+			}
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(content)
+		}
+	}
+	if b.Len() == 0 {
+		return nil
+	}
+	return []*schema.AgenticMessage{schema.UserAgenticMessage(b.String())}
 }
