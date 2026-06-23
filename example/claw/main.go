@@ -134,7 +134,7 @@ func main() {
 		MemoryConfig: &builtin.MemoryConfig{
 			EnableUserMemories:   true,
 			EnableSessionSummary: true,
-			// 启用“事件检索”模式：常驻短文档 + 最近 N 条事件作为动态上下文注入，
+			// 启用“事件检索”模式：常驻短文档 + 最近 N 条事件作为动态上下文追加到当前 user 消息，
 			// 更早的事件通过 search_user_memory 工具按关键词/时间检索。
 			EnableEventSearch:   true,
 			RecentEventLimit:    10,
@@ -168,7 +168,7 @@ func main() {
 3. 回复简洁准确
 
 ## 用户长期记忆规则
-1. 对话前已通过独立 user 消息注入两块动态上下文：
+1. 当前 user 消息末尾会追加两块动态上下文：
    - <user_memory> 常驻短文档（核心约定 + 基础信息）
    - <user_memory_recent_events> 最近若干条任务里程碑/事件记录（每条已含日期/类型/摘要）
 2. **优先使用上述常驻内容**回答；只有命中不到时才调用 search_user_memory

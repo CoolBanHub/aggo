@@ -170,7 +170,7 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 
 启用 `EnableSessionSummary` 后，`builtin` provider 的会话上下文不再只依赖最近 `MemoryLimit` 条原始消息：
 
-- 已生成的会话摘要会作为动态上下文注入
+- 已生成的会话摘要会作为动态上下文追加到当前 user 消息
 - 检索时只补充“摘要游标之后”的未摘要消息尾巴
 - 如果设置了 `SummaryRecentMessageLimit`，会同时注入最近 N 条原始消息并按消息 ID 去重，避免刚被摘要折叠的最近对话丢失原文细节
 - 摘要更新成功后会持久化最后一条已纳入摘要的消息游标，避免重启后重复摘要同一批历史消息
@@ -288,7 +288,7 @@ provider, err := memory.GlobalRegistry().CreateProvider("mem0", &mem0.ProviderCo
 `MemoryMiddleware` 的行为比较直接：
 
 1. `BeforeModelRewriteState` 阶段调用 `provider.Retrieve`
-2. 把 `ContextMessages`（兼容旧 `SystemMessages`）和 `HistoryMessages` 拼到当前 `state.Messages`
+2. 把 `HistoryMessages` 放回 system 后、当前消息前，并将 `ContextMessages`（兼容旧 `SystemMessages`）追加到当前 user 消息末尾
 3. `AfterModelRewriteState` 阶段提取最近一轮 `user + assistant` 消息
 4. 异步调用 `provider.Memorize`
 
