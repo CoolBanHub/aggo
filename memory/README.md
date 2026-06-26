@@ -73,9 +73,9 @@ func main() {
         WithMemory(provider).
         Build(ctx)
 
-    runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
-    _ = runner.Run(ctx, []*schema.Message{
-        schema.UserMessage("记住我叫 Alice，我喜欢摄影"),
+    runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag})
+    _ = runner.Run(ctx, []*schema.AgenticMessage{
+        schema.UserAgenticMessage("记住我叫 Alice，我喜欢摄影"),
     }, adk.WithSessionValues(map[string]any{
         "userID":    "alice",
         "sessionID": "demo-session",
@@ -132,8 +132,8 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 - `EnableUserMemories`: 是否启用用户长期记忆
 - `EnableSessionSummary`: 是否启用会话摘要
 - `EnableEventSearch`: 是否启用“事件检索”模式（推荐用于事件量大、上下文长的场景，见下文）
-- `RecentEventLimit`: 事件检索模式下，每次注入到 system 的最近事件条数，默认 20
-- `Retrieval`: 检索方式，支持 `RetrievalLastN`、`RetrievalFirstN`、`RetrievalSemantic`
+- `RecentEventLimit`: 事件检索模式下，每次注入到当前用户消息的最近事件条数，默认 20
+- `Retrieval`: 兼容旧配置的保留字段；当前 provider 注入历史消息时按最近 N 条读取
 - `MemoryLimit`: 历史消息检索上限
 - `SummaryRecentMessageLimit`: 启用会话摘要时，除摘要游标之后的消息外，额外保留最近 N 条原始消息作为短期上下文；默认 0，保持旧行为
 - `AsyncWorkerPoolSize`: 异步处理工作线程数量
@@ -163,8 +163,9 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 `UserMemoryEventSearcher` 时（默认 builtin provider 启用事件检索后自动满足）会自动注入
 `search_user_memory` 工具，无需手动 `WithTools`。
 
-旧数据迁移：使用 `example/migrate_user_memory` 把现有 Markdown 拆解成事件条目并裁剪
-短文档。先用 `-dry-run` 查看报告，再去掉该标志正式执行。
+旧数据迁移：当前仓库没有内置迁移命令；如已有旧版 Markdown 用户记忆，需要按
+`UserMemoryEventStorage` 接口自行把任务里程碑 / 事件记录拆成事件条目，并裁剪
+`UserMemory.Memory` 中的常驻短文档。
 
 #### 会话摘要行为
 

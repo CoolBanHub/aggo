@@ -19,6 +19,8 @@
 
 ```go
 import (
+    "time"
+
     cronPkg "github.com/CoolBanHub/aggo/cron"
     aggotools "github.com/CoolBanHub/aggo/tools"
     "github.com/CoolBanHub/aggo/tools/database"
@@ -35,9 +37,18 @@ dbTools := aggotools.GetDatabaseTools(gormDB)
 // 写 SQL 需要由工具创建方显式开启。
 writeDBTools := aggotools.GetDatabaseTools(gormDB, database.WithAllowWrite(true))
 
+// 可限制查询行数和执行超时。
+dbTools = aggotools.GetDatabaseTools(
+    gormDB,
+    database.WithMaxResultRows(200),
+    database.WithTimeout(3*time.Second),
+)
+
 // shell_execute 默认拒绝 rm、sudo 等高危命令，并将 workingDir 限制在进程启动目录内。
 shellTools := aggotools.GetShellTools(
     shell.WithAllowedCommands("ls", "pwd", "cat"),
+    shell.WithMaxOutputBytes(8_000),
+    shell.WithMaxTimeout(30*time.Second),
 )
 
 service := cronPkg.NewCronService(cronPkg.NewFileStore("cron_jobs.json"), nil)
@@ -53,8 +64,10 @@ allTools = append(allTools, cronTools...)
 ## 安全边界
 
 - `database_execute` 默认只允许 `SELECT`、`SHOW`、`DESCRIBE`、`EXPLAIN`、`PRAGMA`、`WITH` 等只读语句。需要写操作时使用 `database.WithAllowWrite(true)`。
+- `database_execute` 可以用 `database.WithMaxResultRows(...)` 和 `database.WithTimeout(...)` 限制结果规模和执行时间。
 - `shell_execute` 默认工作目录根为当前进程启动目录。需要修改根目录时使用 `shell.WithWorkingDirRoot(...)`；确需关闭限制时使用 `shell.WithUnrestrictedWorkingDir()`。
 - `shell_execute` 默认拒绝高危命令，并可用 `shell.WithAllowedCommands(...)` 将可执行命令收敛到白名单。
+- `shell_execute` 可以用 `shell.WithMaxOutputBytes(...)`、`shell.WithDefaultTimeout(...)`、`shell.WithMaxTimeout(...)` 限制输出和运行时间。
 - 对会产生大量结果的工具，应配置行数、输出长度或检索数量上限，避免把过多数据送入模型上下文。
 
 ## 开发约定

@@ -52,7 +52,7 @@ func NewLoadDocumentsTool(indexer indexer.Indexer) tool.InvokableTool {
 		indexer: indexer,
 	}
 	name := "load_documents"
-	desc := "将文档加载到知识库。支持多种文档来源（文本文件、URL、目录、内存），提供文档分块、重建知识库等功能。"
+	desc := "将文件或 URL 文档加载到知识库。"
 	t, _ := utils.InferTool(name, desc, this.loadDocuments)
 	return t
 }

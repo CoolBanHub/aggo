@@ -106,7 +106,7 @@ func NewKnowledgeSearchTool(retriever retriever.Retriever, retrieverOptions []re
 		retrieverOptions: retrieverOptions,
 	}
 	name := "knowledge_search"
-	desc := "搜索知识库获取相关信息。在思考后使用此工具多次搜索相关信息。支持多种搜索策略，如精确短语（使用引号）、OR操作符和聚焦关键词。"
+	desc := "搜索知识库获取相关信息。可在思考后多次搜索不同关键词或问题表述。"
 	t, _ := utils.InferTool(name, desc, this.search)
 	return t
 }

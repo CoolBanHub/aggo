@@ -1,13 +1,13 @@
 # AGGO - Go AI Agent 框架
 
-[![Go 版本](https://img.shields.io/badge/Go-%3E%3D%201.24-blue)](https://golang.org/)
+[![Go 版本](https://img.shields.io/badge/Go-%3E%3D%201.24.6-blue)](https://golang.org/)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![CloudWeGo Eino](https://img.shields.io/badge/powered%20by-CloudWeGo%20Eino-orange)](https://github.com/cloudwego/eino)
-[![Eino 版本](https://img.shields.io/badge/Eino-0.9-blue)](https://github.com/cloudwego/eino)
+[![Eino 版本](https://img.shields.io/badge/Eino-0.9.5-blue)](https://github.com/cloudwego/eino)
 
 AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/eino) 框架构建的企业级 AI Agent 框架，提供完整的对话 AI、知识管理、记忆系统、定时任务和工具调用能力。
 
-> **⚠️ 版本兼容性说明**: 本项目使用 **Eino 0.9** 版本。由于 Eino 框架的 API 重大变更，采用了最新的 AgenticMessage 设计，**AGGO 0.3 版本与 0.2 版本不兼容**，升级前请确保使用正确的 Eino 版本。
+> **⚠️ 版本兼容性说明**: 本项目使用 **Eino 0.9.5** 版本。由于 Eino 框架的 API 重大变更，采用了最新的 AgenticMessage 设计，**AGGO 0.3 版本与 0.2 版本不兼容**，升级前请确保使用正确的 Eino 版本。
 >
 > **为什么不保持兼容？** 新版本的设计更符合 Agent 的语义规范，且引入兼容层会增加代码复杂度、影响可维护性。在 AI 辅助编程普及的当下，升级现有项目的成本已大幅降低。
 
@@ -25,7 +25,7 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 - **长期记忆**: 支持用户级别的长期记忆存储
 - **智能摘要**: 自动生成会话摘要，优化上下文长度
 - **多后端支持**: 内置 `builtin` provider，并支持接入外部 `memu`、`mem0` 记忆服务
-- **多种检索策略**: `builtin` 支持 LastN、FirstN、语义检索等策略
+- **历史上下文注入**: `builtin` 按最近 N 条会话消息补充上下文，并支持会话摘要和事件检索模式
 - **灵活存储**: 支持内存存储和 SQL 存储（MySQL、PostgreSQL、SQLite）
 - **异步处理**: 基于工作池的异步任务处理，提升响应性能
 - **智能清理**: 支持定期清理和外部注入的清理策略
@@ -40,7 +40,7 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 - **自动清理**: 一次性任务执行后自动删除
 
 ### 📚 向量数据库集成
-- **Milvus**: 基于 [eino-ext/milvus2](https://github.com/cloudwego/eino-ext) 官方组件，支持 ANN、Hybrid、Sparse 等多种搜索模式
+- **Milvus**: 基于 [eino-ext/milvus2](https://github.com/cloudwego/eino-ext) 官方组件，使用 ANN + COSINE 检索并支持 `ScoreThreshold` 过滤
 - **PostgreSQL + pgvector**: 轻量级向量搜索方案
 - **统一接口**: 提供一致的 `Database` 接口（`indexer.Indexer` + `retriever.Retriever`）
 
@@ -54,14 +54,15 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 - **可扩展**: 易于集成自定义工具
 
 ### 🤖 多模型支持
-- **OpenAI 兼容模型**: 支持 OpenAI、Azure OpenAI 等兼容服务
+- **OpenAI 兼容模型**: 支持 OpenAI 和其他 OpenAI API 兼容服务
 - **GLM 模型**: 原生支持智谱 GLM 系列模型，包含 Thinking 模式
 - **推理强度参数**: 支持 low、medium、high 推理强度配置
 
 ### 📊 可观测性
 - **Langfuse 集成**: AI 应用监控和追踪
+- **AILens360 集成**: 支持通过代理注入用户、会话和 trace 维度
 - **日志管理**: 结构化日志记录
-- **性能监控**: 支持 OpenTelemetry 追踪
+- **回调追踪**: 基于 Eino callbacks 接入模型和工具调用链路
 
 ## 🏗️ 系统架构
 
@@ -81,12 +82,12 @@ AGGO 是一个基于 Go 语言和 [CloudWeGo Eino](https://github.com/cloudwego/
 
 ### 前置要求
 
-- **Go**: >= 1.24.0
+- **Go**: >= 1.24.6
 - **向量数据库** (二选一):
   - [Milvus](https://milvus.io/) >= 2.6 (推荐用于生产环境)
   - [PostgreSQL](https://www.postgresql.org/) >= 14 + [pgvector](https://github.com/pgvector/pgvector) 扩展
 - **AI 模型服务**:
-  - OpenAI API 兼容的服务 (OpenAI, Azure OpenAI, 或其他兼容服务)
+  - OpenAI API 兼容的服务 (OpenAI 或其他兼容服务)
 - **可选依赖**:
   - [Langfuse](https://langfuse.com/) - AI 应用监控和追踪
 
@@ -114,12 +115,13 @@ package main
 import (
     "context"
     "log"
+    "strings"
 
+    "github.com/CoolBanHub/aggo/agent"
     "github.com/CoolBanHub/aggo/model"
     "github.com/CoolBanHub/aggo/memory"
     "github.com/CoolBanHub/aggo/memory/builtin"
     "github.com/CoolBanHub/aggo/memory/builtin/storage"
-    "github.com/CoolBanHub/aggo/agent"
     "github.com/cloudwego/eino/adk"
     "github.com/cloudwego/eino/schema"
 )
@@ -152,9 +154,9 @@ func main() {
         WithMemory(provider).
         Build(ctx)
 
-    runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: ag})
-    iter := runner.Run(ctx, []*schema.Message{
-        schema.UserMessage("你好，介绍一下你自己"),
+    runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: ag})
+    iter := runner.Run(ctx, []*schema.AgenticMessage{
+        schema.UserAgenticMessage("你好，介绍一下你自己"),
     }, adk.WithSessionValues(map[string]any{
         "userID":    "demo-user",
         "sessionID": "demo-session",
@@ -170,10 +172,20 @@ func main() {
         }
         if event.Output != nil && event.Output.MessageOutput != nil {
             if msg, err := event.Output.MessageOutput.GetMessage(); err == nil && msg != nil {
-                log.Printf("AI: %s", msg.Content)
+                log.Printf("AI: %s", assistantText(msg))
             }
         }
     }
+}
+
+func assistantText(msg *schema.AgenticMessage) string {
+    var b strings.Builder
+    for _, block := range msg.ContentBlocks {
+        if block != nil && block.AssistantGenText != nil {
+            b.WriteString(block.AssistantGenText.Text)
+        }
+    }
+    return b.String()
 }
 ```
 
@@ -201,6 +213,11 @@ go run ./adk_test
 ```
 
 示例是独立 Go 模块，更多运行方式见 [example/README.md](./example/README.md)。
+
+运行前请先配置 `BaseUrl`、`APIKey`、`Model` 等模型环境变量；部分示例还依赖额外服务：
+`knowledge_agent_tool_test` 需要 Milvus 或 PostgreSQL/pgvector，
+`mem_agent_test` 和 `sse` 当前示例使用本地 MySQL，
+`mem0_agent_test` 需要 mem0 兼容服务。
 
 ## 💡 核心功能详解
 
@@ -235,10 +252,10 @@ if err != nil {
 }
 ```
 
-**记忆检索策略**:
-- `RetrievalLastN`: 返回最近 N 条记忆
-- `RetrievalFirstN`: 返回最早 N 条记忆
-- `RetrievalSemantic`: 基于语义相关性检索
+**历史消息注入**:
+- 当前 `builtin` provider 会按最近 N 条会话消息补充上下文
+- 启用会话摘要后，会优先注入摘要，再补充摘要游标之后的尾部消息
+- 需要检索更早的用户长期事件时，可启用事件检索模式并使用自动注入的 `search_user_memory` 工具
 
 完整使用说明、provider 约定和存储差异见 [memory/README.md](./memory/README.md)。
 
@@ -352,7 +369,7 @@ chatModel, _ := model.NewChatModel(
     model.WithBaseUrl("https://api.openai.com/v1"),
     model.WithAPIKey("your-api-key"),
     model.WithModel("gpt-4"),
-    model.WithReasoningEffort("medium"),  // 推理强度: low, medium, high
+    model.WithReasoningEffortLevel("medium"),  // 推理强度: low, medium, high
 )
 ```
 
@@ -418,18 +435,34 @@ restrictedShellTools := tools.GetShellTools(shell.WithAllowedCommands("ls", "pwd
 ### SSE 流式响应
 
 ```go
-import "github.com/CoolBanHub/aggo/pkg/sse"
+import (
+    "net/http"
+
+    "github.com/CoolBanHub/aggo/pkg/adapter"
+    "github.com/CoolBanHub/aggo/pkg/sse"
+    "github.com/cloudwego/eino/schema"
+)
 
 // 创建 SSE 写入器
 writer := sse.NewWriter("session-id", w)
-defer writer.WriteDone()
+if writer == nil {
+    http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+    return
+}
+defer writer.Close()
 
-// 流式生成
-agent.Stream(ctx, messages,
-    agent.WithStreamCallback(func(chunk string) {
-        writer.WriteData(chunk)
-    }),
-)
+// 将模型流式输出写为 SSE；Writer.Stream 会在正常结束时写出 [DONE]
+stream, err := chatModel.Stream(ctx, []*schema.AgenticMessage{
+    schema.UserAgenticMessage("你好"),
+})
+if err != nil {
+    http.Error(w, err.Error(), http.StatusInternalServerError)
+    return
+}
+
+_ = writer.Stream(ctx, stream, func(output *schema.AgenticMessage, index int) any {
+    return adapter.MessageToOpenaiStreamResponse(output, index)
+})
 ```
 
 ## 🔧 环境变量配置

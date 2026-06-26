@@ -53,7 +53,7 @@ func SearchUserMemoryTool(provider memory.UserMemoryEventSearcher) (tool.BaseToo
 
 	name := "search_user_memory"
 	desc := "检索当前用户的长期记忆事件（任务里程碑 / 事件记录）。" +
-		"system 中已经常驻最近若干条事件，调用本工具用于查找更早、更大范围或针对特定关键词的事件。" +
+		"当前上下文已包含最近若干条事件，调用本工具用于查找更早、更大范围或针对特定关键词的事件。" +
 		"支持关键词、时间窗、事件类型过滤。"
 
 	return utils.InferTool(name, desc, func(ctx context.Context, params SearchUserMemoryParams) (interface{}, error) {
