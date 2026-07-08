@@ -112,6 +112,32 @@ func TestParseLegacyAnalyzerResponse_BackwardsCompat(t *testing.T) {
 	}
 }
 
+func TestParseLegacyAnalyzerResponse_ExtractsJSONAfterThinkingText(t *testing.T) {
+	raw := `我们分析用户消息：用户连续两次发送几乎相同的指令。
+
+注意：下面才是最终输出。{"op":"update","memory":"# 用户记忆\n\n## 核心约定\n- 行为约束：作为任务专属执行Agent，独立完成全部任务流程。"}`
+
+	result, err := parseLegacyAnalyzerResponse(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.NeedUpdate {
+		t.Fatalf("expected need_update=true")
+	}
+	if !strings.Contains(result.Memory, "任务专属执行Agent") {
+		t.Fatalf("memory missing final JSON content: %q", result.Memory)
+	}
+}
+
+func TestNormalizeAnalyzerJSONContent_PicksLastAnalyzerObject(t *testing.T) {
+	raw := `思考时举例 {"foo":"bar"}，中途草稿 {"op":"noop"}，最终 {"op":"update","memory":"# 用户记忆"}`
+	got := normalizeAnalyzerJSONContent(raw)
+	want := `{"op":"update","memory":"# 用户记忆"}`
+	if got != want {
+		t.Fatalf("normalizeAnalyzerJSONContent() = %q, want %q", got, want)
+	}
+}
+
 func TestAnalyzerPutsDynamicContextInUserMessage(t *testing.T) {
 	cm := &captureAgenticModel{response: `{"op":"noop"}`}
 	analyzer := NewUserMemoryAnalyzer(cm)
@@ -146,6 +172,21 @@ func TestAnalyzerPutsDynamicContextInUserMessage(t *testing.T) {
 		t.Fatalf("analysis user message should not include recent-history wrapper heading: %q", analysisText)
 	}
 	assertDynamicContextOnlyInUser(t, cm.input, "榴莲披萨", "项目X-999验收完成", "明天提醒我复核项目X-999")
+}
+
+func TestAnalyzerResponseTextIgnoresReasoningBlocks(t *testing.T) {
+	msg := &schema.AgenticMessage{
+		Role: schema.AgenticRoleTypeAssistant,
+		ContentBlocks: []*schema.ContentBlock{
+			schema.NewContentBlock(&schema.Reasoning{Text: `我们先分析，草稿 {"op":"noop"}`}),
+			schema.NewContentBlock(&schema.AssistantGenText{Text: `{"op":"update","memory":"# 用户记忆"}`}),
+		},
+	}
+	got := analyzerResponseText(msg)
+	want := `{"op":"update","memory":"# 用户记忆"}`
+	if got != want {
+		t.Fatalf("analyzerResponseText() = %q, want %q", got, want)
+	}
 }
 
 func TestSummaryPutsDynamicContextInUserMessage(t *testing.T) {

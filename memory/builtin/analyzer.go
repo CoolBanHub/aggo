@@ -113,7 +113,7 @@ func (u *UserMemoryAnalyzer) AnalyzeOnce(ctx context.Context, req AnalyzeRequest
 		return nil, fmt.Errorf("分析用户记忆失败: %w", err)
 	}
 
-	content := strings.TrimSpace(agmsg.Text(response))
+	content := normalizeAnalyzerJSONContent(analyzerResponseText(response))
 	if content == "" {
 		return &MemoryAnalysisResult{}, nil
 	}
@@ -125,6 +125,7 @@ func (u *UserMemoryAnalyzer) AnalyzeOnce(ctx context.Context, req AnalyzeRequest
 }
 
 func parseLegacyAnalyzerResponse(content string) (*MemoryAnalysisResult, error) {
+	content = normalizeAnalyzerJSONContent(content)
 	var param UserMemoryAnalyzerParam
 	if err := json.Unmarshal([]byte(content), &param); err != nil {
 		return nil, fmt.Errorf("解析用户记忆响应失败(raw=%q): %w", content, err)
@@ -153,6 +154,7 @@ type eventSearchAnalyzerEventParam struct {
 }
 
 func parseEventSearchAnalyzerResponse(content string) (*MemoryAnalysisResult, error) {
+	content = normalizeAnalyzerJSONContent(content)
 	var param eventSearchAnalyzerParam
 	if err := json.Unmarshal([]byte(content), &param); err != nil {
 		return nil, fmt.Errorf("解析用户记忆响应失败(raw=%q): %w", content, err)
@@ -270,6 +272,48 @@ func appendRuntimeContextSection(sections []string, runtimeContext string) []str
 	return append(sections, "-----\n"+runtimeContext)
 }
 
+func normalizeAnalyzerJSONContent(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+
+	var probe json.RawMessage
+	if json.Unmarshal([]byte(content), &probe) == nil {
+		return content
+	}
+
+	if extracted, ok := extractAnalyzerJSONObject(content); ok {
+		return extracted
+	}
+	return content
+}
+
+func extractAnalyzerJSONObject(content string) (string, bool) {
+	var candidate string
+	for i, r := range content {
+		if r != '{' {
+			continue
+		}
+		decoder := json.NewDecoder(strings.NewReader(content[i:]))
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err == nil && isAnalyzerJSON(raw) {
+			candidate = string(raw)
+		}
+	}
+	return candidate, candidate != ""
+}
+
+func isAnalyzerJSON(raw json.RawMessage) bool {
+	var obj struct {
+		Op string `json:"op"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false
+	}
+	return obj.Op != ""
+}
+
 // generateViaStream 通过流式接口调用模型并拼接输出，等价于 Generate 但避免长耗时请求被中间代理断开。
 func generateViaStream(ctx context.Context, cm model.AgenticModel, messages []*schema.AgenticMessage) (*schema.AgenticMessage, error) {
 	stream, err := cm.Stream(ctx, messages)
@@ -296,6 +340,22 @@ func readAgenticStream(stream *schema.StreamReader[*schema.AgenticMessage]) ([]*
 		}
 		chunks = append(chunks, chunk)
 	}
+}
+
+func analyzerResponseText(msg *schema.AgenticMessage) string {
+	if msg == nil {
+		return ""
+	}
+	var parts []string
+	for _, block := range msg.ContentBlocks {
+		if block != nil && block.AssistantGenText != nil {
+			parts = append(parts, block.AssistantGenText.Text)
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "")
+	}
+	return agmsg.Text(msg)
 }
 
 func buildConversationHistoryPlainText(historyMessages []*ConversationMessage) string {
