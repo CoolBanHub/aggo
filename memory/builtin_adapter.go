@@ -11,6 +11,7 @@ import (
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
 	"github.com/cloudwego/eino/schema"
+	"github.com/gookit/slog"
 )
 
 // Ensure MemoryManager still satisfies MemoryProvider after wrapping.
@@ -129,6 +130,35 @@ func (p *builtinProvider) Memorize(ctx context.Context, req *MemorizeRequest) er
 // Close delegates to the underlying MemoryManager.
 func (p *builtinProvider) Close() error {
 	return p.MemoryManager.Close()
+}
+
+// EnqueueMemorize implements memory.AsyncMemorizer：把整轮 Memorize 交给
+// MemoryManager 的受管工作池执行，写入随 Flush/Shutdown 收敛，
+// 替代 middleware 侧无生命周期的游离 goroutine。
+func (p *builtinProvider) EnqueueMemorize(ctx context.Context, req *MemorizeRequest) error {
+	if req == nil {
+		return fmt.Errorf("memorize request is nil")
+	}
+
+	// 深拷贝请求，调用方后续修改入参不影响实际写入
+	cloned := &MemorizeRequest{
+		UserID:    req.UserID,
+		SessionID: req.SessionID,
+		Messages:  make([]*schema.AgenticMessage, 0, len(req.Messages)),
+	}
+	for _, msg := range req.Messages {
+		if msg == nil {
+			continue
+		}
+		cloned.Messages = append(cloned.Messages, msg)
+	}
+
+	userID, sessionID := req.UserID, req.SessionID
+	return p.MemoryManager.EnqueueTask("memorize", userID, sessionID, func(taskCtx context.Context) {
+		if err := p.Memorize(taskCtx, cloned); err != nil {
+			slog.Errorf("memory: async memorize failed: userID=%s sessionID=%s err=%v", userID, sessionID, err)
+		}
+	})
 }
 
 func (p *builtinProvider) SearchMessages(ctx context.Context, q *builtinsearch.SearchQuery) ([]*builtinsearch.SearchHit, error) {

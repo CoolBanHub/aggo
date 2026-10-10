@@ -330,8 +330,10 @@ type TaskQueueStats struct {
 	QueueCapacity int `json:"queueCapacity"`
 	// 已处理任务数
 	ProcessedTasks int64 `json:"processedTasks"`
-	// 丢弃任务数
+	// 丢弃任务数（队列满）
 	DroppedTasks int64 `json:"droppedTasks"`
+	// 拒绝任务数（管理器已关闭）
+	RejectedTasks int64 `json:"rejectedTasks"`
 	// 当前工作goroutine数
 	ActiveWorkers int `json:"activeWorkers"`
 	// 队列使用率

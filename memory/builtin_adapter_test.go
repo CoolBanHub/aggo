@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	"github.com/CoolBanHub/aggo/memory/builtin/storage"
+	"github.com/cloudwego/eino/schema"
 )
 
 func TestBuiltinRetrieveKeepsRecentMessagesWithSessionSummary(t *testing.T) {
@@ -80,4 +82,60 @@ func TestBuiltinRetrieveKeepsRecentMessagesWithSessionSummary(t *testing.T) {
 
 func intPtr(v int) *int {
 	return &v
+}
+
+// builtinProvider 实现 AsyncMemorizer：写入经由 MemoryManager 的受管工作池，
+// Flush 后落库；关闭后提交返回 ErrMemoryClosed。
+func TestBuiltinProviderEnqueueMemorize(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewMemoryStore()
+	manager, err := builtin.NewMemoryManager(nil, store, &builtin.MemoryConfig{
+		EnableUserMemories:    false,
+		EnableSessionSummary:  false,
+		AsyncWorkerPoolSize:   2,
+		DebounceWindowSeconds: intPtr(0),
+		SummaryTrigger:        builtin.DefaultMemoryConfig().SummaryTrigger,
+		SummaryCache:          builtin.DefaultMemoryConfig().SummaryCache,
+		Cleanup:               builtin.DefaultMemoryConfig().Cleanup,
+		Search:                builtin.DefaultMemoryConfig().Search,
+	})
+	if err != nil {
+		t.Fatalf("NewMemoryManager: %v", err)
+	}
+	provider := &builtinProvider{MemoryManager: manager}
+
+	req := &MemorizeRequest{
+		UserID:    "user-1",
+		SessionID: "session-1",
+		Messages: []*schema.AgenticMessage{
+			schema.UserAgenticMessage("第一个问题"),
+			agmsg.AssistantMessage("第一个回答"),
+		},
+	}
+	if err := provider.EnqueueMemorize(ctx, req); err != nil {
+		t.Fatalf("EnqueueMemorize: %v", err)
+	}
+
+	flushCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := manager.Flush(flushCtx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	messages, err := manager.GetMessages(ctx, "session-1", "user-1", 0)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("stored messages = %d, want 2", len(messages))
+	}
+
+	// 关闭后提交被拒绝且可识别
+	if err := manager.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	err = provider.EnqueueMemorize(ctx, req)
+	if !errors.Is(err, builtin.ErrMemoryClosed) {
+		t.Fatalf("EnqueueMemorize after Close = %v, want ErrMemoryClosed", err)
+	}
 }

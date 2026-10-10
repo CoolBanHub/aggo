@@ -15,6 +15,21 @@ import (
 	"github.com/gookit/slog"
 )
 
+// ErrMemoryClosed 在管理器关闭后提交任务时返回。
+var ErrMemoryClosed = errors.New("memory: manager is closed")
+
+// managerState 描述管理器生命周期状态。
+type managerState uint32
+
+const (
+	// managerRunning 正常接收并处理任务
+	managerRunning managerState = iota
+	// managerStopping 不再接收新任务，正在排空已接受的任务
+	managerStopping
+	// managerClosed 排空完成，底层存储已关闭
+	managerClosed
+)
+
 // MemoryManager 记忆管理器
 // 负责管理用户记忆、会话摘要和对话历史
 type MemoryManager struct {
@@ -36,6 +51,18 @@ type MemoryManager struct {
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
+
+	// 生命周期状态。state 与 submitMu 配合：
+	// 提交任务时在 submitMu 内检查 state，Shutdown 切换状态时也持有 submitMu，
+	// 保证“通过检查的任务必然已入队”，不会出现提交后无人处理。
+	state    atomic.Uint32
+	submitMu sync.Mutex
+	// inFlight 统计正在执行（已出队）的任务，Flush 依据其归零判断队列静止
+	inFlight atomic.Int64
+
+	// shutdownDone 在 doShutdown 完成后关闭；shutdownErr 保存其结果
+	shutdownDone chan struct{}
+	shutdownErr  error
 
 	// 定期清理相关
 	cleanupTicker *time.Ticker
@@ -62,10 +89,13 @@ type MemoryManager struct {
 
 // asyncTask 异步任务结构
 type asyncTask struct {
-	taskType  string // "memory" 或 "summary"
+	taskType  string // "memory" / "summary" / "index" / 自定义
 	userID    string
 	sessionID string
 	message   *ConversationMessage
+	// run 非空时执行该函数（EnqueueTask 提交的自定义任务），
+	// 不参与 (taskType,userID,sessionID) 去重。
+	run func(ctx context.Context)
 }
 
 // NewMemoryManager 创建新的记忆管理器
@@ -90,11 +120,12 @@ func NewMemoryManager(cm model.AgenticModel, memoryStorage MemoryStorage, config
 			time.Duration(config.SummaryCache.TTLSeconds)*time.Second,
 			config.SummaryCache.MaxEntries,
 		),
-		ctx:            ctx,
-		cancel:         cancel,
-		cleanupCtx:     cleanupCtx,
-		cleanupCancel:  cleanupCancel,
+		ctx:           ctx,
+		cancel:        cancel,
+		cleanupCtx:    cleanupCtx,
+		cleanupCancel: cleanupCancel,
 		debounceWindow: debounceWindowFromConfig(config),
+		shutdownDone:  make(chan struct{}),
 	}
 
 	manager.searcher, err = newSearcher(memoryStorage, config.Search)
@@ -140,6 +171,8 @@ func (m *MemoryManager) newAsyncTaskContext(task asyncTask) context.Context {
 }
 
 // startAsyncWorkers 启动异步工作goroutine池
+// worker 收到退出信号后会先排空队列中已接受的任务再返回，
+// 保证 Close/Shutdown 返回时已接受的任务全部完成。
 func (m *MemoryManager) startAsyncWorkers() {
 	for i := 0; i < m.config.AsyncWorkerPoolSize; i++ {
 		m.wg.Add(1)
@@ -148,23 +181,40 @@ func (m *MemoryManager) startAsyncWorkers() {
 			for {
 				select {
 				case <-m.ctx.Done():
-					return
+					// 排空剩余队列后退出
+					for {
+						select {
+						case task, ok := <-m.taskChannel:
+							if !ok {
+								return
+							}
+							m.runQueuedTask(task)
+						default:
+							return
+						}
+					}
 				case task, ok := <-m.taskChannel:
 					if !ok {
 						return // channel 已关闭
 					}
-
-					// 任务已取出准备处理，从排队重标记中移除，允许同类新任务入队
-					taskKey := fmt.Sprintf("%s:%s:%s", task.taskType, task.userID, task.sessionID)
-					m.pendingTasks.Delete(taskKey)
-
-					m.processAsyncTask(task)
-					atomic.AddInt64(&m.taskQueueStats.ProcessedTasks, 1)
+					m.runQueuedTask(task)
 				}
 			}
 		}()
 	}
 	m.taskQueueStats.ActiveWorkers = m.config.AsyncWorkerPoolSize
+}
+
+func (m *MemoryManager) runQueuedTask(task asyncTask) {
+	// 任务已取出准备处理，从排队重标记中移除，允许同类新任务入队
+	taskKey := fmt.Sprintf("%s:%s:%s", task.taskType, task.userID, task.sessionID)
+	m.pendingTasks.Delete(taskKey)
+
+	// inFlight 在提交时增加，这里在任务实际执行完毕后减少
+	defer m.inFlight.Add(-1)
+
+	m.processAsyncTask(task)
+	atomic.AddInt64(&m.taskQueueStats.ProcessedTasks, 1)
 }
 
 // submitAsyncTask 提交异步任务，带队列重防抖功能
@@ -176,13 +226,33 @@ func (m *MemoryManager) submitAsyncTask(task asyncTask) bool {
 		return true // 返回 true 表示"已接收处理"（虽然是去重扔掉的），不视为"队列满丢弃"
 	}
 
+	if !m.submitAsyncTaskRaw(task) {
+		// 入队失败，清除去重标记以免卡死后续重试
+		m.pendingTasks.Delete(taskKey)
+		return false
+	}
+	return true
+}
+
+// submitAsyncTaskRaw 提交异步任务，不做去重。关闭后拒绝提交。
+func (m *MemoryManager) submitAsyncTaskRaw(task asyncTask) bool {
+	// 与 Shutdown 的状态切换互斥：通过检查的任务必然完成入队，
+	// 不会出现“已排空退出后仍有任务滞留队列”的窗口。
+	m.submitMu.Lock()
+	defer m.submitMu.Unlock()
+
+	if managerState(m.state.Load()) != managerRunning {
+		atomic.AddInt64(&m.taskQueueStats.RejectedTasks, 1)
+		return false
+	}
+
 	select {
 	case m.taskChannel <- task:
+		// 提交成功即计入 inFlight（覆盖排队+执行两个阶段），
+		// Flush 据此判断"已接受的任务全部完成"，不存在出队后未被统计的窗口。
+		m.inFlight.Add(1)
 		return true
 	default:
-		// 队列满，入队失败，需清除去重标记以免卡死后续重试
-		m.pendingTasks.Delete(taskKey)
-
 		// 队列满，增加丢弃计数
 		atomic.AddInt64(&m.taskQueueStats.DroppedTasks, 1)
 		slog.Errorf("异步任务队列已满，丢弃任务. 队列: %d/%d, 总丢弃: %d, 任务类型: %s, 用户: %s",
@@ -191,6 +261,142 @@ func (m *MemoryManager) submitAsyncTask(task asyncTask) bool {
 			task.taskType, task.userID)
 		return false
 	}
+}
+
+// EnqueueTask 把 fn 提交到管理器的异步工作池执行。
+// 任务与记忆分析任务共享生命周期：Flush/Shutdown 会等待其完成；
+// 管理器关闭后返回 ErrMemoryClosed，队列满时返回错误。
+// taskType 仅用于观测，不参与去重（每次调用都会执行）。
+func (m *MemoryManager) EnqueueTask(taskType, userID, sessionID string, fn func(ctx context.Context)) error {
+	if fn == nil {
+		return errors.New("memory: task function is nil")
+	}
+	if !m.submitAsyncTaskRaw(asyncTask{
+		taskType:  taskType,
+		userID:    userID,
+		sessionID: sessionID,
+		run:       fn,
+	}) {
+		if managerState(m.state.Load()) != managerRunning {
+			return ErrMemoryClosed
+		}
+		return fmt.Errorf("memory: async task queue is full (capacity %d)", m.taskQueueStats.QueueCapacity)
+	}
+	return nil
+}
+
+// Flush 等待已接受的任务全部完成：先触发未到期的 debounce 定时器，
+// 再等待队列排空且没有正在执行的任务。ctx 取消时返回错误。
+func (m *MemoryManager) Flush(ctx context.Context) error {
+	if managerState(m.state.Load()) == managerClosed {
+		return ErrMemoryClosed
+	}
+
+	// 触发未到期的聚合窗口，使 Flush 覆盖“已接受但还在 debounce 等待”的记忆请求
+	m.firePendingDebounceTimers()
+
+	ticker := time.NewTicker(2 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		// inFlight 在提交时增加、执行完毕后减少，
+		// 为 0 表示已接受的任务（排队中或执行中）全部完成
+		if m.inFlight.Load() == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("memory: flush interrupted: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+// Shutdown 停止接收新任务，等待已接受的任务排空，最后关闭底层存储。
+// 并发/重复调用安全：只有第一次调用执行关闭流程，其余调用等待其完成。
+// ctx 取消时 Shutdown 返回错误，但关闭流程会在后台继续执行。
+func (m *MemoryManager) Shutdown(ctx context.Context) error {
+	m.submitMu.Lock()
+	first := m.state.CompareAndSwap(uint32(managerRunning), uint32(managerStopping))
+	m.submitMu.Unlock()
+
+	if first {
+		go m.doShutdown()
+	}
+
+	select {
+	case <-m.shutdownDone:
+		return m.shutdownErr
+	case <-ctx.Done():
+		return fmt.Errorf("memory: shutdown interrupted: %w", ctx.Err())
+	}
+}
+
+// doShutdown 执行实际关闭流程，只应被调用一次。
+// 关闭顺序：停止入口 → 停止 debounce 定时器 → 排空队列并等待 worker →
+// 停止定期清理 → 关闭底层存储。
+func (m *MemoryManager) doShutdown() {
+	// 停止聚合定时器，未到期的窗口不再触发（任务已被排空语义覆盖不到，直接丢弃）
+	m.stopMemoryTimers()
+
+	// 通知 worker 退出；worker 会先排空队列再返回
+	m.cancel()
+	m.wg.Wait()
+
+	// 停止定期清理任务
+	m.cleanupCancel()
+	m.cleanupWg.Wait()
+
+	m.state.Store(uint32(managerClosed))
+	m.shutdownErr = m.storage.Close()
+	close(m.shutdownDone)
+}
+
+// Close 等待已接受任务完成后关闭管理器（Shutdown 的兼容包装，幂等）
+func (m *MemoryManager) Close() error {
+	return m.Shutdown(context.Background())
+}
+
+// stopMemoryTimers 停止所有聚合定时器
+func (m *MemoryManager) stopMemoryTimers() {
+	m.memoryTimers.Range(func(key, value any) bool {
+		if timer, ok := value.(*time.Timer); ok {
+			timer.Stop()
+		}
+		m.memoryTimers.Delete(key)
+		return true
+	})
+}
+
+// firePendingDebounceTimers 立即触发未到期的聚合定时器对应的任务。
+// 使用带去重的 submitAsyncTask，与定时器回调本身的提交互斥，不会重复入队。
+func (m *MemoryManager) firePendingDebounceTimers() {
+	m.memoryTimers.Range(func(key, value any) bool {
+		timerKey, ok := key.(string)
+		if !ok {
+			return true
+		}
+		if timer, ok := value.(*time.Timer); ok {
+			timer.Stop()
+		}
+		m.memoryTimers.Delete(timerKey)
+
+		// timerKey 格式: "memory:{userID}:{sessionID}"
+		rest := strings.TrimPrefix(timerKey, "memory:")
+		idx := strings.Index(rest, ":")
+		if idx <= 0 || idx == len(rest)-1 {
+			return true
+		}
+		userID, sessionID := rest[:idx], rest[idx+1:]
+		submitted := m.submitAsyncTask(asyncTask{
+			taskType:  "memory",
+			userID:    userID,
+			sessionID: sessionID,
+		})
+		if !submitted {
+			slog.Errorf("Flush 触发聚合任务失败: userID=%s sessionID=%s", userID, sessionID)
+		}
+		return true
+	})
 }
 
 // scheduleMemoryTask 调度记忆分析任务，支持聚合窗口（debounce）
@@ -238,6 +444,7 @@ func (m *MemoryManager) GetTaskQueueStats() TaskQueueStats {
 		ActiveWorkers:  m.taskQueueStats.ActiveWorkers,
 		ProcessedTasks: atomic.LoadInt64(&m.taskQueueStats.ProcessedTasks),
 		DroppedTasks:   atomic.LoadInt64(&m.taskQueueStats.DroppedTasks),
+		RejectedTasks:  atomic.LoadInt64(&m.taskQueueStats.RejectedTasks),
 	}
 	if m.taskChannel != nil {
 		stats.QueueSize = len(m.taskChannel)
@@ -295,6 +502,14 @@ func (m *MemoryManager) performPeriodicCleanup(parentCtx context.Context) {
 
 // processAsyncTask 处理异步任务
 func (m *MemoryManager) processAsyncTask(task asyncTask) {
+	// EnqueueTask 提交的自定义任务（如异步 Memorize）
+	if task.run != nil {
+		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), m.asyncTaskTimeout())
+		defer cancel()
+		task.run(ctx)
+		return
+	}
+
 	switch task.taskType {
 	case "memory":
 		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), m.asyncTaskTimeout())
@@ -725,6 +940,10 @@ func (m *MemoryManager) UpdateConfig(config *MemoryConfig) {
 	if config == nil {
 		return
 	}
+	// 关闭/关闭中不接受配置更新：会重启清理 goroutine 并写已关闭的存储
+	if managerState(m.state.Load()) != managerRunning {
+		return
+	}
 
 	currentCacheTTLSeconds := 0
 	currentCacheMaxEntries := 0
@@ -788,32 +1007,6 @@ func (m *MemoryManager) ForceCleanupNow(ctx context.Context) error {
 	m.performPeriodicCleanup(ctx)
 
 	return nil
-}
-
-// Close 关闭管理器
-func (m *MemoryManager) Close() error {
-	// 关闭定期清理任务
-	if m.cleanupCancel != nil {
-		m.cleanupCancel()
-		// 等待清理goroutine结束
-		m.cleanupWg.Wait()
-	}
-
-	// 停止所有聚合定时器，阻止新的记忆任务入队
-	m.memoryTimers.Range(func(key, value interface{}) bool {
-		if timer, ok := value.(*time.Timer); ok {
-			timer.Stop()
-		}
-		m.memoryTimers.Delete(key)
-		return true
-	})
-
-	// 通知所有 worker 退出，等待退出后再关闭 channel
-	m.cancel()
-	m.wg.Wait()
-	close(m.taskChannel)
-
-	return m.storage.Close()
 }
 
 func (m *MemoryManager) cacheSessionSummary(summary *SessionSummary) {

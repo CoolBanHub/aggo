@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
+	"github.com/CoolBanHub/aggo/pkg/sessionkeys"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
@@ -18,19 +19,89 @@ const (
 	runtimeContextDivider  = "\n\n-----\n"
 )
 
+// MemoryMiddlewareConfig 配置 MemoryMiddleware 的身份解析与写入行为。
+// 零值可用：所有字段都有与旧行为兼容的默认值。
+type MemoryMiddlewareConfig struct {
+	// UserIDKey 从会话中读取用户身份的键，默认 "userID"，
+	// 找不到时回退读取 "actorID"。
+	UserIDKey string
+	// SessionIDKey 从会话中读取会话 ID 的键，默认 "sessionID"。
+	SessionIDKey string
+	// IdentityResolver 覆盖默认的身份解析逻辑
+	//（例如从 actorID/conversationID 组合出记忆归属），设置后 UserIDKey/SessionIDKey 被忽略。
+	IdentityResolver func(ctx context.Context) (userID, sessionID string, ok bool)
+	// MissingIdentity 决定身份缺失时的行为，默认 MissingIdentityLog。
+	MissingIdentity MissingIdentityPolicy
+	// Normalizers 在写入前依次作用于 MemorizeRequest（深拷贝后执行）。
+	Normalizers []MemorizeNormalizer
+	// MemorizeTimeout 仅在 provider 未实现 AsyncMemorizer 时，
+	// 用于兼容路径的后台写入超时，默认 2 分钟。
+	MemorizeTimeout time.Duration
+}
+
+func (c *MemoryMiddlewareConfig) normalize() {
+	if c.UserIDKey == "" {
+		c.UserIDKey = sessionkeys.KeyUserID
+	}
+	if c.SessionIDKey == "" {
+		c.SessionIDKey = sessionkeys.KeySessionID
+	}
+	if c.MemorizeTimeout <= 0 {
+		c.MemorizeTimeout = defaultMemorizeTimeout
+	}
+}
+
 // MemoryMiddleware implements adk.ChatModelAgentMiddleware.
 // It delegates to a MemoryProvider for retrieval and memorization.
 type MemoryMiddleware struct {
 	*adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]
 	provider MemoryProvider
+	config   MemoryMiddlewareConfig
 }
 
 // NewMemoryMiddleware creates a MemoryMiddleware with a MemoryProvider.
+// 行为与旧版本兼容：身份缺失时记录一条日志后跳过（MissingIdentityLog）。
 func NewMemoryMiddleware(provider MemoryProvider) *MemoryMiddleware {
+	return NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{})
+}
+
+// NewMemoryMiddlewareWithConfig creates a MemoryMiddleware with explicit config.
+func NewMemoryMiddlewareWithConfig(provider MemoryProvider, config MemoryMiddlewareConfig) *MemoryMiddleware {
+	config.normalize()
 	return &MemoryMiddleware{
 		TypedBaseChatModelAgentMiddleware: &adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]{},
 		provider:                          provider,
+		config:                            config,
 	}
+}
+
+// resolveIdentity 从运行时会话解析记忆身份。
+func (m *MemoryMiddleware) resolveIdentity(ctx context.Context) (string, string, bool) {
+	if m.config.IdentityResolver != nil {
+		uid, sid, ok := m.config.IdentityResolver(ctx)
+		return uid, sid, ok && uid != "" && sid != ""
+	}
+	uid, uidOK := sessionkeys.String(ctx, m.config.UserIDKey)
+	if !uidOK {
+		// 回退到 actorID：大多数应用中操作者即记忆归属人
+		uid, uidOK = sessionkeys.ActorID(ctx)
+	}
+	sid, sidOK := sessionkeys.String(ctx, m.config.SessionIDKey)
+	if !uidOK || !sidOK {
+		return "", "", false
+	}
+	return uid, sid, true
+}
+
+// handleMissingIdentity 按策略处理身份缺失，返回是否应中断本轮请求。
+func (m *MemoryMiddleware) handleMissingIdentity(stage string) error {
+	switch m.config.MissingIdentity {
+	case MissingIdentityError:
+		return fmt.Errorf("MemoryMiddleware: missing identity in session (userIDKey=%s, sessionIDKey=%s), %s aborted", m.config.UserIDKey, m.config.SessionIDKey, stage)
+	case MissingIdentityLog:
+		log.Printf("MemoryMiddleware: session missing identity (userIDKey=%s, sessionIDKey=%s), skipping %s", m.config.UserIDKey, m.config.SessionIDKey, stage)
+	}
+	return nil
 }
 
 // BeforeAgent is called before the agent runs.
@@ -44,11 +115,11 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 		return ctx, state, nil
 	}
 
-	sessionID, _ := adk.GetSessionValue(ctx, "sessionID")
-	userID, _ := adk.GetSessionValue(ctx, "userID")
-	sid, _ := sessionID.(string)
-	uid, _ := userID.(string)
-	if sid == "" || uid == "" {
+	uid, sid, ok := m.resolveIdentity(ctx)
+	if !ok {
+		if err := m.handleMissingIdentity("retrieve"); err != nil {
+			return ctx, state, err
+		}
 		return ctx, state, nil
 	}
 
@@ -118,11 +189,11 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 		return ctx, state, nil
 	}
 
-	sessionID, _ := adk.GetSessionValue(ctx, "sessionID")
-	userID, _ := adk.GetSessionValue(ctx, "userID")
-	sid, _ := sessionID.(string)
-	uid, _ := userID.(string)
-	if sid == "" || uid == "" {
+	uid, sid, ok := m.resolveIdentity(ctx)
+	if !ok {
+		if err := m.handleMissingIdentity("memorize"); err != nil {
+			return ctx, state, err
+		}
 		return ctx, state, nil
 	}
 
@@ -168,22 +239,65 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 	}
 	messagesToMemorize = append(messagesToMemorize, assistantMsg)
 
-	if len(messagesToMemorize) > 0 {
-		messagesToMemorize = append([]*schema.AgenticMessage(nil), messagesToMemorize...)
-		go func() {
-			bgCtx, cancel := context.WithTimeout(context.Background(), defaultMemorizeTimeout)
-			defer cancel()
-			if err := m.provider.Memorize(bgCtx, &MemorizeRequest{
-				UserID:    uid,
-				SessionID: sid,
-				Messages:  messagesToMemorize,
-			}); err != nil {
-				log.Printf("MemoryMiddleware: Memorize failed: %v", err)
-			}
-		}()
+	if len(messagesToMemorize) == 0 {
+		return ctx, state, nil
 	}
 
+	// 深拷贝消息，normalizer 与异步写入都不与调用方共享对象
+	req := &MemorizeRequest{
+		UserID:    uid,
+		SessionID: sid,
+		Messages:  cloneMessages(messagesToMemorize),
+	}
+	for _, normalizer := range m.config.Normalizers {
+		normalized, err := normalizer(ctx, req)
+		if err != nil {
+			log.Printf("MemoryMiddleware: memorize normalizer failed, skip this turn: %v", err)
+			return ctx, state, nil
+		}
+		if normalized == nil {
+			// normalizer 显式丢弃本次写入
+			return ctx, state, nil
+		}
+		req = normalized
+	}
+
+	// provider 实现了受管异步写入时走统一生命周期（Flush/Shutdown 可等待），
+	// 否则回退到游离 goroutine 的兼容路径。
+	if async, ok := m.provider.(AsyncMemorizer); ok {
+		if err := async.EnqueueMemorize(ctx, req); err != nil {
+			log.Printf("MemoryMiddleware: EnqueueMemorize failed: %v", err)
+		}
+		return ctx, state, nil
+	}
+
+	messages := req.Messages
+	timeout := m.config.MemorizeTimeout
+	provider := m.provider
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		if err := provider.Memorize(bgCtx, &MemorizeRequest{
+			UserID:    req.UserID,
+			SessionID: req.SessionID,
+			Messages:  messages,
+		}); err != nil {
+			log.Printf("MemoryMiddleware: Memorize failed: %v", err)
+		}
+	}()
+
 	return ctx, state, nil
+}
+
+func cloneMessages(messages []*schema.AgenticMessage) []*schema.AgenticMessage {
+	cloned := make([]*schema.AgenticMessage, 0, len(messages))
+	for _, msg := range messages {
+		if msg == nil {
+			continue
+		}
+		cloned = append(cloned, agmsg.Clone(msg))
+	}
+	return cloned
 }
 
 func (m *MemoryMiddleware) beforeModelRewriteStateKey() string {

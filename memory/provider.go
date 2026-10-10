@@ -94,3 +94,37 @@ type HookableProvider interface {
 	// RegisterHook registers a handler for the given lifecycle event.
 	RegisterHook(event HookEvent, handler HookHandler)
 }
+
+// AsyncMemorizer is an optional extension of MemoryProvider for providers
+// that own a managed async write path (e.g. builtin.MemoryManager's worker
+// pool with Flush/Shutdown lifecycle). When implemented, MemoryMiddleware
+// delegates memorization to EnqueueMemorize instead of spawning an
+// untracked goroutine, so pending writes are drained on shutdown.
+type AsyncMemorizer interface {
+	// EnqueueMemorize accepts a memorize request for asynchronous execution.
+	// It must be safe to reject the request after the provider is closed
+	// (returning an error instead of panicking or blocking).
+	EnqueueMemorize(ctx context.Context, req *MemorizeRequest) error
+}
+
+// MemorizeNormalizer 在消息写入记忆前对请求做清洗/裁剪（如移除图片索引、
+// 发言人标记、runtime context 注入内容）。
+//
+// 约定：
+//   - 入参请求视为不可变，返回新的请求对象，不得原地修改；
+//   - 返回 nil, nil 表示丢弃本次写入；
+//   - 返回错误表示清洗失败，MemoryMiddleware 会记录日志并跳过本次写入。
+type MemorizeNormalizer func(ctx context.Context, req *MemorizeRequest) (*MemorizeRequest, error)
+
+// MissingIdentityPolicy 决定 MemoryMiddleware 在会话缺少身份信息时的行为。
+type MissingIdentityPolicy int
+
+const (
+	// MissingIdentitySkip 静默跳过记忆读写（旧默认行为）。
+	MissingIdentitySkip MissingIdentityPolicy = iota
+	// MissingIdentityLog 记录日志后跳过。作为新配置的默认值，
+	// 避免现有业务在身份缺失时无声失效。
+	MissingIdentityLog
+	// MissingIdentityError 向上层返回错误，中断本轮请求。
+	MissingIdentityError
+)

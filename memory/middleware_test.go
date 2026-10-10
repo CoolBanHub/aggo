@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -193,5 +194,204 @@ func TestMemoryMiddlewareReusesExistingRuntimeContextSection(t *testing.T) {
 	}
 	if !strings.Contains(currentUserText, "[发言人]\n张三\n<user_memory>") {
 		t.Fatalf("expected memory appended inside existing runtime context section: %q", currentUserText)
+	}
+}
+
+// asyncMemorizeProvider 记录 EnqueueMemorize 调用，验证受管异步写入路径。
+type asyncMemorizeProvider struct {
+	*fakeMemoryProvider
+	enqueued chan *MemorizeRequest
+	closed   bool
+}
+
+func newAsyncMemorizeProvider(result *RetrieveResult) *asyncMemorizeProvider {
+	return &asyncMemorizeProvider{
+		fakeMemoryProvider: &fakeMemoryProvider{result: result},
+		enqueued:           make(chan *MemorizeRequest, 4),
+	}
+}
+
+func (p *asyncMemorizeProvider) EnqueueMemorize(ctx context.Context, req *MemorizeRequest) error {
+	if p.closed {
+		return fmt.Errorf("provider closed")
+	}
+	p.enqueued <- req
+	return nil
+}
+
+func runOnce(t *testing.T, handler adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage], session map[string]any) error {
+	t.Helper()
+	ctx := context.Background()
+	cm := &captureAgenticModel{}
+	agent, err := adk.NewTypedChatModelAgent[*schema.AgenticMessage](ctx, &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
+		Name:        "test",
+		Description: "test",
+		Instruction: "稳定系统提示",
+		Model:       cm,
+		Handlers:    []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{handler},
+	})
+	if err != nil {
+		t.Fatalf("NewTypedChatModelAgent: %v", err)
+	}
+	runner := adk.NewTypedRunner[*schema.AgenticMessage](adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: agent})
+	var opts []adk.AgentRunOption
+	if session != nil {
+		opts = append(opts, adk.WithSessionValues(session))
+	}
+	iter := runner.Query(ctx, "当前问题", opts...)
+	var runErr error
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil && event.Err != io.EOF {
+			runErr = event.Err
+		}
+	}
+	return runErr
+}
+
+// 自定义身份键：应用可以用 owner/conversation 等业务键接入记忆。
+func TestMemoryMiddlewareCustomIdentityKeys(t *testing.T) {
+	provider := newAsyncMemorizeProvider(nil)
+	mw := NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{
+		UserIDKey:       "owner",
+		SessionIDKey:    "conversation",
+		MissingIdentity: MissingIdentityError,
+	})
+
+	if err := runOnce(t, mw, map[string]any{"owner": "u-9", "conversation": "c-9"}); err != nil {
+		t.Fatalf("run with custom keys: %v", err)
+	}
+
+	select {
+	case req := <-provider.enqueued:
+		if req.UserID != "u-9" || req.SessionID != "c-9" {
+			t.Fatalf("memorized as (%s,%s), want (u-9,c-9)", req.UserID, req.SessionID)
+		}
+	default:
+		t.Fatal("EnqueueMemorize not called")
+	}
+}
+
+// 身份缺失时按 MissingIdentityError 策略中断请求，而不是静默跳过。
+func TestMemoryMiddlewareMissingIdentityError(t *testing.T) {
+	provider := newAsyncMemorizeProvider(nil)
+	mw := NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{
+		MissingIdentity: MissingIdentityError,
+	})
+
+	err := runOnce(t, mw, nil)
+	if err == nil {
+		t.Fatal("expected error when identity is missing")
+	}
+	if !strings.Contains(err.Error(), "missing identity") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Log 策略：不中断，只是记录日志
+	mw = NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{
+		MissingIdentity: MissingIdentityLog,
+	})
+	if err := runOnce(t, mw, nil); err != nil {
+		t.Fatalf("Log policy must not abort the run: %v", err)
+	}
+	select {
+	case req := <-provider.enqueued:
+		t.Fatalf("memorize must be skipped when identity is missing, got %#v", req)
+	default:
+	}
+}
+
+// IdentityResolver 覆盖默认解析逻辑（如按 actor+conversation 组合归属）。
+func TestMemoryMiddlewareIdentityResolver(t *testing.T) {
+	provider := newAsyncMemorizeProvider(nil)
+	mw := NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{
+		IdentityResolver: func(ctx context.Context) (string, string, bool) {
+			return "actor-1", "conv-1", true
+		},
+	})
+
+	if err := runOnce(t, mw, map[string]any{"anything": "else"}); err != nil {
+		t.Fatalf("run with resolver: %v", err)
+	}
+	select {
+	case req := <-provider.enqueued:
+		if req.UserID != "actor-1" || req.SessionID != "conv-1" {
+			t.Fatalf("memorized as (%s,%s), want (actor-1,conv-1)", req.UserID, req.SessionID)
+		}
+	default:
+		t.Fatal("EnqueueMemorize not called")
+	}
+}
+
+// Normalizer 在写入前生效：清洗后的内容进入 Memorize 请求，
+// 且原会话消息不被修改。
+func TestMemoryMiddlewareAppliesNormalizers(t *testing.T) {
+	provider := newAsyncMemorizeProvider(nil)
+	mw := NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{
+		Normalizers: []MemorizeNormalizer{
+			func(ctx context.Context, req *MemorizeRequest) (*MemorizeRequest, error) {
+				cloned := *req
+				cloned.Messages = append([]*schema.AgenticMessage(nil), req.Messages...)
+				for i, msg := range cloned.Messages {
+					if msg.Role == schema.AgenticRoleTypeUser {
+						cleaned := agmsg.Clone(msg)
+						agmsg.AppendUserText(cleaned, "\n[发言人] 张三")
+						cloned.Messages[i] = cleaned
+					}
+				}
+				return &cloned, nil
+			},
+			func(ctx context.Context, req *MemorizeRequest) (*MemorizeRequest, error) {
+				cloned := *req
+				cloned.Messages = append([]*schema.AgenticMessage(nil), req.Messages...)
+				return &cloned, nil
+			},
+		},
+	})
+
+	if err := runOnce(t, mw, map[string]any{"userID": "user-1", "sessionID": "session-1"}); err != nil {
+		t.Fatalf("run with normalizers: %v", err)
+	}
+
+	select {
+	case req := <-provider.enqueued:
+		if len(req.Messages) == 0 {
+			t.Fatal("no messages memorized")
+		}
+		if !strings.Contains(agmsg.Text(req.Messages[0]), "[发言人] 张三") {
+			t.Fatalf("normalizer output missing: %q", agmsg.Text(req.Messages[0]))
+		}
+	default:
+		t.Fatal("EnqueueMemorize not called")
+	}
+}
+
+// provider 实现 AsyncMemorizer 时走受管异步路径，
+// 不再调用同步 Memorize（由 provider 的 EnqueueMemorize 负责实际写入）。
+func TestMemoryMiddlewarePrefersAsyncMemorizer(t *testing.T) {
+	provider := newAsyncMemorizeProvider(nil)
+	mw := NewMemoryMiddleware(provider)
+
+	if err := runOnce(t, mw, map[string]any{"userID": "user-1", "sessionID": "session-1"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	select {
+	case req := <-provider.enqueued:
+		if len(req.Messages) < 2 {
+			t.Fatalf("expected user+assistant messages, got %#v", req.Messages)
+		}
+	default:
+		t.Fatal("EnqueueMemorize not called")
+	}
+	// 同步 Memorize 不应被 middleware 直接调用
+	select {
+	case req := <-provider.memorizeCalled:
+		_ = req
+		t.Fatal("provider.Memorize must not be called directly when AsyncMemorizer is implemented")
+	default:
 	}
 }
