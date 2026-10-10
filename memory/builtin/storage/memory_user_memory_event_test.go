@@ -22,8 +22,9 @@ func TestMemoryStore_UserMemoryEvent_CRUD(t *testing.T) {
 		if err := store.SaveUserMemoryEvent(ctx, evt); err != nil {
 			t.Fatalf("save event err: %v", err)
 		}
-		if evt.ID == "" {
-			t.Fatalf("ID should be assigned")
+		// 存储侧生成 ID/时间戳写在落库快照上，不再回写调用方对象
+		if evt.ID != "" {
+			t.Fatalf("caller object must not be mutated, got ID %s", evt.ID)
 		}
 	}
 

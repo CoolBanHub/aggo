@@ -277,18 +277,26 @@ func (f *FileStore) ClearUserMemory(ctx context.Context, userID string) error {
 	return f.saveUserMemories()
 }
 
+// SaveSessionSummary 保存会话摘要
+// 追加写文件的是落库快照（含存储侧生成的时间戳），与内存态一致
 func (f *FileStore) SaveSessionSummary(ctx context.Context, summary *builtin.SessionSummary) error {
-	if err := f.MemoryStore.SaveSessionSummary(ctx, summary); err != nil {
+	f.MemoryStore.mu.Lock()
+	stored, err := f.MemoryStore.putSessionSummary(summary)
+	f.MemoryStore.mu.Unlock()
+	if err != nil {
 		return err
 	}
-	return f.appendSessionSummary(summary)
+	return f.appendSessionSummary(stored)
 }
 
 func (f *FileStore) UpdateSessionSummary(ctx context.Context, summary *builtin.SessionSummary) error {
-	if err := f.MemoryStore.UpdateSessionSummary(ctx, summary); err != nil {
+	f.MemoryStore.mu.Lock()
+	stored, err := f.MemoryStore.updateSessionSummaryLocked(summary)
+	f.MemoryStore.mu.Unlock()
+	if err != nil {
 		return err
 	}
-	return f.appendSessionSummary(summary)
+	return f.appendSessionSummary(stored)
 }
 
 func (f *FileStore) DeleteSessionSummary(ctx context.Context, sessionID string, userID string) error {
@@ -299,7 +307,11 @@ func (f *FileStore) DeleteSessionSummary(ctx context.Context, sessionID string, 
 }
 
 func (f *FileStore) SaveMessage(ctx context.Context, message *builtin.ConversationMessage) error {
-	if err := f.MemoryStore.SaveMessage(ctx, message); err != nil {
+	// 复用内存写入逻辑并拿到落库快照（含生成的 ID/时间戳），追加写文件与其一致
+	f.MemoryStore.mu.Lock()
+	stored, err := f.MemoryStore.putMessage(message)
+	f.MemoryStore.mu.Unlock()
+	if err != nil {
 		return err
 	}
 
@@ -316,7 +328,7 @@ func (f *FileStore) SaveMessage(ctx context.Context, message *builtin.Conversati
 	if needRewrite {
 		return f.saveMessages() // 超过限额裁剪后，必须重写全量文件
 	}
-	return f.appendMessage(message) // 未超过额度时，直接以追加形式写入磁盘，O(1) 复杂度
+	return f.appendMessage(stored) // 未超过额度时，直接以追加形式写入磁盘，O(1) 复杂度
 }
 
 func (f *FileStore) DeleteMessages(ctx context.Context, sessionID string, userID string) error {
@@ -384,12 +396,15 @@ func (f *FileStore) appendUserMemoryEvent(evt *builtin.UserMemoryEvent) error {
 	return err
 }
 
-// SaveUserMemoryEvent 内存写入后追加持久化
+// SaveUserMemoryEvent 内存写入后追加持久化（写文件的是落库快照）
 func (f *FileStore) SaveUserMemoryEvent(ctx context.Context, event *builtin.UserMemoryEvent) error {
-	if err := f.MemoryStore.SaveUserMemoryEvent(ctx, event); err != nil {
+	f.MemoryStore.mu.Lock()
+	stored, err := f.MemoryStore.putUserMemoryEvent(event)
+	f.MemoryStore.mu.Unlock()
+	if err != nil {
 		return err
 	}
-	return f.appendUserMemoryEvent(event)
+	return f.appendUserMemoryEvent(stored)
 }
 
 // DeleteUserMemoryEvent 删除后全量重写

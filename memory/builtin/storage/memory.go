@@ -53,34 +53,40 @@ func (m *MemoryStore) generateKey(sessionID, userID string) string {
 	return fmt.Sprintf("%s:%s", sessionID, userID)
 }
 
-// UpsertUserMemory 创建或更新用户记忆（每个用户一条记录）
+// UpsertUserMemory 创建或更新用户记忆（每个用户一条记录）。
+// 保存的是入参的深拷贝；时间戳写在副本上，调用方对象不会被修改。
 func (m *MemoryStore) UpsertUserMemory(ctx context.Context, userMemory *builtin.UserMemory) error {
-	if userMemory == nil {
-		return errors.New("记忆对象不能为空")
-	}
-	if userMemory.UserID == "" {
-		return errors.New("用户ID不能为空")
-	}
-	if userMemory.Memory == "" {
-		return errors.New("记忆内容不能为空")
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// 设置时间戳
-	now := time.Now()
-	if userMemory.CreatedAt.IsZero() {
-		userMemory.CreatedAt = now
-	}
-	userMemory.UpdatedAt = now
-
-	// 保存记忆
-	m.userMemories[userMemory.UserID] = userMemory
-	return nil
+	_, err := m.putUserMemory(userMemory)
+	return err
 }
 
-// GetUserMemory 获取用户的记忆
+// putUserMemory 校验并保存用户记忆，返回落库的快照（含生成的时间戳）。
+// 调用方必须已持有写锁。
+func (m *MemoryStore) putUserMemory(userMemory *builtin.UserMemory) (*builtin.UserMemory, error) {
+	if userMemory == nil {
+		return nil, errors.New("记忆对象不能为空")
+	}
+	if userMemory.UserID == "" {
+		return nil, errors.New("用户ID不能为空")
+	}
+	if userMemory.Memory == "" {
+		return nil, errors.New("记忆内容不能为空")
+	}
+
+	stored := cloneUserMemory(userMemory)
+	now := time.Now()
+	if stored.CreatedAt.IsZero() {
+		stored.CreatedAt = now
+	}
+	stored.UpdatedAt = now
+
+	m.userMemories[stored.UserID] = stored
+	return cloneUserMemory(stored), nil
+}
+
+// GetUserMemory 获取用户的记忆（返回深拷贝，修改返回值不影响存储）
 func (m *MemoryStore) GetUserMemory(ctx context.Context, userID string) (*builtin.UserMemory, error) {
 	if userID == "" {
 		return nil, errors.New("用户ID不能为空")
@@ -94,7 +100,7 @@ func (m *MemoryStore) GetUserMemory(ctx context.Context, userID string) (*builti
 		return nil, nil
 	}
 
-	return userMemory, nil
+	return cloneUserMemory(userMemory), nil
 }
 
 // ClearUserMemory 清空用户记忆
@@ -110,34 +116,39 @@ func (m *MemoryStore) ClearUserMemory(ctx context.Context, userID string) error 
 	return nil
 }
 
-// SaveSessionSummary 保存会话摘要
+// SaveSessionSummary 保存会话摘要（保存入参的深拷贝，时间戳写在副本上）
 func (m *MemoryStore) SaveSessionSummary(ctx context.Context, summary *builtin.SessionSummary) error {
-	if summary == nil {
-		return errors.New("摘要对象不能为空")
-	}
-	if summary.SessionID == "" {
-		return errors.New("会话ID不能为空")
-	}
-	if summary.UserID == "" {
-		return errors.New("用户ID不能为空")
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// 设置时间戳
-	now := time.Now()
-	if summary.CreatedAt.IsZero() {
-		summary.CreatedAt = now
-	}
-	summary.UpdatedAt = now
-
-	key := m.generateKey(summary.SessionID, summary.UserID)
-	m.sessionSummaries[key] = summary
-	return nil
+	_, err := m.putSessionSummary(summary)
+	return err
 }
 
-// GetSessionSummary 获取会话摘要
+// putSessionSummary 校验并保存会话摘要，返回落库快照。调用方必须已持有写锁。
+func (m *MemoryStore) putSessionSummary(summary *builtin.SessionSummary) (*builtin.SessionSummary, error) {
+	if summary == nil {
+		return nil, errors.New("摘要对象不能为空")
+	}
+	if summary.SessionID == "" {
+		return nil, errors.New("会话ID不能为空")
+	}
+	if summary.UserID == "" {
+		return nil, errors.New("用户ID不能为空")
+	}
+
+	stored := cloneSessionSummary(summary)
+	now := time.Now()
+	if stored.CreatedAt.IsZero() {
+		stored.CreatedAt = now
+	}
+	stored.UpdatedAt = now
+
+	key := m.generateKey(stored.SessionID, stored.UserID)
+	m.sessionSummaries[key] = stored
+	return cloneSessionSummary(stored), nil
+}
+
+// GetSessionSummary 获取会话摘要（返回深拷贝）
 func (m *MemoryStore) GetSessionSummary(ctx context.Context, sessionID string, userID string) (*builtin.SessionSummary, error) {
 	if sessionID == "" {
 		return nil, errors.New("会话ID不能为空")
@@ -155,38 +166,44 @@ func (m *MemoryStore) GetSessionSummary(ctx context.Context, sessionID string, u
 		return nil, nil // 没找到返回nil，不是错误
 	}
 
-	return summary, nil
+	return cloneSessionSummary(summary), nil
 }
 
-// UpdateSessionSummary 更新会话摘要
+// UpdateSessionSummary 更新会话摘要（保存入参的深拷贝）
 func (m *MemoryStore) UpdateSessionSummary(ctx context.Context, summary *builtin.SessionSummary) error {
-	if summary == nil {
-		return errors.New("摘要对象不能为空")
-	}
-	if summary.SessionID == "" {
-		return errors.New("会话ID不能为空")
-	}
-	if summary.UserID == "" {
-		return errors.New("用户ID不能为空")
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	_, err := m.updateSessionSummaryLocked(summary)
+	return err
+}
+
+// updateSessionSummaryLocked 更新会话摘要并返回落库快照。调用方必须已持有写锁。
+func (m *MemoryStore) updateSessionSummaryLocked(summary *builtin.SessionSummary) (*builtin.SessionSummary, error) {
+	if summary == nil {
+		return nil, errors.New("摘要对象不能为空")
+	}
+	if summary.SessionID == "" {
+		return nil, errors.New("会话ID不能为空")
+	}
+	if summary.UserID == "" {
+		return nil, errors.New("用户ID不能为空")
+	}
 
 	key := m.generateKey(summary.SessionID, summary.UserID)
 	existing, exists := m.sessionSummaries[key]
 	if !exists {
-		return errors.New("会话摘要不存在")
+		return nil, errors.New("会话摘要不存在")
 	}
 
+	stored := cloneSessionSummary(summary)
 	// 保持原有创建时间
-	if summary.CreatedAt.IsZero() {
-		summary.CreatedAt = existing.CreatedAt
+	if stored.CreatedAt.IsZero() {
+		stored.CreatedAt = existing.CreatedAt
 	}
-	summary.UpdatedAt = time.Now()
+	stored.UpdatedAt = time.Now()
 
-	m.sessionSummaries[key] = summary
-	return nil
+	m.sessionSummaries[key] = stored
+	return cloneSessionSummary(stored), nil
 }
 
 // DeleteSessionSummary 删除会话摘要
@@ -206,37 +223,41 @@ func (m *MemoryStore) DeleteSessionSummary(ctx context.Context, sessionID string
 	return nil
 }
 
-// SaveMessage 保存对话消息
+// SaveMessage 保存对话消息（保存入参的深拷贝，ID/时间戳写在副本上）
 func (m *MemoryStore) SaveMessage(ctx context.Context, message *builtin.ConversationMessage) error {
-	if message == nil {
-		return errors.New("消息对象不能为空")
-	}
-	if message.SessionID == "" {
-		return errors.New("会话ID不能为空")
-	}
-	if message.UserID == "" {
-		return errors.New("用户ID不能为空")
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	// 如果没有ID，生成一个
-	if message.ID == "" {
-		message.ID = utils.GetULID()
-	}
-
-	// 设置时间戳
-	if message.CreatedAt.IsZero() {
-		message.CreatedAt = time.Now()
-	}
-
-	key := m.generateKey(message.SessionID, message.UserID)
-	m.messages[key] = append(m.messages[key], message)
-	return nil
+	_, err := m.putMessage(message)
+	return err
 }
 
-// GetMessages 获取会话的消息历史
+// putMessage 校验并保存消息，返回落库快照（含生成的 ID 与时间戳）。
+// 调用方必须已持有写锁。
+func (m *MemoryStore) putMessage(message *builtin.ConversationMessage) (*builtin.ConversationMessage, error) {
+	if message == nil {
+		return nil, errors.New("消息对象不能为空")
+	}
+	if message.SessionID == "" {
+		return nil, errors.New("会话ID不能为空")
+	}
+	if message.UserID == "" {
+		return nil, errors.New("用户ID不能为空")
+	}
+
+	stored := cloneConversationMessage(message)
+	if stored.ID == "" {
+		stored.ID = utils.GetULID()
+	}
+	if stored.CreatedAt.IsZero() {
+		stored.CreatedAt = time.Now()
+	}
+
+	key := m.generateKey(stored.SessionID, stored.UserID)
+	m.messages[key] = append(m.messages[key], stored)
+	return cloneConversationMessage(stored), nil
+}
+
+// GetMessages 获取会话的消息历史（返回深拷贝，修改返回值不影响存储）
 func (m *MemoryStore) GetMessages(ctx context.Context, sessionID string, userID string, limit int) ([]*builtin.ConversationMessage, error) {
 	if sessionID == "" {
 		return nil, errors.New("会话ID不能为空")
@@ -255,7 +276,9 @@ func (m *MemoryStore) GetMessages(ctx context.Context, sessionID string, userID 
 	}
 
 	messages := make([]*builtin.ConversationMessage, len(msgs))
-	copy(messages, msgs)
+	for i, msg := range msgs {
+		messages[i] = cloneConversationMessage(msg)
+	}
 
 	// 按时间排序（最新的在后面）
 	sort.Slice(messages, func(i, j int) bool {
@@ -410,41 +433,43 @@ func (m *MemoryStore) Close() error {
 	return nil
 }
 
-// SaveUserMemoryEvent 保存一条用户记忆事件
+// SaveUserMemoryEvent 保存一条用户记忆事件（保存入参的深拷贝）
 func (m *MemoryStore) SaveUserMemoryEvent(ctx context.Context, event *builtin.UserMemoryEvent) error {
-	if event == nil {
-		return errors.New("事件对象不能为空")
-	}
-	if event.UserID == "" {
-		return errors.New("用户ID不能为空")
-	}
-	if strings.TrimSpace(event.Summary) == "" {
-		return errors.New("事件内容不能为空")
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	_, err := m.putUserMemoryEvent(event)
+	return err
+}
 
-	if event.ID == "" {
-		event.ID = utils.GetULID()
+// putUserMemoryEvent 校验并保存事件，返回落库快照。调用方必须已持有写锁。
+func (m *MemoryStore) putUserMemoryEvent(event *builtin.UserMemoryEvent) (*builtin.UserMemoryEvent, error) {
+	if event == nil {
+		return nil, errors.New("事件对象不能为空")
+	}
+	if event.UserID == "" {
+		return nil, errors.New("用户ID不能为空")
+	}
+	if strings.TrimSpace(event.Summary) == "" {
+		return nil, errors.New("事件内容不能为空")
+	}
+
+	stored := cloneUserMemoryEvent(event)
+	if stored.ID == "" {
+		stored.ID = utils.GetULID()
 	}
 	now := time.Now()
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = now
+	if stored.CreatedAt.IsZero() {
+		stored.CreatedAt = now
 	}
-	if event.EventDate.IsZero() {
-		event.EventDate = now
+	if stored.EventDate.IsZero() {
+		stored.EventDate = now
 	}
-	if event.Type == "" {
-		event.Type = builtin.UserMemoryEventTypeEvent
+	if stored.Type == "" {
+		stored.Type = builtin.UserMemoryEventTypeEvent
 	}
 
-	cloned := *event
-	if len(event.Keywords) > 0 {
-		cloned.Keywords = append([]string(nil), event.Keywords...)
-	}
-	m.userMemoryEvents[event.UserID] = append(m.userMemoryEvents[event.UserID], &cloned)
-	return nil
+	m.userMemoryEvents[stored.UserID] = append(m.userMemoryEvents[stored.UserID], stored)
+	return cloneUserMemoryEvent(stored), nil
 }
 
 // ListRecentUserMemoryEvents 返回该用户最近的 limit 条事件
@@ -502,11 +527,7 @@ func (m *MemoryStore) SearchUserMemoryEvents(ctx context.Context, query *builtin
 		if len(keywords) > 0 && !matchEventKeywords(evt, keywords, match) {
 			continue
 		}
-		cloned := *evt
-		if len(evt.Keywords) > 0 {
-			cloned.Keywords = append([]string(nil), evt.Keywords...)
-		}
-		filtered = append(filtered, &cloned)
+		filtered = append(filtered, cloneUserMemoryEvent(evt))
 	}
 
 	sortEventsDesc(filtered)
@@ -562,11 +583,7 @@ func (m *MemoryStore) ClearUserMemoryEvents(ctx context.Context, userID string) 
 func cloneEventSlice(events []*builtin.UserMemoryEvent) []*builtin.UserMemoryEvent {
 	out := make([]*builtin.UserMemoryEvent, 0, len(events))
 	for _, evt := range events {
-		cloned := *evt
-		if len(evt.Keywords) > 0 {
-			cloned.Keywords = append([]string(nil), evt.Keywords...)
-		}
-		out = append(out, &cloned)
+		out = append(out, cloneUserMemoryEvent(evt))
 	}
 	return out
 }
