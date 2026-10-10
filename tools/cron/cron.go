@@ -2,12 +2,13 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	cronPkg "github.com/CoolBanHub/aggo/cron"
-	"github.com/cloudwego/eino/adk"
+	"github.com/CoolBanHub/aggo/pkg/sessionkeys"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 )
@@ -15,26 +16,58 @@ import (
 // CronOption 配置选项
 type CronOption func(*CronTool)
 
-// WithOnJobTriggered 设置任务触发时的回调
+// WithOnJobTriggered 设置任务触发时的回调（观测用，不拦截模型处理）。
+// 注意：如果同时使用 cronPkg.NewCronAgent，Agent 会安装自己的任务处理器，
+// 该回调会被合并进 Agent 的处理器中执行。
 func WithOnJobTriggered(fn func(job *cronPkg.CronJob)) CronOption {
+	if fn == nil {
+		return func(t *CronTool) {}
+	}
 	return func(t *CronTool) {
-		t.onJobTriggered = fn
+		t.onJobTriggered = func(ctx context.Context, job *cronPkg.CronJob) {
+			fn(job)
+		}
+	}
+}
+
+// WithOnJobProcessed 设置任务处理完成后的回调（观测用）。
+// 该回调只在独立使用本工具（未配合 cronPkg.NewCronAgent）时不会被自动触发；
+// 配合 NewCronAgent 时请使用 cronPkg.WithOnJobProcessed。
+func WithOnJobProcessed(fn func(job *cronPkg.CronJob, response string, err error)) CronOption {
+	if fn == nil {
+		return func(t *CronTool) {}
+	}
+	return func(t *CronTool) {
+		t.onJobProcessed = func(ctx context.Context, job *cronPkg.CronJob, response string, err error) {
+			fn(job, response, err)
+		}
 	}
 }
 
 // CronTool 定时任务工具
 type CronTool struct {
 	service        *cronPkg.CronService
-	onJobTriggered func(job *cronPkg.CronJob)
+	onJobTriggered func(ctx context.Context, job *cronPkg.CronJob)
+	onJobProcessed func(ctx context.Context, job *cronPkg.CronJob, response string, err error)
 }
 
 type serviceBoundTool struct {
 	tool.InvokableTool
 	service *cronPkg.CronService
+	ct      *CronTool
 }
 
 func (t *serviceBoundTool) CronService() *cronPkg.CronService {
 	return t.service
+}
+
+// CronLifecycle 暴露工具层配置的任务回调，
+// 供 cronPkg.NewCronAgent 合并进统一的任务处理器。
+func (t *serviceBoundTool) CronLifecycle() *cronPkg.JobLifecycle {
+	return &cronPkg.JobLifecycle{
+		OnTriggered: t.ct.onJobTriggered,
+		OnProcessed: t.ct.onJobProcessed,
+	}
 }
 
 // CronParams 工具参数
@@ -68,46 +101,71 @@ func GetTools(service *cronPkg.CronService, opts ...CronOption) []tool.BaseTool 
 		opt(ct)
 	}
 
-	// 设置 service 的回调
-	service.SetOnJob(func(job *cronPkg.CronJob) (string, error) {
-		if ct.onJobTriggered != nil {
-			ct.onJobTriggered(job)
-		}
-		return "ok", nil
-	})
+	// 独立使用本工具（未配合 NewCronAgent）时，安装只含观测回调的处理器，
+	// 保持旧行为可用；NewCronAgent 会用自己的处理器覆盖并合并这些回调。
+	if ct.onJobTriggered != nil || ct.onJobProcessed != nil {
+		onTriggered := ct.onJobTriggered
+		onProcessed := ct.onJobProcessed
+		service.SetOnJobContext(func(ctx context.Context, job *cronPkg.CronJob) (string, error) {
+			if onTriggered != nil {
+				onTriggered(ctx, job)
+			}
+			if onProcessed != nil {
+				onProcessed(ctx, job, "", nil)
+			}
+			return "ok", nil
+		})
+	}
 
 	name := "cron"
-	desc := "定时任务调度工具。支持添加、查看、删除、启用和禁用定时任务。" +
+	desc := "定时任务调度工具。支持添加、查看、删除、启用和禁用当前用户的定时任务。" +
 		"使用 'at_seconds' 设置一次性定时（如：提醒我10分钟后 → at_seconds=600）；" +
 		"使用 'every_seconds' 设置周期定时（如：每2小时 → every_seconds=7200）；" +
-		"使用 'cron_expr' 设置 Cron 表达式调度（如：每天9点 → cron_expr='0 9 * * *'）。"
+		"使用 'cron_expr' 设置 Cron 表达式调度（如：每天9点 → cron_expr='0 9 * * *'）。" +
+		"列表与变更操作只作用于当前会话身份所属的任务。"
 
 	t, _ := utils.InferTool(name, desc, ct.execute)
 
 	return []tool.BaseTool{&serviceBoundTool{
 		InvokableTool: t,
 		service:       service,
+		ct:            ct,
 	}}
 }
 
 func (ct *CronTool) execute(ctx context.Context, params CronParams) (interface{}, error) {
+	// 归属身份从运行时会话解析，模型不可通过参数指定；
+	// 解析不到身份时拒绝执行，不能退化为空字符串（否则会看到/操作所有人的任务）。
+	ownerID, err := requireOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	switch params.Action {
 	case "add":
-		return ct.addJob(ctx, params)
+		return ct.addJob(ctx, params, ownerID)
 	case "list":
-		return ct.listJobs()
+		return ct.listJobs(ownerID)
 	case "remove":
-		return ct.removeJob(params)
+		return ct.removeJob(params, ownerID)
 	case "enable":
-		return ct.enableJob(params, true)
+		return ct.enableJob(params, ownerID, true)
 	case "disable":
-		return ct.enableJob(params, false)
+		return ct.enableJob(params, ownerID, false)
 	default:
 		return nil, fmt.Errorf("unknown action: %s", params.Action)
 	}
 }
 
-func (ct *CronTool) addJob(ctx context.Context, params CronParams) (interface{}, error) {
+func requireOwner(ctx context.Context) (string, error) {
+	if id, ok := sessionkeys.ResolveOwner(ctx); ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("cron: 无法从会话中解析用户身份，拒绝执行该操作。" +
+		"请通过 adk.WithSessionValues 注入 userID/actorID（或会话级 sessionID）后重试")
+}
+
+func (ct *CronTool) addJob(ctx context.Context, params CronParams, ownerID string) (interface{}, error) {
 	if params.Message == "" {
 		return nil, fmt.Errorf("message is required for add action")
 	}
@@ -143,20 +201,7 @@ func (ct *CronTool) addJob(ctx context.Context, params CronParams) (interface{},
 		name = string(nameRunes[:30]) + "..."
 	}
 
-	var userID string
-	if v, ok := adk.GetSessionValue(ctx, "userID"); ok {
-		if s, ok := v.(string); ok {
-			userID = s
-		}
-	}
-	if userID == "" {
-		if v, ok := adk.GetSessionValue(ctx, "sessionID"); ok {
-			if s, ok := v.(string); ok {
-				userID = s
-			}
-		}
-	}
-	job, err := ct.service.AddJob(name, schedule, params.Message, userID)
+	job, err := ct.service.AddJob(name, schedule, params.Message, ownerID)
 	if err != nil {
 		return nil, fmt.Errorf("error adding job: %w", err)
 	}
@@ -170,8 +215,14 @@ func (ct *CronTool) addJob(ctx context.Context, params CronParams) (interface{},
 	}, nil
 }
 
-func (ct *CronTool) listJobs() (interface{}, error) {
-	jobs := ct.service.ListJobs(true)
+func (ct *CronTool) listJobs(ownerID string) (interface{}, error) {
+	jobs, err := ct.service.ListJobsByUser(ownerID, true)
+	if err != nil {
+		if errors.Is(err, cronPkg.ErrJobNotFound) {
+			return nil, fmt.Errorf("cron: 无法从会话中解析用户身份，拒绝列出定时任务")
+		}
+		return nil, fmt.Errorf("error listing jobs: %w", err)
+	}
 
 	if len(jobs) == 0 {
 		return map[string]interface{}{
@@ -225,30 +276,37 @@ func (ct *CronTool) listJobs() (interface{}, error) {
 	}, nil
 }
 
-func (ct *CronTool) removeJob(params CronParams) (interface{}, error) {
+func (ct *CronTool) removeJob(params CronParams, ownerID string) (interface{}, error) {
 	if params.JobID == "" {
 		return nil, fmt.Errorf("job_id is required for remove action")
 	}
 
-	if ct.service.RemoveJob(params.JobID) {
-		return map[string]interface{}{
-			"operation": "remove",
-			"success":   true,
-			"job_id":    params.JobID,
-			"message":   fmt.Sprintf("定时任务已删除: %s", params.JobID),
-		}, nil
+	if err := ct.service.RemoveJobForUser(params.JobID, ownerID); err != nil {
+		if errors.Is(err, cronPkg.ErrJobNotFound) {
+			return nil, fmt.Errorf("job %s not found", params.JobID)
+		}
+		return nil, fmt.Errorf("error removing job: %w", err)
 	}
-	return nil, fmt.Errorf("job %s not found", params.JobID)
+
+	return map[string]interface{}{
+		"operation": "remove",
+		"success":   true,
+		"job_id":    params.JobID,
+		"message":   fmt.Sprintf("定时任务已删除: %s", params.JobID),
+	}, nil
 }
 
-func (ct *CronTool) enableJob(params CronParams, enable bool) (interface{}, error) {
+func (ct *CronTool) enableJob(params CronParams, ownerID string, enable bool) (interface{}, error) {
 	if params.JobID == "" {
 		return nil, fmt.Errorf("job_id is required for enable/disable action")
 	}
 
-	job := ct.service.EnableJob(params.JobID, enable)
-	if job == nil {
-		return nil, fmt.Errorf("job %s not found", params.JobID)
+	job, err := ct.service.EnableJobForUser(params.JobID, ownerID, enable)
+	if err != nil {
+		if errors.Is(err, cronPkg.ErrJobNotFound) {
+			return nil, fmt.Errorf("job %s not found", params.JobID)
+		}
+		return nil, fmt.Errorf("error updating job: %w", err)
 	}
 
 	action := "启用"

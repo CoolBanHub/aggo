@@ -60,7 +60,11 @@ func main() {
 	}
 
 	// 创建 CronService 和工具
-	cronService := cronPkg.NewCronService(cronPkg.NewFileStore("cron_jobs.json"), nil)
+	cronStore, err := cronPkg.NewFileStoreWithError("cron_jobs.json")
+	if err != nil {
+		log.Fatalf("加载定时任务存储失败: %v", err)
+	}
+	cronService := cronPkg.NewCronService(cronStore, nil)
 	cronTools := cronTool.GetTools(cronService, cronTool.WithOnJobTriggered(func(job *cronPkg.CronJob) {
 		fmt.Printf("\n🔔 [任务触发] %s: %s\n", job.Name, job.Payload.Message)
 	}))

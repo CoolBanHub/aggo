@@ -34,7 +34,11 @@ func main() {
 	}
 
 	// 创建 CronService 和工具
-	service := cronPkg.NewCronService(cronPkg.NewFileStore("cron_jobs.json"), nil)
+	store, err := cronPkg.NewFileStoreWithError("cron_jobs.json")
+	if err != nil {
+		log.Fatalf("加载定时任务存储失败: %v", err)
+	}
+	service := cronPkg.NewCronService(store, nil)
 	tools := cronTool.GetTools(service)
 
 	// 创建 CronAgent
@@ -70,9 +74,14 @@ func main() {
 
 	for i, msg := range conversations {
 		fmt.Printf("【问题 %d】: %s\n", i+1, msg)
+		// cron 工具要求会话携带用户身份（userID/actorID/sessionID），
+		// 否则列表与变更操作会按“默认拒绝”处理。
 		iter := runner.Run(ctx, []*schema.AgenticMessage{
 			schema.UserAgenticMessage(msg),
-		})
+		}, adk.WithSessionValues(map[string]any{
+			"userID":    "example-user",
+			"sessionID": "example-session",
+		}))
 		for {
 			event, ok := iter.Next()
 			if !ok {
