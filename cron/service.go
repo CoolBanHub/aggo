@@ -82,7 +82,7 @@ type CronService struct {
 	onJob ContextJobHandler
 	mu    sync.RWMutex
 	// running 由 mu 保护
-	running bool
+	running        bool
 	scheduler      gocron.Scheduler
 	locker         Locker
 	lockTimeout    time.Duration

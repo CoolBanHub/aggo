@@ -81,12 +81,12 @@ func triggerJob(t *testing.T, cs *CronService, userID string) *CronJob {
 // 四种回调组合下，模型处理都执行、两个回调按固定顺序触发。
 func TestNewCronAgentCallbackCombinations(t *testing.T) {
 	cases := []struct {
-		name             string
-		withTriggered    bool
-		withProcessed    bool
-		wantModelCalls   int
-		wantTriggered    bool
-		wantProcessed    bool
+		name              string
+		withTriggered     bool
+		withProcessed     bool
+		wantModelCalls    int
+		wantTriggered     bool
+		wantProcessed     bool
 		disableProcessing bool
 	}{
 		{name: "no callbacks", wantModelCalls: 1},
@@ -161,7 +161,7 @@ func TestNewCronAgentCallbackCombinations(t *testing.T) {
 	}
 }
 
-func contains(list []string, s string) bool     { return indexOf(list, s) >= 0 }
+func contains(list []string, s string) bool       { return indexOf(list, s) >= 0 }
 func containsPrefix(list []string, p string) bool { return lastIndexOfPrefix(list, p) >= 0 }
 
 func indexOf(list []string, s string) int {
