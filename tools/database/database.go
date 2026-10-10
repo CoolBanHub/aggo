@@ -87,7 +87,9 @@ func NewDatabaseExecuteTool(db *gorm.DB, opts ...Option) tool.InvokableTool {
 		}
 	}
 	name := "database_execute"
-	desc := "执行数据库SQL并返回结果。默认只允许只读查询；如需写操作，工具创建方必须显式启用。支持MySQL、PostgreSQL、SQLite。"
+	desc := "执行数据库SQL并返回结果。默认只允许单条只读查询（SELECT/SHOW/DESCRIBE/EXPLAIN/PRAGMA）；" +
+		"CTE（WITH 开头）与多语句默认视为不安全，如需执行必须由工具创建方显式启用 WithAllowWrite(true)。" +
+		"支持MySQL、PostgreSQL、SQLite。"
 	t, _ := utils.InferTool(name, desc, this.execute)
 	return t
 }
@@ -111,7 +113,7 @@ func (t *DatabaseExecuteTool) execute(ctx context.Context, params ExecuteParams)
 
 	// 检查是否是返回结果集的语句类型
 	queryUpper := firstSQLKeyword(params.Query)
-	isSelect := isReadOnlyKeyword(queryUpper)
+	isSelect := isReadOnlyKeyword(queryUpper) && !hasMultipleStatements(params.Query)
 	if !isSelect && !t.allowWrite {
 		return nil, fmt.Errorf("database_execute is read-only by default; enable WithAllowWrite(true) to run %s statements", queryUpper)
 	}
@@ -227,11 +229,45 @@ func firstSQLKeyword(query string) string {
 	return strings.ToUpper(strings.Trim(fields[0], " \t\r\n("))
 }
 
+// isReadOnlyKeyword 判断首关键词是否只读。
+// 注意：WITH（CTE）不再视为只读——MySQL/PostgreSQL/SQLite 都允许在 CTE 中
+// 携带 DELETE/UPDATE/INSERT（如 WITH x AS (...) DELETE FROM t），
+// 关键词判断无法区分，默认拒绝，需要 WithAllowWrite(true) 显式放行。
 func isReadOnlyKeyword(keyword string) bool {
 	switch keyword {
-	case "SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "PRAGMA", "WITH":
+	case "SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN", "PRAGMA":
 		return true
 	default:
 		return false
 	}
+}
+
+// hasMultipleStatements 检测语句中是否存在分号后的额外语句。
+// 扫描时跳过单引号字符串字面量（'' 转义），避免把字面量里的分号误判为分隔符。
+func hasMultipleStatements(query string) bool {
+	inString := false
+	i := 0
+	for i < len(query) {
+		c := query[i]
+		switch {
+		case inString:
+			if c == '\'' {
+				if i+1 < len(query) && query[i+1] == '\'' {
+					i += 2 // 转义的 ''
+					continue
+				}
+				inString = false
+			}
+		case c == '\'':
+			inString = true
+		case c == ';':
+			// 分号后还有非空白内容 → 多语句
+			rest := strings.TrimSpace(query[i+1:])
+			if rest != "" {
+				return true
+			}
+		}
+		i++
+	}
+	return false
 }
