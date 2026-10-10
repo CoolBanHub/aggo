@@ -2,21 +2,33 @@ package sse
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 
 	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/bytedance/sonic"
 	"github.com/cloudwego/eino/schema"
 )
 
+// ErrWriterClosed 在 Writer 关闭后继续写入时返回。
+// 旧版本对已关闭的写入静默返回 nil，调用方无法感知连接已结束。
+var ErrWriterClosed = errors.New("sse: writer is closed")
+
 type Writer struct {
 	id      string
 	w       http.ResponseWriter
 	flusher http.Flusher
-	closed  bool
-	Done    func(http.ResponseWriter) error
+
+	// mu 保护 closed/err 以及底层 ResponseWriter 的写入，
+	// 保证并发写事件帧不会交错；第一次写失败会记录 err 并标记关闭
+	mu     sync.Mutex
+	closed bool
+	err    error
+
+	Done func(http.ResponseWriter) error
 }
 
 func NewWriter(id string, w http.ResponseWriter) *Writer {
@@ -35,35 +47,55 @@ func NewWriter(id string, w http.ResponseWriter) *Writer {
 		id:      id,
 		w:       w,
 		flusher: flusher,
-		closed:  false,
 	}
 }
 
 func (w *Writer) SetDone(f func(http.ResponseWriter) error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.Done = f
 }
 
+// Close 幂等；关闭后所有写方法返回 ErrWriterClosed
 func (w *Writer) Close() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.closed = true
 }
 
 func (w *Writer) IsClosed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.closed
 }
 
-func (w *Writer) WriteEvent(event *Event) error {
-	if event == nil || w.closed {
-		return nil
+// writeFrame 串行化“写入 + Flush”，保证事件帧不交错。
+// 第一次写失败会保留原始错误并标记关闭，之后的写入直接返回该错误。
+func (w *Writer) writeFrame(frame string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.err != nil {
+		return w.err
+	}
+	if w.closed {
+		return ErrWriterClosed
 	}
 
-	_, err := w.w.Write([]byte(event.String()))
-	if err != nil {
+	if _, err := io.WriteString(w.w, frame); err != nil {
+		w.err = err
 		w.closed = true
 		return err
 	}
-
 	w.flusher.Flush()
 	return nil
+}
+
+func (w *Writer) WriteEvent(event *Event) error {
+	if event == nil {
+		return nil
+	}
+	return w.writeFrame(event.String())
 }
 
 func (w *Writer) WriteEventSimple(id, eventType string, data []byte) error {
@@ -118,13 +150,7 @@ func (w *Writer) WriteDataString(data string) error {
 }
 
 func (w *Writer) WriteComment(comment string) error {
-	_, err := fmt.Fprintf(w.w, ": %s\n\n", comment)
-	if err != nil {
-		return err
-	}
-
-	w.flusher.Flush()
-	return nil
+	return w.writeFrame(fmt.Sprintf(": %s\n\n", comment))
 }
 
 func (w *Writer) WriteKeepAlive() error {
@@ -132,23 +158,30 @@ func (w *Writer) WriteKeepAlive() error {
 }
 
 func (w *Writer) WriteDone() error {
+	w.mu.Lock()
+	done := w.Done
+	w.mu.Unlock()
 
-	if w.Done != nil {
-		err := w.Done(w.w)
-		if err != nil {
-			return err
+	if done != nil {
+		if err := done(w.w); err != nil {
+			return w.markWriteFailed(err)
 		}
-		w.flusher.Flush()
-		return nil
+		return w.writeFrame("")
 	}
 
-	_, err := fmt.Fprintf(w.w, "data: [DONE]\n\n")
-	if err != nil {
-		return err
-	}
+	return w.writeFrame("data: [DONE]\n\n")
+}
 
-	w.flusher.Flush()
-	return nil
+// markWriteFailed 在 Done 回调自行写入并失败时，与 writeFrame 保持
+// 相同的“记录首次错误并标记关闭”语义。
+func (w *Writer) markWriteFailed(err error) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.err == nil {
+		w.err = err
+		w.closed = true
+	}
+	return w.err
 }
 
 func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema.AgenticMessage], fn func(output *schema.AgenticMessage, index int) any) error {
@@ -161,13 +194,11 @@ func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema
 	index := 0
 	for {
 		// 检查上下文是否被取消或 Writer 是否已关闭
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			if w.IsClosed() {
-				return fmt.Errorf("writer is closed")
-			}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if w.IsClosed() {
+			return ErrWriterClosed
 		}
 
 		chunk, err := stream.Recv()
