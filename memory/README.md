@@ -141,6 +141,12 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 - `SummaryTrigger`: 摘要触发策略
 - `SummaryCache`: 会话摘要缓存配置，支持 `TTLSeconds` 与 `MaxEntries`
 - `Cleanup`: 定期清理配置
+- `ContextBudget`: 注入模型上下文的预算（v0.3 新增），零值不限制：
+  - `MaxRunes`: 注入内容总字符上限，超出时按优先级丢弃
+    （最近未摘要消息 > 会话摘要 > 最近事件 > 长期记忆），裁剪都在 rune 边界进行
+  - `MaxHistoryItems` / `MaxEventItems` / `MaxMemoryRunes` / `MaxSummaryRunes`:
+    各类内容的条数/字符上限
+  - 裁剪发生时会记录到 `RetrieveResult.Warnings` 并标记 `Metadata["truncated"]=true`
 - `TablePre`: SQL 表前缀
 
 默认配置来自 `builtin.DefaultMemoryConfig()`。
@@ -291,13 +297,59 @@ provider, err := memory.GlobalRegistry().CreateProvider("mem0", &mem0.ProviderCo
 1. `BeforeModelRewriteState` 阶段调用 `provider.Retrieve`
 2. 把 `HistoryMessages` 放回 system 后、当前消息前，并将 `ContextMessages`（兼容旧 `SystemMessages`）追加到当前 user 消息末尾
 3. `AfterModelRewriteState` 阶段提取最近一轮 `user + assistant` 消息
-4. 异步调用 `provider.Memorize`
+4. 异步写入：provider 实现 `memory.AsyncMemorizer` 时调用
+   `EnqueueMemorize`（builtin provider 走 MemoryManager 的受管工作池，
+   随 Flush/Shutdown 收敛）；否则回退为后台 goroutine 直接调用
+   `provider.Memorize`（兼容旧 provider）
 
 这意味着：
 
-- provider 侧要假设 `Memorize` 可能在后台 goroutine 中执行
+- builtin provider 下，写入不再依赖无法追踪的游离 goroutine
 - 如果没有有效的 `user` 或 `assistant` 消息，本轮不会入库
 - 同一个 middleware 实例会做一次“已注入”标记，避免重复注入记忆
+
+### MemoryManager 的关闭语义
+
+`builtin.MemoryManager` 有明确的生命周期状态机（running → stopping → closed）：
+
+- `Close()` 幂等，并发/重复调用安全；内部执行 `Shutdown(context.Background())`
+- `Shutdown(ctx)` 按固定顺序关闭：停止接收新任务 → 停止聚合定时器 →
+  worker 排空已接受的任务 → 停止定期清理 → 关闭底层存储。
+  **已接受的记忆请求不会丢**
+- `Flush(ctx)` 触发未到期的聚合（debounce）窗口并等待已接受的任务全部完成；
+  服务优雅退出前可先 `Flush` 再 `Close`
+- 关闭后提交任务返回 `builtin.ErrMemoryClosed`，不会向已关闭的结构写入
+
+```go
+// 优雅退出示例
+flushCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+_ = manager.Flush(flushCtx)
+cancel()
+_ = manager.Close()
+```
+
+### MemoryMiddlewareConfig
+
+需要自定义身份解析或写入清洗时，使用 `NewMemoryMiddlewareWithConfig`：
+
+```go
+mw := memory.NewMemoryMiddlewareWithConfig(provider, memory.MemoryMiddlewareConfig{
+    UserIDKey:    "owner",             // 默认 "userID"，缺失时回退 actorID
+    SessionIDKey: "conversation",      // 默认 "sessionID"
+    // IdentityResolver: 自定义解析逻辑，设置后覆盖两个 Key
+    MissingIdentity: memory.MissingIdentityLog, // Skip | Log(默认) | Error
+    Normalizers: []memory.MemorizeNormalizer{
+        func(ctx context.Context, req *memory.MemorizeRequest) (*memory.MemorizeRequest, error) {
+            // 写入前清洗（去除图片索引、发言人标记、runtime context 等）；
+            // 入参视为不可变，返回新对象；返回 nil 表示丢弃本轮
+            return cleaned(req), nil
+        },
+    },
+})
+```
+
+身份缺失时：`Skip` 保持旧的静默跳过行为；`Log`（新默认）记录日志后跳过；
+`Error` 中断本轮请求。
 
 ## 迁移建议
 

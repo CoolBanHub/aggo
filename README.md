@@ -290,7 +290,11 @@ import (
     cronTool "github.com/CoolBanHub/aggo/tools/cron"
 )
 
-store := cronPkg.NewFileStore("/path/to/cron_jobs.json")
+store, err := cronPkg.NewFileStoreWithError("/path/to/cron_jobs.json")
+if err != nil {
+    // 文件损坏/权限错误在这里暴露，而不是被当作空数据静默覆盖
+}
+
 service := cronPkg.NewCronService(store, nil)
 cronTools := cronTool.GetTools(service)
 
@@ -302,6 +306,12 @@ _ = result.Service.Start()
 defer result.Service.Stop()
 ```
 
+> ⚠️ **身份要求**：cron 工具按会话身份隔离任务。运行时必须通过
+> `adk.WithSessionValues` 注入 `userID`/`actorID`（或会话级 `sessionID`），
+> 否则 `add/list/remove/enable/disable` 都会**默认拒绝**，
+> 不会退化为操作全部任务。用户 A 无法列出、删除或启停用户 B 的任务；
+> 后台管理请使用 Service 的 `ListJobs`/`RemoveJob`/`EnableJob`（管理员接口）。
+
 #### 调度方式
 
 | 类型 | 说明 | 示例 |
@@ -312,13 +322,30 @@ defer result.Service.Stop()
 
 #### 自定义任务触发
 
+`WithOnJobTriggered` 与 `WithOnJobProcessed` 都是纯观测回调（日志、埋点、通知），
+**不会拦截模型处理**：任务触发后模型处理默认始终执行，两个回调按
+“触发 → 模型生成 → 处理完成”的顺序依次调用。如需关闭模型处理，
+显式传入 `WithDisableJobProcessing()`，不要依赖“是否设置回调”来推断。
+
 ```go
 result, _ := cronPkg.NewCronAgent(ctx, chatModel, cronTools,
+    // 触发时通知（观测）
     cronPkg.WithOnJobTriggered(func(job *cronPkg.CronJob) {
         fmt.Printf("任务触发: %s\n", job.Payload.Message)
     }),
+    // 模型生成后发送提醒（观测）
+    cronPkg.WithOnJobProcessed(func(job *cronPkg.CronJob, response string, err error) {
+        if err == nil {
+            sendNotification(response)
+        }
+    }),
 )
 ```
+
+需要带 context 的回调可使用 `WithOnJobTriggeredContext` / `WithOnJobProcessedContext`，
+任务 context 默认注入 OwnerID 与 JobID，也可通过 `WithJobContextBuilder`
+携带 trace。停止服务时 `StopContext(ctx)` 会等待正在执行的任务结束
+（`Stop` 是其兼容包装）。
 
 ### 向量数据库集成
 
@@ -656,6 +683,62 @@ CREATE EXTENSION IF NOT EXISTS vector;
 ```go
 defer provider.Close()  // 确保在创建 provider 后立即添加 defer
 ```
+
+## 🔒 安全与生命周期约定
+
+### 会话身份（actor / conversation / session）
+
+多用户/群聊场景下请区分三种 ID，并通过 `pkg/sessionkeys` 的标准键注入会话：
+
+| 键 | 语义 | 用途 |
+|----|------|------|
+| `actorID` | 实际发言人 | 权限判断与审计 |
+| `conversationID` | 群聊/私聊 | 对话隔离与通知投递 |
+| `sessionID` | 一次会话窗口 | 上下文与记忆窗口 |
+| `userID` | 用户身份 | 单租户应用默认身份键，与 `actorID` 互相兜底 |
+
+```go
+runner.Run(ctx, msgs, adk.WithSessionValues(map[string]any{
+    "actorID":        senderID,
+    "conversationID": chatID,
+    "sessionID":      sessionID,
+}))
+```
+
+cron 工具的任务归属解析顺序为 `actorID → userID → sessionID`；
+记忆 middleware 默认读取 `userID`（缺失时回退 `actorID`）与 `sessionID`，
+可通过 `memory.MemoryMiddlewareConfig` 自定义。
+
+### 记忆生命周期
+
+`builtin.MemoryManager` 提供统一生命周期：
+
+- `Flush(ctx)`：触发未到期的聚合窗口并等待已接受的任务全部完成；
+- `Shutdown(ctx)` / `Close()`（幂等）：停止接收新任务 → 排空已接受任务 →
+  关闭底层存储，已接受的记忆不会丢；
+- `MemoryMiddleware` 在 provider 实现 `memory.AsyncMemorizer` 时走受管
+  异步写入，退出时随 Flush/Shutdown 收敛，不再产生无法追踪的 goroutine。
+
+详见 [memory/README.md](./memory/README.md)。
+
+### 其他安全相关行为
+
+- **数据库工具**：默认只放行单条 `SELECT/SHOW/DESCRIBE/EXPLAIN/PRAGMA`；
+  CTE（`WITH`）与多语句默认视为不安全，需要 `WithAllowWrite(true)` 显式放行。
+- **SSE Writer**：并发写入安全（帧不交错），`Close` 幂等，
+  关闭后的写入返回 `ErrWriterClosed` 而不是静默丢弃。
+- **cron 分布式锁**：加锁与解锁使用独立的 context/超时
+  （`SetLockTimeouts` 可配），任务超过锁超时后仍能正常解锁。
+
+## 🧭 版本兼容性
+
+- **v0.2.x**：基于 Eino 旧版 Message API（`schema.Message`）。
+- **v0.3.x（当前 main）**：基于 Eino 0.9.5 的 Agentic API
+  （`model.AgenticModel` / `schema.AgenticMessage`）。
+
+两个版本的 API **不能混用**。升级到 v0.3 时需要同步升级 Eino 依赖并迁移
+消息类型；`go.work` 只能用于本地联调，不能作为构建成功的前提——业务仓库
+请确保 `GOWORK=off go build ./...` 在发布前可用。
 
 ## 🤝 贡献
 
