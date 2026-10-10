@@ -120,12 +120,12 @@ func NewMemoryManager(cm model.AgenticModel, memoryStorage MemoryStorage, config
 			time.Duration(config.SummaryCache.TTLSeconds)*time.Second,
 			config.SummaryCache.MaxEntries,
 		),
-		ctx:           ctx,
-		cancel:        cancel,
-		cleanupCtx:    cleanupCtx,
-		cleanupCancel: cleanupCancel,
+		ctx:            ctx,
+		cancel:         cancel,
+		cleanupCtx:     cleanupCtx,
+		cleanupCancel:  cleanupCancel,
 		debounceWindow: debounceWindowFromConfig(config),
-		shutdownDone:  make(chan struct{}),
+		shutdownDone:   make(chan struct{}),
 	}
 
 	manager.searcher, err = newSearcher(memoryStorage, config.Search)

@@ -184,6 +184,27 @@ const (
 	RetrievalSemantic MemoryRetrieval = "semantic"
 )
 
+// ContextBudget 限制注入模型上下文的记忆内容规模，防止长期记忆无限增长
+// 撑爆模型上下文窗口。零值表示不限制（兼容旧行为）。
+//
+// 裁剪优先级（从高到低保留）：
+// 当前用户消息与系统指令（不在记忆层）> 最近未摘要消息 > 会话摘要 >
+// 最近事件 > 长期记忆扩展内容。所有按字符的裁剪都在 rune 边界进行，
+// 不会截断 UTF-8 多字节字符。
+type ContextBudget struct {
+	// MaxRunes 注入内容的总字符上限（上下文块 + 历史消息文本），
+	// 超出时从最低优先级开始丢弃。
+	MaxRunes int `json:"maxRunes,omitempty"`
+	// MaxHistoryItems 注入的历史消息条数上限，保留最新的 N 条。
+	MaxHistoryItems int `json:"maxHistoryItems,omitempty"`
+	// MaxEventItems 常驻注入的最近事件条数上限（事件检索模式）。
+	MaxEventItems int `json:"maxEventItems,omitempty"`
+	// MaxMemoryRunes 长期记忆（用户记忆短文档）注入的字符上限。
+	MaxMemoryRunes int `json:"maxMemoryRunes,omitempty"`
+	// MaxSummaryRunes 会话摘要注入的字符上限。
+	MaxSummaryRunes int `json:"maxSummaryRunes,omitempty"`
+}
+
 // MemoryConfig 记忆配置
 type MemoryConfig struct {
 	// 是否启用用户记忆
@@ -227,6 +248,9 @@ type MemoryConfig struct {
 
 	// 搜索配置。nil 时按 keyword 默认行为初始化。
 	Search *SearchConfig `json:"search,omitempty"`
+
+	// 上下文预算。零值不限制（兼容旧行为）。
+	ContextBudget ContextBudget `json:"contextBudget,omitempty"`
 }
 
 // CleanupConfig 清理相关配置

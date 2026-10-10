@@ -24,33 +24,67 @@ type builtinProvider struct {
 }
 
 // Retrieve implements MemoryProvider.
+//
+// 检索子步骤失败不中断整体检索（best-effort 兼容旧行为），但会记录到
+// result.Warnings 并输出日志；配置了 ContextBudget 时按优先级裁剪注入内容，
+// 裁剪同样记录 warning 与 Metadata[“truncated”]。
 func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*RetrieveResult, error) {
 	if req == nil {
 		return nil, fmt.Errorf("retrieve request is nil")
 	}
 
 	cfg := p.MemoryManager.GetConfig()
+	budget := cfg.ContextBudget
 
 	result := &RetrieveResult{
 		Metadata: make(map[string]any),
 	}
+	addWarning := func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		result.Warnings = append(result.Warnings, msg)
+		slog.Warnf("memory: retrieve degraded: %s", msg)
+	}
+	markTruncated := func() {
+		result.Metadata["truncated"] = true
+	}
 
 	var sessionSummary *builtin.SessionSummary
+	var memoryBlock, eventsBlock, summaryBlock string
 
 	// Fetch user memory as dynamic context messages. Keeping it out of the
 	// system prompt preserves provider-side prompt caching for the stable
 	// instruction.
 	if cfg.EnableUserMemories {
 		userMemory, err := p.MemoryManager.GetUserMemory(ctx, req.UserID)
-		if err == nil && userMemory != nil && userMemory.Memory != "" {
-			result.ContextMessages = append(result.ContextMessages, schema.UserAgenticMessage(fmt.Sprintf("<user_memory>\n%s\n</user_memory>", userMemory.Memory)))
+		switch {
+		case err != nil:
+			addWarning("get_user_memory_failed: %v", err)
+		case userMemory != nil && userMemory.Memory != "":
+			text := userMemory.Memory
+			if budget.MaxMemoryRunes > 0 {
+				var truncated bool
+				text, truncated = truncateRunes(text, budget.MaxMemoryRunes)
+				if truncated {
+					markTruncated()
+					addWarning("user_memory_truncated_to_%d_runes", budget.MaxMemoryRunes)
+				}
+			}
+			memoryBlock = fmt.Sprintf("<user_memory>\n%s\n</user_memory>", text)
 		}
 
 		// 事件检索模式：再追加“最近 N 条事件”块，更早的事件由 search_user_memory 工具按需检索。
 		if cfg.EnableEventSearch && cfg.RecentEventLimit > 0 {
 			events, evtErr := p.MemoryManager.ListRecentUserMemoryEvents(ctx, req.UserID, cfg.RecentEventLimit)
-			if evtErr == nil && len(events) > 0 {
-				result.ContextMessages = append(result.ContextMessages, schema.UserAgenticMessage(formatRecentEventsBlock(events)))
+			switch {
+			case evtErr != nil:
+				addWarning("list_recent_events_failed: %v", evtErr)
+			case len(events) > 0:
+				if budget.MaxEventItems > 0 && len(events) > budget.MaxEventItems {
+					events = events[:budget.MaxEventItems]
+					markTruncated()
+					addWarning("recent_events_truncated_to_%d_items", budget.MaxEventItems)
+				}
+				eventsBlock = formatRecentEventsBlock(events)
 			}
 		}
 	}
@@ -58,9 +92,21 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 	// Fetch session summary as dynamic context.
 	if cfg.EnableSessionSummary {
 		summary, err := p.MemoryManager.GetSessionSummary(ctx, req.SessionID, req.UserID)
-		if err == nil && summary != nil && summary.Summary != "" {
+		switch {
+		case err != nil:
+			addWarning("get_session_summary_failed: %v", err)
+		case summary != nil && summary.Summary != "":
 			sessionSummary = summary
-			result.ContextMessages = append(result.ContextMessages, schema.UserAgenticMessage(fmt.Sprintf("<session_context>\n%s\n</session_context>", summary.Summary)))
+			text := summary.Summary
+			if budget.MaxSummaryRunes > 0 {
+				var truncated bool
+				text, truncated = truncateRunes(text, budget.MaxSummaryRunes)
+				if truncated {
+					markTruncated()
+					addWarning("session_summary_truncated_to_%d_runes", budget.MaxSummaryRunes)
+				}
+			}
+			summaryBlock = fmt.Sprintf("<session_context>\n%s\n</session_context>", text)
 		}
 	}
 
@@ -69,28 +115,116 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 	if limit <= 0 {
 		limit = cfg.MemoryLimit
 	}
+	var history []*schema.AgenticMessage
 	if cfg.EnableSessionSummary && sessionSummary != nil {
-		history, err := p.MemoryManager.GetMessagesAfterSummary(ctx, req.SessionID, req.UserID, limit)
+		h, err := p.MemoryManager.GetMessagesAfterSummary(ctx, req.SessionID, req.UserID, limit)
 		if err != nil {
-			history = nil
+			addWarning("get_messages_after_summary_failed: %v", err)
 		}
+		history = h
 		if cfg.SummaryRecentMessageLimit > 0 {
 			recent, recentErr := p.MemoryManager.GetMessages(ctx, req.SessionID, req.UserID, cfg.SummaryRecentMessageLimit)
-			if recentErr == nil && len(recent) > 0 {
+			if recentErr != nil {
+				addWarning("get_recent_messages_failed: %v", recentErr)
+			} else if len(recent) > 0 {
 				history = mergeHistoryMessages(maxInt(limit, cfg.SummaryRecentMessageLimit), recent, history)
 			}
 		}
-		if len(history) > 0 {
-			result.HistoryMessages = decorateHistoryMessages(history)
-		}
 	} else {
-		history, err := p.MemoryManager.GetMessages(ctx, req.SessionID, req.UserID, limit)
-		if err == nil && len(history) > 0 {
-			result.HistoryMessages = decorateHistoryMessages(history)
+		h, err := p.MemoryManager.GetMessages(ctx, req.SessionID, req.UserID, limit)
+		if err != nil {
+			addWarning("get_messages_failed: %v", err)
+		}
+		history = h
+	}
+
+	// 预算裁剪：先限制历史条数，再按总字符预算从低优先级端丢弃。
+	// 优先级（保留从高到低）：最近未摘要消息 > 会话摘要 > 最近事件 > 长期记忆。
+	if budget.MaxHistoryItems > 0 && len(history) > budget.MaxHistoryItems {
+		history = history[len(history)-budget.MaxHistoryItems:]
+		markTruncated()
+		addWarning("history_truncated_to_%d_items", budget.MaxHistoryItems)
+	}
+	if budget.MaxRunes > 0 {
+		total := runeLen(memoryBlock) + runeLen(eventsBlock) + runeLen(summaryBlock) + agenticMessagesRunes(history)
+		dropped := false
+		for total > budget.MaxRunes {
+			switch {
+			case memoryBlock != "":
+				total -= runeLen(memoryBlock)
+				memoryBlock = ""
+				dropped = true
+			case eventsBlock != "":
+				total -= runeLen(eventsBlock)
+				eventsBlock = ""
+				dropped = true
+			case summaryBlock != "":
+				total -= runeLen(summaryBlock)
+				summaryBlock = ""
+				dropped = true
+			case len(history) > 1: // 至少保留最近一条历史消息
+				droppedRunes := agmsg.Text(history[0])
+				history = history[1:]
+				total -= runeLen(droppedRunes)
+				dropped = true
+			default:
+				// 只剩最后一条历史消息，无法继续裁剪
+				total = 0
+			}
+		}
+		if dropped {
+			markTruncated()
+			addWarning("context_budget_exceeded_max_%d_runes_dropped_lower_priority_context", budget.MaxRunes)
 		}
 	}
 
+	// 保持原有注入顺序：长期记忆 → 最近事件 → 会话摘要
+	for _, block := range []string{memoryBlock, eventsBlock, summaryBlock} {
+		if block == "" {
+			continue
+		}
+		result.ContextMessages = append(result.ContextMessages, schema.UserAgenticMessage(block))
+	}
+	if len(history) > 0 {
+		result.HistoryMessages = decorateHistoryMessages(history)
+	}
+
 	return result, nil
+}
+
+// truncateRunes 在 rune 边界裁剪文本，保证结果不超过 max 个 rune。
+// 发生裁剪时返回 true；截断处以省略号标记。
+func truncateRunes(s string, max int) (string, bool) {
+	if max <= 0 {
+		return s, false
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s, false
+	}
+	const marker = "…"
+	markerLen := len([]rune(marker))
+	cut := max - markerLen
+	if cut <= 0 {
+		// 预算太小放不下标记，直接硬裁剪
+		return string(runes[:max]), true
+	}
+	return string(runes[:cut]) + marker, true
+}
+
+func runeLen(s string) int {
+	return len([]rune(s))
+}
+
+func agenticMessagesRunes(messages []*schema.AgenticMessage) int {
+	total := 0
+	for _, msg := range messages {
+		if msg == nil {
+			continue
+		}
+		total += runeLen(agmsg.Text(msg))
+	}
+	return total
 }
 
 // Memorize implements MemoryProvider.

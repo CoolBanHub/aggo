@@ -50,6 +50,11 @@ type RetrieveResult struct {
 	// HistoryMessages are injected as conversation history.
 	HistoryMessages []*schema.AgenticMessage
 
+	// Warnings records degradations during retrieval (sub-query failures,
+	// budget truncation, etc.) so callers can surface them in logs/metrics
+	// instead of silently losing context.
+	Warnings []string
+
 	// Metadata holds provider-specific data.
 	Metadata map[string]any
 }

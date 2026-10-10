@@ -145,6 +145,11 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 		return ctx, state, nil
 	}
 
+	// 检索成功但发生降级（子步骤失败/预算裁剪）时让调用方可观测
+	if len(result.Warnings) > 0 {
+		log.Printf("MemoryMiddleware: Retrieve degraded: %v", result.Warnings)
+	}
+
 	// Split state.Messages into: first system message + rest.
 	var systemMsg *schema.AgenticMessage
 	var restMessages []*schema.AgenticMessage

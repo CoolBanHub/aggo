@@ -40,14 +40,14 @@ func intPtr(v int) *int { return &v }
 func newLifecycleManager(t *testing.T, mutate func(*builtin.MemoryConfig)) *builtin.MemoryManager {
 	t.Helper()
 	cfg := &builtin.MemoryConfig{
-		EnableUserMemories:   false,
-		EnableSessionSummary: false,
-		AsyncWorkerPoolSize:  2,
+		EnableUserMemories:    false,
+		EnableSessionSummary:  false,
+		AsyncWorkerPoolSize:   2,
 		DebounceWindowSeconds: intPtr(0),
-		SummaryTrigger:       builtin.DefaultMemoryConfig().SummaryTrigger,
-		SummaryCache:         builtin.DefaultMemoryConfig().SummaryCache,
-		Cleanup:              builtin.DefaultMemoryConfig().Cleanup,
-		Search:               builtin.DefaultMemoryConfig().Search,
+		SummaryTrigger:        builtin.DefaultMemoryConfig().SummaryTrigger,
+		SummaryCache:          builtin.DefaultMemoryConfig().SummaryCache,
+		Cleanup:               builtin.DefaultMemoryConfig().Cleanup,
+		Search:                builtin.DefaultMemoryConfig().Search,
 	}
 	if mutate != nil {
 		mutate(cfg)
