@@ -252,3 +252,28 @@ func TestDebounceRaceWithClose(t *testing.T) {
 		}
 	}
 }
+
+// 关闭时未到期的 debounce 窗口会被并入队列执行，已接受的记忆请求不因关机丢失。
+func TestCloseFlushesPendingDebounceWindows(t *testing.T) {
+	mgr := newLifecycleManager(t, func(cfg *builtin.MemoryConfig) {
+		cfg.EnableUserMemories = true
+		cfg.DebounceWindowSeconds = intPtr(60) // 自然窗口内不会触发
+		cfg.AsyncWorkerPoolSize = 1
+	})
+	ctx := context.Background()
+	if err := mgr.ProcessUserMessage(ctx, "u1", "s1", "你好", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.ProcessAssistantMessage(ctx, "u1", "s1", "收到"); err != nil {
+		t.Fatal(err)
+	}
+
+	before := mgr.GetTaskQueueStats().ProcessedTasks
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	after := mgr.GetTaskQueueStats().ProcessedTasks
+	if after <= before {
+		t.Fatalf("pending debounce window was dropped at shutdown: processed %d -> %d", before, after)
+	}
+}

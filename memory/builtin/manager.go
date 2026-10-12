@@ -426,14 +426,17 @@ func (m *MemoryManager) flushPendingDebounceTimersForShutdown() {
 			timer.Stop()
 		}
 		m.memoryTimers.Delete(key)
-		m.submitMu.Lock()
-		if managerState(m.state.Load()) == managerStopping {
-			m.inFlight.Add(1)
-			// Workers remain alive until after this method returns, so blocking
-			// here when the queue is full preserves the accepted task.
-			m.taskChannel <- asyncTask{taskType: "memory", userID: timerKey.userID, sessionID: timerKey.sessionID}
+		// state 已单向进入 stopping（只有 doShutdown 会推进到 closed，
+		// 且发生在本方法之后），无需再与提交门互斥。注意：不能在持有
+		// submitMu 时阻塞发送——队列满且所有 worker 恰好都卡在需要
+		// submitMu 的路径上时（如并发的 memorize 任务），会互相等待造成死锁。
+		if managerState(m.state.Load()) != managerStopping {
+			return true
 		}
-		m.submitMu.Unlock()
+		// Workers remain alive until after this method returns, so blocking
+		// here when the queue is full preserves the accepted task.
+		m.inFlight.Add(1)
+		m.taskChannel <- asyncTask{taskType: "memory", userID: timerKey.userID, sessionID: timerKey.sessionID}
 		return true
 	})
 }

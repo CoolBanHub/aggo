@@ -243,7 +243,7 @@ func isReadOnlyKeyword(keyword string) bool {
 }
 
 // hasMultipleStatements 检测语句中是否存在分号后的额外语句。
-// 扫描时跳过单引号字符串字面量（'' 转义），避免把字面量里的分号误判为分隔符。
+// 扫描时跳过单引号字符串字面量（” 转义），避免把字面量里的分号误判为分隔符。
 func hasMultipleStatements(query string) bool {
 	inString := false
 	i := 0

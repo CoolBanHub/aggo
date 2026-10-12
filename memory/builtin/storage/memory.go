@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,10 +49,40 @@ func (m *MemoryStore) AutoMigrate() error {
 	return nil
 }
 
-// generateKey 生成会话相关的复合键
+// generateKey 生成会话相关的复合键。
+// 两段都带长度前缀，sessionID/userID 含 ':' 时也不会碰撞。
 func (m *MemoryStore) generateKey(sessionID, userID string) string {
-	// Length-prefix both components so IDs containing ':' cannot collide.
 	return fmt.Sprintf("%d:%s%d:%s", len(sessionID), sessionID, len(userID), userID)
+}
+
+// parseCompositeKey 解析 generateKey 生成的复合键，格式不匹配时 ok=false。
+func parseCompositeKey(key string) (sessionID, userID string, ok bool) {
+	sessionID, rest, ok := takeLengthPrefixedField(key)
+	if !ok {
+		return "", "", false
+	}
+	userID, _, ok = takeLengthPrefixedField(rest)
+	if !ok {
+		return "", "", false
+	}
+	return sessionID, userID, true
+}
+
+// takeLengthPrefixedField 从 "<len>:<bytes><rest...>" 中取出第一个字段与剩余部分。
+func takeLengthPrefixedField(s string) (field, rest string, ok bool) {
+	colon := strings.IndexByte(s, ':')
+	if colon < 0 {
+		return "", "", false
+	}
+	n, err := strconv.Atoi(s[:colon])
+	if err != nil || n < 0 {
+		return "", "", false
+	}
+	start := colon + 1
+	if start+n > len(s) {
+		return "", "", false
+	}
+	return s[start : start+n], s[start+n:], true
 }
 
 // UpsertUserMemory 创建或更新用户记忆（每个用户一条记录）。
@@ -654,8 +685,10 @@ func (m *MemoryStore) CleanupOldMessages(ctx context.Context, userID string, bef
 
 	cleanedCount := 0
 	for sessionKey, messages := range m.messages {
-		// 检查是否属于指定用户
-		if !strings.HasSuffix(sessionKey, ":"+userID) {
+		// 检查是否属于指定用户：解析复合键精确比对，
+		// 后缀匹配在 userID 含 ':' 时会误匹配其他用户
+		_, keyUserID, ok := parseCompositeKey(sessionKey)
+		if !ok || keyUserID != userID {
 			continue
 		}
 

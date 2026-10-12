@@ -99,6 +99,11 @@ type CronService struct {
 
 	// jobWg 跟踪正在执行的任务回调，StopContext 等待其结束
 	jobWg sync.WaitGroup
+
+	// stopGen 由 mu 保护，每次进入 StopContext 的等待阶段时递增。
+	// 等待 goroutine 只在 generation 未被更新的 Stop 覆盖时复位 stopping，
+	// 避免“上一次超时的 Stop 迟到复位”破坏当前 Stop 的拒绝窗口。
+	stopGen uint64
 }
 
 // NewCronService 创建定时调度服务
@@ -243,14 +248,13 @@ func (cs *CronService) StopContext(ctx context.Context) error {
 		s = cs.scheduler
 		cs.scheduler = nil
 		cs.running = false
-		cs.stopping = true
 		cs.jobIDToGocronID = make(map[string]uuid.UUID)
 	}
-	if s == nil {
-		// Prevent callbacks that raced with a previous scheduler shutdown from
-		// registering themselves while Stop waits for the current executions.
-		cs.stopping = true
-	}
+	// Prevent callbacks that raced with a previous scheduler shutdown from
+	// registering themselves while Stop waits for the current executions.
+	cs.stopping = true
+	cs.stopGen++
+	gen := cs.stopGen
 	cs.mu.Unlock()
 
 	var shutdownErr error
@@ -258,18 +262,22 @@ func (cs *CronService) StopContext(ctx context.Context) error {
 		shutdownErr = s.Shutdown()
 	}
 
-	// 即便未处于 running 状态，也等待仍在执行的任务回调结束
+	// 即便未处于 running 状态，也等待仍在执行的任务回调结束。
+	// waiting goroutine 在任务全部结束后复位 stopping——包括 StopContext
+	// 因 ctx 超时先返回的情况，否则 stopping 会永久为 true，服务无法再次 Start。
 	done := make(chan struct{})
 	go func() {
 		cs.jobWg.Wait()
+		cs.mu.Lock()
+		if cs.stopGen == gen {
+			cs.stopping = false
+		}
+		cs.mu.Unlock()
 		close(done)
 	}()
 
 	select {
 	case <-done:
-		cs.mu.Lock()
-		cs.stopping = false
-		cs.mu.Unlock()
 		return shutdownErr
 	case <-ctx.Done():
 		return fmt.Errorf("cron: timed out waiting for running jobs: %w (scheduler shutdown: %v)", ctx.Err(), shutdownErr)

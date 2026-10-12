@@ -344,6 +344,49 @@ func TestStopContextWaitsForRunningJobs(t *testing.T) {
 	<-done
 }
 
+// StopContext 因 ctx 超时先返回后，任务结束时应复位 stopping 状态，
+// 服务可以再次 Start（否则 stopping 永久为 true，服务无法重启）。
+func TestStopContextTimeoutRecoversForRestart(t *testing.T) {
+	store := newFakeStore()
+	cs := NewCronService(store, nil)
+	job := addJobForUser(t, cs, "userA", "a1")
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	cs.SetOnJobContext(func(ctx context.Context, j *CronJob) (string, error) {
+		close(entered)
+		<-release
+		return "ok", nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		cs.executeJob(job.ID)
+		close(done)
+	}()
+	<-entered
+
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer shortCancel()
+	if err := cs.StopContext(shortCtx); err == nil {
+		t.Fatal("StopContext should time out while the job is running")
+	}
+
+	// 任务结束后，等待 goroutine 应复位 stopping，使 Start 可用
+	close(release)
+	<-done
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := cs.Start(); err == nil {
+			_ = cs.StopContext(context.Background())
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("Start must succeed again after the timed-out stop's jobs drained")
+}
+
 // Start 时注册失败的任务应被标记为不可用；标记本身持久化失败时启动报错。
 func TestStartMarksUnregisterableJob(t *testing.T) {
 	store := newFakeStore()

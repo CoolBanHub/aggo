@@ -7,7 +7,7 @@ import (
 
 // 存储层对象以不可变快照方式出入库：保存时深拷贝入参，读取时深拷贝内部对象。
 // 否则调用方在存储锁外修改共享指针（如 Parts 里的 URL、事件 Keywords）
-// 会绕过存储锁直接改变存储内容（改进方案 §5.4）。
+// 会绕过存储锁直接改变存储内容。
 
 func cloneStringPtr(v *string) *string {
 	if v == nil {

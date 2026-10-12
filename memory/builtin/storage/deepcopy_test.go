@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	"github.com/cloudwego/eino/schema"
@@ -191,5 +192,74 @@ func TestConcurrentReadWriteNoRace(t *testing.T) {
 	if final == nil || final.Summary != "外部修改" {
 		// 最后一次 Update 写入的就是 "外部修改"，但不能包含并发撕裂的内容
 		t.Fatalf("unexpected final summary: %+v", final)
+	}
+}
+
+// 复合键带长度前缀后，CleanupOldMessages 按 userID 精确匹配：
+// 清理 "b" 不会误删 "a:b" 这类含冒号用户的消息。
+func TestCleanupOldMessagesColonUserIDIsolation(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+
+	old := time.Now().Add(-2 * time.Hour)
+	newer := time.Now()
+
+	// 用户 "a:b"：一条旧消息 + 一条新消息
+	if err := store.SaveMessage(ctx, &builtin.ConversationMessage{
+		SessionID: "s1", UserID: "a:b", Role: "user", Content: "旧", CreatedAt: old,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveMessage(ctx, &builtin.ConversationMessage{
+		SessionID: "s1", UserID: "a:b", Role: "user", Content: "新", CreatedAt: newer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 用户 "b"：一条旧消息
+	if err := store.SaveMessage(ctx, &builtin.ConversationMessage{
+		SessionID: "s2", UserID: "b", Role: "user", Content: "旧", CreatedAt: old,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.CleanupOldMessages(ctx, "b", time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	msgsAB, err := store.GetMessages(ctx, "s1", "a:b", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgsAB) != 2 {
+		t.Fatalf("user a:b must keep both messages, got %d", len(msgsAB))
+	}
+	msgsB, err := store.GetMessages(ctx, "s2", "b", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgsB) != 0 {
+		t.Fatalf("user b's old message should be cleaned, got %d", len(msgsB))
+	}
+}
+
+// 复合键解析：含冒号的 sessionID/userID 不碰撞，非法键返回 ok=false。
+func TestParseCompositeKey(t *testing.T) {
+	store := NewMemoryStore()
+	cases := []struct{ sessionID, userID string }{
+		{"s1", "u1"},
+		{"with:colon", "u1"},
+		{"s1", "with:colon"},
+		{"with:colon", "also:colon"},
+		{"", "u1"},
+	}
+	for _, tc := range cases {
+		key := store.generateKey(tc.sessionID, tc.userID)
+		gotSession, gotUser, ok := parseCompositeKey(key)
+		if !ok || gotSession != tc.sessionID || gotUser != tc.userID {
+			t.Fatalf("parseCompositeKey(%q) = (%q,%q,%v), want (%q,%q)", key, gotSession, gotUser, ok, tc.sessionID, tc.userID)
+		}
+	}
+	if _, _, ok := parseCompositeKey("not-a-composite-key"); ok {
+		t.Fatal("malformed key should not parse")
 	}
 }
