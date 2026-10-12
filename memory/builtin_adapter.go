@@ -139,6 +139,8 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 		history = h
 	}
 
+	history = decorateHistoryMessages(history)
+
 	// 预算裁剪：先限制历史条数，再按总字符预算从低优先级端丢弃。
 	// 优先级（保留从高到低）：最近未摘要消息 > 会话摘要 > 最近事件 > 长期记忆。
 	if budget.MaxHistoryItems > 0 && len(history) > budget.MaxHistoryItems {
@@ -200,7 +202,7 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 		result.ContextMessages = append(result.ContextMessages, schema.UserAgenticMessage(block))
 	}
 	if len(history) > 0 {
-		result.HistoryMessages = decorateHistoryMessages(history)
+		result.HistoryMessages = history
 	}
 
 	return result, nil

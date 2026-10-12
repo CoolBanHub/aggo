@@ -3,6 +3,7 @@ package builtin_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -275,5 +276,65 @@ func TestCloseFlushesPendingDebounceWindows(t *testing.T) {
 	after := mgr.GetTaskQueueStats().ProcessedTasks
 	if after <= before {
 		t.Fatalf("pending debounce window was dropped at shutdown: processed %d -> %d", before, after)
+	}
+}
+
+// A queued write creates its debounce window only after Flush/Shutdown has
+// begun. Both operations must include that window and all its child work.
+func TestLifecycleDrainsChildrenOfQueuedWrite(t *testing.T) {
+	for _, shutdown := range []bool{false, true} {
+		t.Run(fmt.Sprintf("shutdown=%v", shutdown), func(t *testing.T) {
+			mgr := newLifecycleManager(t, func(cfg *builtin.MemoryConfig) {
+				cfg.EnableUserMemories = true
+				cfg.AsyncWorkerPoolSize = 1
+				cfg.DebounceWindowSeconds = intPtr(60)
+			})
+			defer mgr.Close()
+			started, release := make(chan struct{}), make(chan struct{})
+			if err := mgr.EnqueueTask("block", "u", "s", func(context.Context) { close(started); <-release }); err != nil {
+				t.Fatal(err)
+			}
+			<-started
+			if err := mgr.EnqueueTask("memorize", "u", "s", func(ctx context.Context) {
+				if err := mgr.ProcessUserMessage(ctx, "u", "s", "hello", nil); err != nil {
+					t.Error(err)
+				}
+				if err := mgr.ProcessAssistantMessage(ctx, "u", "s", "reply"); err != nil {
+					t.Error(err)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if shutdown {
+					done <- mgr.Shutdown(ctx)
+				} else {
+					done <- mgr.Flush(ctx)
+				}
+			}()
+			if shutdown {
+				// Establish the stopping state without relying on goroutine scheduling.
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+				_ = mgr.Shutdown(ctx)
+				cancel()
+			} else {
+				select {
+				case err := <-done:
+					t.Fatalf("Flush returned early: %v", err)
+				case <-time.After(20 * time.Millisecond):
+				}
+			}
+			close(release)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			stats := mgr.GetTaskQueueStats()
+			if stats.ProcessedTasks < 3 || stats.RejectedTasks != 0 {
+				t.Fatalf("analysis child was lost: %+v", stats)
+			}
+		})
 	}
 }

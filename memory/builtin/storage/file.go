@@ -14,7 +14,8 @@ import (
 )
 
 // FileStore 基于文件的记忆存储实现
-// 分三个文件分别存储不同类型的数据，并在新增消息时支持修剪历史避免文件无限增长。
+// 按数据类型分文件保存。写入使用完整候选快照与原子替换，
+// 消息文件较大或写入频繁时建议使用 SQL 存储。
 type FileStore struct {
 	*MemoryStore
 	dirPath            string
@@ -142,288 +143,161 @@ func (f *FileStore) load() error {
 	return nil
 }
 
-// saveToFileB 原子的写入文件
-func (f *FileStore) saveToFileB(name string, b []byte) error {
-	filePath := f.getFilePath(name)
-	tmpFile := filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, b, 0644); err != nil {
+// mutate serializes the entire mutation, persistence and publication. Readers
+// keep seeing the committed snapshot until Rename succeeds. A failed write
+// leaves both the in-memory store and its previous file intact.
+func (f *FileStore) mutate(ctx context.Context, name string, change func(*MemoryStore) error) error {
+	f.fileMu.Lock()
+	defer f.fileMu.Unlock()
+	f.MemoryStore.mu.Lock()
+	defer f.MemoryStore.mu.Unlock()
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return os.Rename(tmpFile, filePath)
-}
-
-// saveUserMemories 重新全量保存用户记忆到 JSONL 文件
-func (f *FileStore) saveUserMemories() error {
-	f.MemoryStore.mu.RLock()
-	var lines []string
-	for _, mem := range f.MemoryStore.userMemories {
-		if b, err := json.Marshal(mem); err == nil {
-			lines = append(lines, string(b))
+	candidate := NewMemoryStore()
+	// Clone only the affected table; unrelated committed maps are untouched.
+	candidate.userMemories = f.userMemories
+	candidate.sessionSummaries = f.sessionSummaries
+	candidate.messages = f.messages
+	candidate.userMemoryEvents = f.userMemoryEvents
+	switch name {
+	case "user_memories":
+		candidate.userMemories = make(map[string]*builtin.UserMemory, len(f.userMemories))
+		for k, v := range f.userMemories {
+			candidate.userMemories[k] = cloneUserMemory(v)
 		}
-	}
-	f.MemoryStore.mu.RUnlock()
-
-	data := []byte(strings.Join(lines, "\n") + "\n")
-	if len(lines) == 0 {
-		data = []byte("")
-	}
-
-	f.fileMu.Lock()
-	defer f.fileMu.Unlock()
-	return f.saveToFileB("user_memories", data)
-}
-
-// saveSessionSummaries 重新全量保存会话摘要到 JSONL 文件
-func (f *FileStore) saveSessionSummaries() error {
-	f.MemoryStore.mu.RLock()
-	var lines []string
-	for _, summary := range f.MemoryStore.sessionSummaries {
-		if b, err := json.Marshal(summary); err == nil {
-			lines = append(lines, string(b))
+	case "session_summaries":
+		candidate.sessionSummaries = make(map[string]*builtin.SessionSummary, len(f.sessionSummaries))
+		for k, v := range f.sessionSummaries {
+			candidate.sessionSummaries[k] = cloneSessionSummary(v)
 		}
-	}
-	f.MemoryStore.mu.RUnlock()
-
-	data := []byte(strings.Join(lines, "\n") + "\n")
-	if len(lines) == 0 {
-		data = []byte("")
-	}
-
-	f.fileMu.Lock()
-	defer f.fileMu.Unlock()
-	return f.saveToFileB("session_summaries", data)
-}
-
-// appendSessionSummary 增量追加单条会话摘要到 JSONL 文件结尾
-func (f *FileStore) appendSessionSummary(summary *builtin.SessionSummary) error {
-	b, err := json.Marshal(summary)
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-
-	f.fileMu.Lock()
-	defer f.fileMu.Unlock()
-
-	filePath := f.getFilePath("session_summaries")
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	_, err = file.Write(b)
-	return err
-}
-
-// saveMessages 重新全量保存对话消息到 JSONL 文件
-func (f *FileStore) saveMessages() error {
-	f.MemoryStore.mu.RLock()
-	var lines []string
-	for _, sessionMsgs := range f.MemoryStore.messages {
-		for _, msg := range sessionMsgs {
-			if b, err := json.Marshal(msg); err == nil {
-				lines = append(lines, string(b))
+	case "messages":
+		candidate.messages = make(map[string][]*builtin.ConversationMessage, len(f.messages))
+		for k, list := range f.messages {
+			for _, v := range list {
+				candidate.messages[k] = append(candidate.messages[k], cloneConversationMessage(v))
 			}
 		}
+	case "user_memory_events":
+		candidate.userMemoryEvents = make(map[string][]*builtin.UserMemoryEvent, len(f.userMemoryEvents))
+		for k, list := range f.userMemoryEvents {
+			candidate.userMemoryEvents[k] = cloneEventSlice(list)
+		}
+	default:
+		return fmt.Errorf("unknown memory file: %s", name)
 	}
-	f.MemoryStore.mu.RUnlock()
-
-	// 拼接所有行，加换行符
-	data := []byte(strings.Join(lines, "\n") + "\n")
-	if len(lines) == 0 {
-		data = []byte("")
+	if err := change(candidate); err != nil {
+		return err
 	}
-
-	f.fileMu.Lock()
-	defer f.fileMu.Unlock()
-	return f.saveToFileB("messages", data)
+	var records []any
+	switch name {
+	case "user_memories":
+		for _, v := range candidate.userMemories {
+			records = append(records, v)
+		}
+	case "session_summaries":
+		for _, v := range candidate.sessionSummaries {
+			records = append(records, v)
+		}
+	case "messages":
+		for _, list := range candidate.messages {
+			for _, v := range list {
+				records = append(records, v)
+			}
+		}
+	case "user_memory_events":
+		for _, list := range candidate.userMemoryEvents {
+			for _, v := range list {
+				records = append(records, v)
+			}
+		}
+	default:
+		return fmt.Errorf("unknown memory file: %s", name)
+	}
+	var data strings.Builder
+	encoder := json.NewEncoder(&data)
+	for _, record := range records {
+		if err := encoder.Encode(record); err != nil {
+			return err
+		}
+	}
+	if err := f.saveToFileB(name, []byte(data.String())); err != nil {
+		return err
+	}
+	f.userMemories = candidate.userMemories
+	f.sessionSummaries = candidate.sessionSummaries
+	f.messages = candidate.messages
+	f.userMemoryEvents = candidate.userMemoryEvents
+	return nil
 }
 
-// appendMessage 增量追加单条对话消息到 JSONL 文件结尾
-func (f *FileStore) appendMessage(msg *builtin.ConversationMessage) error {
-	b, err := json.Marshal(msg)
+func (f *FileStore) saveToFileB(name string, data []byte) error {
+	path := f.getFilePath(name)
+	tmp := path + ".tmp"
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
-	b = append(b, '\n')
-
-	f.fileMu.Lock()
-	defer f.fileMu.Unlock()
-
-	filePath := f.getFilePath("messages")
-	// 追加模式打开文件
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
+	defer os.Remove(tmp)
+	if _, err = file.Write(data); err != nil {
+		_ = file.Close()
 		return err
 	}
-	defer file.Close()
-
-	_, err = file.Write(b)
-	return err
-}
-
-// === 下面覆写所有可能修改数据的方法，按对应的表分离落地存储 ===
-
-// UpsertUserMemory 创建或更新用户记忆
-// 由于每个用户只有一条记录，直接全量重写文件（记录数极少，开销可忽略）
-func (f *FileStore) UpsertUserMemory(ctx context.Context, userMemory *builtin.UserMemory) error {
-	if err := f.MemoryStore.UpsertUserMemory(ctx, userMemory); err != nil {
+	if err = file.Sync(); err != nil {
+		_ = file.Close()
 		return err
 	}
-	return f.saveUserMemories()
+	if err = file.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(tmp, path); err != nil {
+		return err
+	}
+	if dir, err := os.Open(f.dirPath); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
 }
 
-// ClearUserMemory 清空用户记忆
+func (f *FileStore) UpsertUserMemory(ctx context.Context, v *builtin.UserMemory) error {
+	return f.mutate(ctx, "user_memories", func(s *MemoryStore) error { return s.UpsertUserMemory(ctx, v) })
+}
 func (f *FileStore) ClearUserMemory(ctx context.Context, userID string) error {
-	if err := f.MemoryStore.ClearUserMemory(ctx, userID); err != nil {
-		return err
-	}
-	return f.saveUserMemories()
+	return f.mutate(ctx, "user_memories", func(s *MemoryStore) error { return s.ClearUserMemory(ctx, userID) })
 }
-
-// SaveSessionSummary 保存会话摘要
-// 追加写文件的是落库快照（含存储侧生成的时间戳），与内存态一致
-func (f *FileStore) SaveSessionSummary(ctx context.Context, summary *builtin.SessionSummary) error {
-	f.MemoryStore.mu.Lock()
-	stored, err := f.MemoryStore.putSessionSummary(summary)
-	f.MemoryStore.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	return f.appendSessionSummary(stored)
+func (f *FileStore) SaveSessionSummary(ctx context.Context, v *builtin.SessionSummary) error {
+	return f.mutate(ctx, "session_summaries", func(s *MemoryStore) error { return s.SaveSessionSummary(ctx, v) })
 }
-
-func (f *FileStore) UpdateSessionSummary(ctx context.Context, summary *builtin.SessionSummary) error {
-	f.MemoryStore.mu.Lock()
-	stored, err := f.MemoryStore.updateSessionSummaryLocked(summary)
-	f.MemoryStore.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	return f.appendSessionSummary(stored)
+func (f *FileStore) UpdateSessionSummary(ctx context.Context, v *builtin.SessionSummary) error {
+	return f.mutate(ctx, "session_summaries", func(s *MemoryStore) error { return s.UpdateSessionSummary(ctx, v) })
 }
-
-func (f *FileStore) DeleteSessionSummary(ctx context.Context, sessionID string, userID string) error {
-	if err := f.MemoryStore.DeleteSessionSummary(ctx, sessionID, userID); err != nil {
-		return err
-	}
-	return f.saveSessionSummaries()
+func (f *FileStore) DeleteSessionSummary(ctx context.Context, sessionID, userID string) error {
+	return f.mutate(ctx, "session_summaries", func(s *MemoryStore) error { return s.DeleteSessionSummary(ctx, sessionID, userID) })
 }
-
-func (f *FileStore) SaveMessage(ctx context.Context, message *builtin.ConversationMessage) error {
-	// 复用内存写入逻辑并拿到落库快照（含生成的 ID/时间戳），追加写文件与其一致
-	f.MemoryStore.mu.Lock()
-	stored, err := f.MemoryStore.putMessage(message)
-	f.MemoryStore.mu.Unlock()
-	if err != nil {
-		return err
-	}
-
-	// 控制消息最大保存数量
-	needRewrite := false
-	if f.maxSessionMessages > 0 {
-		count, _ := f.MemoryStore.GetMessageCount(ctx, message.UserID, message.SessionID)
-		if count > f.maxSessionMessages {
-			_ = f.MemoryStore.CleanupMessagesByLimit(ctx, message.UserID, message.SessionID, f.maxSessionMessages)
-			needRewrite = true
+func (f *FileStore) SaveMessage(ctx context.Context, v *builtin.ConversationMessage) error {
+	return f.mutate(ctx, "messages", func(s *MemoryStore) error {
+		if err := s.SaveMessage(ctx, v); err != nil {
+			return err
 		}
-	}
-
-	if needRewrite {
-		return f.saveMessages() // 超过限额裁剪后，必须重写全量文件
-	}
-	return f.appendMessage(stored) // 未超过额度时，直接以追加形式写入磁盘，O(1) 复杂度
+		return s.CleanupMessagesByLimit(ctx, v.UserID, v.SessionID, f.maxSessionMessages)
+	})
 }
-
-func (f *FileStore) DeleteMessages(ctx context.Context, sessionID string, userID string) error {
-	if err := f.MemoryStore.DeleteMessages(ctx, sessionID, userID); err != nil {
-		return err
-	}
-	return f.saveMessages()
+func (f *FileStore) DeleteMessages(ctx context.Context, sessionID, userID string) error {
+	return f.mutate(ctx, "messages", func(s *MemoryStore) error { return s.DeleteMessages(ctx, sessionID, userID) })
 }
-
 func (f *FileStore) CleanupOldMessages(ctx context.Context, userID string, before time.Time) error {
-	if err := f.MemoryStore.CleanupOldMessages(ctx, userID, before); err != nil {
-		return err
-	}
-	return f.saveMessages()
+	return f.mutate(ctx, "messages", func(s *MemoryStore) error { return s.CleanupOldMessages(ctx, userID, before) })
 }
-
-func (f *FileStore) CleanupMessagesByLimit(ctx context.Context, userID, sessionID string, keepLimit int) error {
-	if err := f.MemoryStore.CleanupMessagesByLimit(ctx, userID, sessionID, keepLimit); err != nil {
-		return err
-	}
-	return f.saveMessages()
+func (f *FileStore) CleanupMessagesByLimit(ctx context.Context, userID, sessionID string, limit int) error {
+	return f.mutate(ctx, "messages", func(s *MemoryStore) error { return s.CleanupMessagesByLimit(ctx, userID, sessionID, limit) })
 }
-
-// saveUserMemoryEvents 重新全量保存用户记忆事件到 JSONL 文件
-func (f *FileStore) saveUserMemoryEvents() error {
-	f.MemoryStore.mu.RLock()
-	var lines []string
-	for _, list := range f.MemoryStore.userMemoryEvents {
-		for _, evt := range list {
-			if b, err := json.Marshal(evt); err == nil {
-				lines = append(lines, string(b))
-			}
-		}
-	}
-	f.MemoryStore.mu.RUnlock()
-
-	data := []byte(strings.Join(lines, "\n") + "\n")
-	if len(lines) == 0 {
-		data = []byte("")
-	}
-
-	f.fileMu.Lock()
-	defer f.fileMu.Unlock()
-	return f.saveToFileB("user_memory_events", data)
+func (f *FileStore) SaveUserMemoryEvent(ctx context.Context, v *builtin.UserMemoryEvent) error {
+	return f.mutate(ctx, "user_memory_events", func(s *MemoryStore) error { return s.SaveUserMemoryEvent(ctx, v) })
 }
-
-// appendUserMemoryEvent 增量追加单条事件到 JSONL 文件
-func (f *FileStore) appendUserMemoryEvent(evt *builtin.UserMemoryEvent) error {
-	b, err := json.Marshal(evt)
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n')
-
-	f.fileMu.Lock()
-	defer f.fileMu.Unlock()
-
-	filePath := f.getFilePath("user_memory_events")
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	_, err = file.Write(b)
-	return err
-}
-
-// SaveUserMemoryEvent 内存写入后追加持久化（写文件的是落库快照）
-func (f *FileStore) SaveUserMemoryEvent(ctx context.Context, event *builtin.UserMemoryEvent) error {
-	f.MemoryStore.mu.Lock()
-	stored, err := f.MemoryStore.putUserMemoryEvent(event)
-	f.MemoryStore.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	return f.appendUserMemoryEvent(stored)
-}
-
-// DeleteUserMemoryEvent 删除后全量重写
 func (f *FileStore) DeleteUserMemoryEvent(ctx context.Context, userID, eventID string) error {
-	if err := f.MemoryStore.DeleteUserMemoryEvent(ctx, userID, eventID); err != nil {
-		return err
-	}
-	return f.saveUserMemoryEvents()
+	return f.mutate(ctx, "user_memory_events", func(s *MemoryStore) error { return s.DeleteUserMemoryEvent(ctx, userID, eventID) })
 }
-
-// ClearUserMemoryEvents 清空后全量重写
 func (f *FileStore) ClearUserMemoryEvents(ctx context.Context, userID string) error {
-	if err := f.MemoryStore.ClearUserMemoryEvents(ctx, userID); err != nil {
-		return err
-	}
-	return f.saveUserMemoryEvents()
+	return f.mutate(ctx, "user_memory_events", func(s *MemoryStore) error { return s.ClearUserMemoryEvents(ctx, userID) })
 }

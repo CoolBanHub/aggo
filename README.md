@@ -437,7 +437,7 @@ import (
     "github.com/CoolBanHub/aggo/tools/database"
 )
 
-// 默认只允许 SELECT/SHOW/DESCRIBE/EXPLAIN/PRAGMA/WITH 等只读查询
+// 默认只允许 单条 SELECT/SHOW/DESCRIBE/EXPLAIN SELECT 查询
 dbTools := tools.GetDatabaseTools(gormDB)
 
 // 如确需写操作，必须显式开启
@@ -723,8 +723,10 @@ cron 工具的任务归属解析顺序为 `actorID → userID → sessionID`；
 
 ### 其他安全相关行为
 
-- **数据库工具**：默认只放行单条 `SELECT/SHOW/DESCRIBE/EXPLAIN/PRAGMA`；
-  CTE（`WITH`）与多语句默认视为不安全，需要 `WithAllowWrite(true)` 显式放行。
+- **数据库工具**：默认只放行单条 `SELECT/SHOW/DESCRIBE/EXPLAIN SELECT`；
+  CTE（`WITH`）、多语句、PRAGMA、EXPLAIN ANALYZE、SELECT INTO 默认拒绝；
+  PostgreSQL/MySQL 使用只读事务，SQLite 使用连接级 query_only。
+  只读模式须传入非事务的数据库句柄；需要写操作时显式开启 `WithAllowWrite(true)`。
 - **SSE Writer**：并发写入安全（帧不交错），`Close` 幂等，
   关闭后的写入返回 `ErrWriterClosed` 而不是静默丢弃。
 - **cron 分布式锁**：加锁与解锁使用独立的 context/超时

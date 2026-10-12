@@ -202,7 +202,7 @@ func PrefixHistoryTimestamp(msg *schema.AgenticMessage) *schema.AgenticMessage {
 	return agmsg.PrependText(msg, fmt.Sprintf("[%s] ", formatted))
 }
 
-func enqueueIndexTask(manager *MemoryManager, msg *ConversationMessage) {
+func enqueueIndexTask(ctx context.Context, manager *MemoryManager, msg *ConversationMessage) {
 	if manager == nil || manager.searcher == nil {
 		return
 	}
@@ -210,7 +210,8 @@ func enqueueIndexTask(manager *MemoryManager, msg *ConversationMessage) {
 	cfg := cloneMemoryConfig(manager.configSnapshot())
 	searchCfg := normalizeSearchConfig(cfg.Search)
 	if searchCfg.AsyncIndex {
-		submitted := manager.submitAsyncTask(asyncTask{
+		submitted := manager.submitAsyncTaskRaw(asyncTask{
+			internal:  ctx.Value(managedTaskContextKey{}) == manager,
 			taskType:  "index",
 			userID:    msg.UserID,
 			sessionID: msg.SessionID,
@@ -222,7 +223,7 @@ func enqueueIndexTask(manager *MemoryManager, msg *ConversationMessage) {
 		return
 	}
 
-	if err := manager.searcher.Index(context.Background(), toSearchMessage(msg)); err != nil {
+	if err := manager.searcher.Index(ctx, toSearchMessage(msg)); err != nil {
 		slog.Errorf("同步建立搜索索引失败: sessionID=%s, userID=%s, err=%v", msg.SessionID, msg.UserID, err)
 	}
 }

@@ -58,9 +58,10 @@ type MemoryManager struct {
 	// 生命周期状态。state 与 submitMu 配合：
 	// 提交任务时在 submitMu 内检查 state，Shutdown 切换状态时也持有 submitMu，
 	// 保证“通过检查的任务必然已入队”，不会出现提交后无人处理。
-	state    atomic.Uint32
-	submitMu sync.Mutex
-	// inFlight 统计正在执行（已出队）的任务，Flush 依据其归零判断队列静止
+	lifecycleMu sync.Mutex
+	state       atomic.Uint32
+	submitMu    sync.Mutex
+	// inFlight 统计排队、执行中任务和 debounce 窗口，Flush 等待其归零
 	inFlight atomic.Int64
 
 	// shutdownDone 在 doShutdown 完成后关闭；shutdownErr 保存其结果
@@ -92,11 +93,19 @@ type MemoryManager struct {
 }
 
 // asyncTask 异步任务结构
+type managedTaskContextKey struct{}
+
+type pendingMemoryTimer struct {
+	timer *time.Timer
+}
+
 type asyncTask struct {
-	taskType  string // "memory" / "summary" / "index" / 自定义
-	userID    string
-	sessionID string
-	message   *ConversationMessage
+	internal     bool
+	deduplicated bool
+	taskType     string // "memory" / "summary" / "index" / 自定义
+	userID       string
+	sessionID    string
+	message      *ConversationMessage
 	// run 非空时执行该函数（EnqueueTask 提交的自定义任务），
 	// 不参与 (taskType,userID,sessionID) 去重。
 	run func(ctx context.Context)
@@ -224,7 +233,9 @@ func (m *MemoryManager) startAsyncWorkers() {
 func (m *MemoryManager) runQueuedTask(task asyncTask) {
 	// 任务已取出准备处理，从排队重标记中移除，允许同类新任务入队
 	taskKey := asyncTaskKey{taskType: task.taskType, userID: task.userID, sessionID: task.sessionID}
-	m.pendingTasks.Delete(taskKey)
+	if task.deduplicated {
+		m.pendingTasks.Delete(taskKey)
+	}
 
 	// inFlight 在提交时增加，这里在任务实际执行完毕后减少
 	defer m.inFlight.Add(-1)
@@ -235,6 +246,7 @@ func (m *MemoryManager) runQueuedTask(task asyncTask) {
 
 // submitAsyncTask 提交异步任务，带队列重防抖功能
 func (m *MemoryManager) submitAsyncTask(task asyncTask) bool {
+	task.deduplicated = true
 	taskKey := asyncTaskKey{taskType: task.taskType, userID: task.userID, sessionID: task.sessionID}
 	// 如果相同签名（任务类型+用户+会话）的任务已在队列中，则丢弃当前重复提交，节省开销
 	if _, loaded := m.pendingTasks.LoadOrStore(taskKey, struct{}{}); loaded {
@@ -255,10 +267,11 @@ func (m *MemoryManager) submitAsyncTaskRaw(task asyncTask) bool {
 	// 与 Shutdown 的状态切换互斥：通过检查的任务必然完成入队，
 	// 不会出现“已排空退出后仍有任务滞留队列”的窗口。
 	m.submitMu.Lock()
-	defer m.submitMu.Unlock()
 
-	if managerState(m.state.Load()) != managerRunning {
+	state := managerState(m.state.Load())
+	if state == managerClosed || (state == managerStopping && !task.internal) {
 		atomic.AddInt64(&m.taskQueueStats.RejectedTasks, 1)
+		m.submitMu.Unlock()
 		return false
 	}
 
@@ -268,8 +281,16 @@ func (m *MemoryManager) submitAsyncTaskRaw(task asyncTask) bool {
 	m.inFlight.Add(1)
 	select {
 	case m.taskChannel <- task:
+		m.submitMu.Unlock()
 		return true
 	default:
+		m.submitMu.Unlock()
+		// Accepted work may produce more work with every worker occupied.
+		// Run its child inline instead of blocking or dropping it on overflow.
+		if task.internal {
+			m.runQueuedTask(task)
+			return true
+		}
 		m.inFlight.Add(-1)
 		// 队列满，增加丢弃计数
 		atomic.AddInt64(&m.taskQueueStats.DroppedTasks, 1)
@@ -303,22 +324,20 @@ func (m *MemoryManager) EnqueueTask(taskType, userID, sessionID string, fn func(
 	return nil
 }
 
-// Flush 等待已接受的任务全部完成：先触发未到期的 debounce 定时器，
-// 再等待队列排空且没有正在执行的任务。ctx 取消时返回错误。
+// Flush waits for queued work, running work and debounce windows, including
+// child tasks created by accepted Memorize requests while Flush is waiting.
 func (m *MemoryManager) Flush(ctx context.Context) error {
 	if managerState(m.state.Load()) == managerClosed {
 		return ErrMemoryClosed
 	}
-
-	// 触发未到期的聚合窗口，使 Flush 覆盖“已接受但还在 debounce 等待”的记忆请求
-	m.firePendingDebounceTimers()
-
 	ticker := time.NewTicker(2 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		// inFlight 在提交时增加、执行完毕后减少，
-		// 为 0 表示已接受的任务（排队中或执行中）全部完成
-		if m.inFlight.Load() == 0 {
+		m.firePendingDebounceTimers()
+		m.submitMu.Lock()
+		idle := m.inFlight.Load() == 0
+		m.submitMu.Unlock()
+		if idle {
 			return nil
 		}
 		select {
@@ -349,20 +368,20 @@ func (m *MemoryManager) Shutdown(ctx context.Context) error {
 	}
 }
 
-// doShutdown 执行实际关闭流程，只应被调用一次。
-// 关闭顺序：停止入口 → 停止 debounce 定时器 → 排空队列并等待 worker →
-// 停止定期清理 → 关闭底层存储。
+// doShutdown rejects external work, drains accepted tasks and their children,
+// then stops workers and cleanup before closing storage.
 func (m *MemoryManager) doShutdown() {
-	// Convert pending debounce windows into queue tasks before stopping workers.
-	// These requests were already accepted by the middleware and must not be
-	// lost merely because their debounce duration has not elapsed.
-	m.flushPendingDebounceTimersForShutdown()
-	m.stopMemoryTimers()
-
-	// 通知 worker 退出；worker 会先排空队列再返回
+	// Keep workers alive until accepted work and all its descendants finish.
+	_ = m.Flush(context.Background())
 	m.cancel()
 	m.wg.Wait()
 
+	// Configuration updates may be waiting for a cleanup callback to finish.
+	// Wait for that work only in this background shutdown, so each Shutdown
+	// caller can still return when its context expires. The lifecycle lock also
+	// prevents a cleanup restart from racing cleanupWg.Wait or storage.Close.
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	// 停止定期清理任务
 	m.cleanupMu.Lock()
 	cleanupCancel := m.cleanupCancel
@@ -380,114 +399,64 @@ func (m *MemoryManager) Close() error {
 	return m.Shutdown(context.Background())
 }
 
-// stopMemoryTimers 停止所有聚合定时器
-func (m *MemoryManager) stopMemoryTimers() {
-	m.memoryTimers.Range(func(key, value any) bool {
-		if timer, ok := value.(*time.Timer); ok {
-			timer.Stop()
-		}
-		m.memoryTimers.Delete(key)
-		return true
-	})
-}
-
-// firePendingDebounceTimers 立即触发未到期的聚合定时器对应的任务。
-// 使用带去重的 submitAsyncTask，与定时器回调本身的提交互斥，不会重复入队。
-func (m *MemoryManager) firePendingDebounceTimers() {
-	m.memoryTimers.Range(func(key, value any) bool {
-		timerKey, ok := key.(memoryTimerKey)
-		if !ok {
-			return true
-		}
-		if timer, ok := value.(*time.Timer); ok {
-			timer.Stop()
-		}
-		m.memoryTimers.Delete(timerKey)
-
-		submitted := m.submitAsyncTask(asyncTask{
-			taskType:  "memory",
-			userID:    timerKey.userID,
-			sessionID: timerKey.sessionID,
-		})
-		if !submitted {
-			slog.Errorf("Flush 触发聚合任务失败: userID=%s sessionID=%s", timerKey.userID, timerKey.sessionID)
-		}
-		return true
-	})
-}
-
-func (m *MemoryManager) flushPendingDebounceTimersForShutdown() {
-	m.memoryTimers.Range(func(key, value any) bool {
-		timerKey, ok := key.(memoryTimerKey)
-		if !ok {
-			return true
-		}
-		if timer, ok := value.(*time.Timer); ok {
-			timer.Stop()
-		}
-		m.memoryTimers.Delete(key)
-		// state 已单向进入 stopping（只有 doShutdown 会推进到 closed，
-		// 且发生在本方法之后），无需再与提交门互斥。注意：不能在持有
-		// submitMu 时阻塞发送——队列满且所有 worker 恰好都卡在需要
-		// submitMu 的路径上时（如并发的 memorize 任务），会互相等待造成死锁。
-		if managerState(m.state.Load()) != managerStopping {
-			return true
-		}
-		// Workers remain alive until after this method returns, so blocking
-		// here when the queue is full preserves the accepted task.
-		m.inFlight.Add(1)
-		m.taskChannel <- asyncTask{taskType: "memory", userID: timerKey.userID, sessionID: timerKey.sessionID}
-		return true
-	})
-}
-
-// scheduleMemoryTask 调度记忆分析任务，支持聚合窗口（debounce）
-// 首次请求后启动 debounceWindow 定时器，期间的新请求不重置定时器，到期统一处理一次
-func (m *MemoryManager) scheduleMemoryTask(userID, sessionID string) {
-	m.configMu.RLock()
-	debounceWindow := m.debounceWindow
-	m.configMu.RUnlock()
-	// debounceWindow 为 0 时，保持原有行为：立即提交
-	if debounceWindow <= 0 {
-		submitted := m.submitAsyncTask(asyncTask{
-			taskType:  "memory",
-			userID:    userID,
-			sessionID: sessionID,
-		})
-		if !submitted {
-			slog.Errorf("警告: 用户记忆分析队列已满，跳过处理: userID=%s\n", userID)
-		}
-		return
-	}
-
-	timerKey := memoryTimerKey{userID: userID, sessionID: sessionID}
-
-	// Coordinate timer creation with Shutdown's state transition. Without this
-	// gate a request can create a timer after shutdown has already flushed the
-	// timer map, and its analysis would then be rejected and lost.
+// fireMemoryTimer transfers a counted debounce window to the worker queue.
+// On overflow the timer retries without running analysis outside the worker
+// pool, including after a caller's Flush has timed out.
+func (m *MemoryManager) fireMemoryTimer(key memoryTimerKey, pending *pendingMemoryTimer) {
 	m.submitMu.Lock()
 	defer m.submitMu.Unlock()
-	if managerState(m.state.Load()) != managerRunning {
+	if current, ok := m.memoryTimers.Load(key); !ok || current != pending {
 		return
 	}
-	// 如果已有定时器，说明窗口内已有一次请求在等待，直接返回
-	if _, loaded := m.memoryTimers.Load(timerKey); loaded {
-		return
+	task := asyncTask{taskType: "memory", userID: key.userID, sessionID: key.sessionID, internal: true}
+	select {
+	case m.taskChannel <- task:
+		pending.timer.Stop()
+		m.memoryTimers.Delete(key)
+	default:
+		// Keep the window counted and arrange a future attempt even if no
+		// Flush caller remains. Only a successful queue transfer stops it.
+		pending.timer.Reset(2 * time.Millisecond)
 	}
+}
 
-	// 启动延迟定时器
-	timer := time.AfterFunc(debounceWindow, func() {
-		m.memoryTimers.Delete(timerKey)
-		submitted := m.submitAsyncTask(asyncTask{
-			taskType:  "memory",
-			userID:    userID,
-			sessionID: sessionID,
-		})
-		if !submitted {
-			slog.Errorf("警告: 用户记忆分析队列已满，跳过处理: userID=%s\n", userID)
-		}
+func (m *MemoryManager) firePendingDebounceTimers() {
+	m.memoryTimers.Range(func(key, value any) bool {
+		m.fireMemoryTimer(key.(memoryTimerKey), value.(*pendingMemoryTimer))
+		return true
 	})
-	m.memoryTimers.Store(timerKey, timer)
+}
+
+func (m *MemoryManager) submitChildTask(ctx context.Context, task asyncTask) bool {
+	task.internal = ctx.Value(managedTaskContextKey{}) == m
+	return m.submitAsyncTask(task)
+}
+
+// scheduleMemoryTask counts the debounce window when it is accepted, rather
+// than only counting its later queue submission.
+func (m *MemoryManager) scheduleMemoryTask(ctx context.Context, userID, sessionID string) {
+	m.configMu.RLock()
+	window := m.debounceWindow
+	m.configMu.RUnlock()
+	if window <= 0 {
+		m.submitChildTask(ctx, asyncTask{taskType: "memory", userID: userID, sessionID: sessionID})
+		return
+	}
+	key := memoryTimerKey{userID: userID, sessionID: sessionID}
+	m.submitMu.Lock()
+	defer m.submitMu.Unlock()
+	state := managerState(m.state.Load())
+	internal := ctx.Value(managedTaskContextKey{}) == m
+	if state == managerClosed || (state == managerStopping && !internal) {
+		return
+	}
+	if _, exists := m.memoryTimers.Load(key); exists {
+		return
+	}
+	pending := &pendingMemoryTimer{}
+	m.inFlight.Add(1)
+	pending.timer = time.AfterFunc(window, func() { m.fireMemoryTimer(key, pending) })
+	m.memoryTimers.Store(key, pending)
 }
 
 // GetTaskQueueStats 获取异步任务队列统计
@@ -563,7 +532,7 @@ func (m *MemoryManager) performPeriodicCleanup(parentCtx context.Context) {
 func (m *MemoryManager) processAsyncTask(task asyncTask) {
 	// EnqueueTask 提交的自定义任务（如异步 Memorize）
 	if task.run != nil {
-		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), m.asyncTaskTimeout())
+		ctx, cancel := context.WithTimeout(context.WithValue(m.newAsyncTaskContext(task), managedTaskContextKey{}, m), m.asyncTaskTimeout())
 		defer cancel()
 		task.run(ctx)
 		return
@@ -571,20 +540,20 @@ func (m *MemoryManager) processAsyncTask(task asyncTask) {
 
 	switch task.taskType {
 	case "memory":
-		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), m.asyncTaskTimeout())
+		ctx, cancel := context.WithTimeout(context.WithValue(m.newAsyncTaskContext(task), managedTaskContextKey{}, m), m.asyncTaskTimeout())
 		defer cancel()
 		m.analyzeAndCreateUserMemory(ctx, task.userID, task.sessionID)
 	case "index":
 		if task.message == nil {
 			return
 		}
-		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), m.asyncTaskTimeout())
+		ctx, cancel := context.WithTimeout(context.WithValue(m.newAsyncTaskContext(task), managedTaskContextKey{}, m), m.asyncTaskTimeout())
 		defer cancel()
 		if err := m.searcher.Index(ctx, toSearchMessage(task.message)); err != nil {
 			slog.Errorf("异步建立搜索索引失败: sessionID=%s, userID=%s, err=%v\n", task.sessionID, task.userID, err)
 		}
 	case "summary":
-		ctx, cancel := context.WithTimeout(m.newAsyncTaskContext(task), m.asyncTaskTimeout())
+		ctx, cancel := context.WithTimeout(context.WithValue(m.newAsyncTaskContext(task), managedTaskContextKey{}, m), m.asyncTaskTimeout())
 		defer cancel()
 		err := m.updateSessionSummary(ctx, task.userID, task.sessionID)
 		if err != nil {
@@ -671,7 +640,7 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 		if err != nil {
 			slog.Errorf("检查摘要触发条件失败: %v\n", err)
 		} else if shouldTrigger {
-			submitted := m.submitAsyncTask(asyncTask{
+			submitted := m.submitChildTask(ctx, asyncTask{
 				taskType:  "summary",
 				userID:    userID,
 				sessionID: sessionID,
@@ -684,7 +653,7 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 
 	// 如果启用了用户记忆，分析消息并创建记忆（在AI回复后触发）
 	if cfg.EnableUserMemories {
-		m.scheduleMemoryTask(userID, sessionID)
+		m.scheduleMemoryTask(ctx, userID, sessionID)
 	}
 
 	return nil
@@ -966,7 +935,7 @@ func (m *MemoryManager) SaveMessage(ctx context.Context, message *ConversationMe
 	if err := m.storage.SaveMessage(ctx, &snapshot); err != nil {
 		return err
 	}
-	enqueueIndexTask(m, &snapshot)
+	enqueueIndexTask(ctx, m, &snapshot)
 	return nil
 }
 
@@ -1024,6 +993,8 @@ func (m *MemoryManager) configSnapshot() *MemoryConfig {
 
 // UpdateConfig 更新配置
 func (m *MemoryManager) UpdateConfig(config *MemoryConfig) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	if config == nil {
 		return
 	}
@@ -1078,6 +1049,14 @@ func (m *MemoryManager) UpdateConfig(config *MemoryConfig) {
 	m.cleanupWg.Wait()
 
 	// 启动新的定期清理任务
+	// Shutdown can transition to stopping while we wait for the old callback.
+	// Serialize the restart with that transition and leave canceled cleanup in
+	// place when shutdown has started.
+	m.submitMu.Lock()
+	defer m.submitMu.Unlock()
+	if managerState(m.state.Load()) != managerRunning {
+		return
+	}
 	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 	m.cleanupMu.Lock()
 	m.cleanupCtx = cleanupCtx

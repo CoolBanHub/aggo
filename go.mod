@@ -19,6 +19,8 @@ require (
 	github.com/meguminnnnnnnnn/go-openai v0.1.2
 	github.com/milvus-io/milvus/client/v2 v2.6.1
 	github.com/oklog/ulid/v2 v2.1.1
+	github.com/robfig/cron/v3 v3.0.1
+	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.30.2
 )
 
@@ -81,6 +83,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
+	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.3 // indirect
 	github.com/milvus-io/milvus/pkg/v2 v2.6.3 // indirect
@@ -99,7 +102,6 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
-	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/samber/lo v1.27.0 // indirect
 	github.com/shirou/gopsutil/v3 v3.23.12 // indirect

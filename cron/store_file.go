@@ -71,8 +71,8 @@ func (s *FileStore) load() error {
 	return json.Unmarshal(data, s.data)
 }
 
-func (s *FileStore) save() error {
-	data, err := json.MarshalIndent(s.data, "", "  ")
+func (s *FileStore) save(candidate *fileStoreData) error {
+	data, err := json.MarshalIndent(candidate, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -151,17 +151,26 @@ func (s *FileStore) Save(job *CronJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 查找是否存在，存在则更新
-	for i := range s.data.Jobs {
-		if s.data.Jobs[i].ID == job.ID {
-			s.data.Jobs[i] = *cloneJob(job)
-			return s.save()
+	if job == nil {
+		return fmt.Errorf("cron: nil job")
+	}
+	candidate := &fileStoreData{Version: s.data.Version, Jobs: append([]CronJob(nil), s.data.Jobs...)}
+	found := false
+	for i := range candidate.Jobs {
+		if candidate.Jobs[i].ID == job.ID {
+			candidate.Jobs[i] = *cloneJob(job)
+			found = true
+			break
 		}
 	}
-
-	// 不存在则新增
-	s.data.Jobs = append(s.data.Jobs, *cloneJob(job))
-	return s.save()
+	if !found {
+		candidate.Jobs = append(candidate.Jobs, *cloneJob(job))
+	}
+	if err := s.save(candidate); err != nil {
+		return err
+	}
+	s.data = candidate
+	return nil
 }
 
 // Delete 删除任务
@@ -183,6 +192,10 @@ func (s *FileStore) Delete(id string) error {
 		return fmt.Errorf("job %s not found", id)
 	}
 
-	s.data.Jobs = jobs
-	return s.save()
+	candidate := &fileStoreData{Version: s.data.Version, Jobs: jobs}
+	if err := s.save(candidate); err != nil {
+		return err
+	}
+	s.data = candidate
+	return nil
 }

@@ -193,7 +193,9 @@ provider, err := memory.GlobalRegistry().CreateProvider("builtin", &builtin.Prov
 `memory/builtin/storage/` 目前提供三种实现：
 
 - `storage.NewMemoryStore()`: 纯内存，适合测试或本地开发
-- `storage.NewFileStore(dir, maxSessionMessages)`: 基于 JSONL 文件
+- `storage.NewFileStore(dir, maxSessionMessages)`: 基于 JSONL 文件；写入序列化候选快照，
+  原子替换成功后才提交内存，写入失败保留原状态。每次写入重写对应文件，
+  数据量较大或写入频繁时建议使用 SQL 存储。
 - `storage.NewGormStorage(db)`: 基于 GORM，支持 MySQL / PostgreSQL / SQLite
 
 如果使用 SQL 存储，`NewMemoryManager` 在初始化时会自动执行 `AutoMigrate()`。
@@ -313,10 +315,12 @@ provider, err := memory.GlobalRegistry().CreateProvider("mem0", &mem0.ProviderCo
 `builtin.MemoryManager` 有明确的生命周期状态机（running → stopping → closed）：
 
 - `Close()` 幂等，并发/重复调用安全；内部执行 `Shutdown(context.Background())`
-- `Shutdown(ctx)` 按固定顺序关闭：停止接收新任务 → 停止聚合定时器 →
-  worker 排空已接受的任务 → 停止定期清理 → 关闭底层存储。
-  **已接受的记忆请求不会丢**
+- `Shutdown(ctx)` 按固定顺序关闭：停止接收新任务 → 排空已接受的任务及其
+  派生的分析、摘要和索引 → 停止 worker 与定期清理 → 关闭底层存储。
+  调用方超时后关闭流程继续在后台执行；后续可再次调用 `Shutdown` 或 `Close` 等待完成。
 - `Flush(ctx)` 触发未到期的聚合（debounce）窗口并等待已接受的任务全部完成；
+  超时不会取消待执行的聚合任务，队列恢复容量后会自动继续执行。
+  聚合分析始终由 worker 执行，队列满时重试入队。
   服务优雅退出前可先 `Flush` 再 `Close`
 - 关闭后提交任务返回 `builtin.ErrMemoryClosed`，不会向已关闭的结构写入
 

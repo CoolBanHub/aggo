@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-co-op/gocron/v2"
 	"github.com/google/uuid"
+	cronexpr "github.com/robfig/cron/v3"
 )
 
 // ErrJobNotFound 表示任务不存在，或任务存在但不属于当前调用者。
@@ -100,10 +101,14 @@ type CronService struct {
 	// jobWg 跟踪正在执行的任务回调，StopContext 等待其结束
 	jobWg sync.WaitGroup
 
-	// stopGen 由 mu 保护，每次进入 StopContext 的等待阶段时递增。
-	// 等待 goroutine 只在 generation 未被更新的 Stop 覆盖时复位 stopping，
-	// 避免“上一次超时的 Stop 迟到复位”破坏当前 Stop 的拒绝窗口。
-	stopGen uint64
+	stopResult *cronStopResult
+	runCtx     context.Context
+	runCancel  context.CancelFunc
+}
+
+type cronStopResult struct {
+	done chan struct{}
+	err  error
 }
 
 // NewCronService 创建定时调度服务
@@ -200,10 +205,14 @@ func (cs *CronService) Start() error {
 		return fmt.Errorf("failed to create gocron scheduler: %w", err)
 	}
 	cs.scheduler = s
+	cs.runCtx, cs.runCancel = context.WithCancel(context.Background())
 
 	// 加载并启动所有已启用的任务
 	jobs, err := cs.store.List()
 	if err != nil {
+		cs.runCancel()
+		_ = s.Shutdown()
+		cs.scheduler = nil
 		return fmt.Errorf("failed to list jobs from store: %w", err)
 	}
 
@@ -224,12 +233,15 @@ func (cs *CronService) Start() error {
 		}
 	}
 
-	cs.scheduler.Start()
-	cs.running = true
-
 	if len(startErrs) > 0 {
+		cs.runCancel()
+		_ = s.Shutdown()
+		cs.scheduler = nil
+		cs.jobIDToGocronID = make(map[string]uuid.UUID)
 		return fmt.Errorf("failed to start cron service: %w", errors.Join(startErrs...))
 	}
+	cs.scheduler.Start()
+	cs.running = true
 
 	return nil
 }
@@ -243,45 +255,60 @@ func (cs *CronService) Stop() {
 // 返回等待超时错误时，任务回调可能仍在后台执行。
 func (cs *CronService) StopContext(ctx context.Context) error {
 	cs.mu.Lock()
-	var s gocron.Scheduler
-	if cs.running {
-		s = cs.scheduler
+	if !cs.stopping {
+		cs.stopping = true
+		s := cs.scheduler
 		cs.scheduler = nil
 		cs.running = false
 		cs.jobIDToGocronID = make(map[string]uuid.UUID)
-	}
-	// Prevent callbacks that raced with a previous scheduler shutdown from
-	// registering themselves while Stop waits for the current executions.
-	cs.stopping = true
-	cs.stopGen++
-	gen := cs.stopGen
-	cs.mu.Unlock()
-
-	var shutdownErr error
-	if s != nil {
-		shutdownErr = s.Shutdown()
-	}
-
-	// 即便未处于 running 状态，也等待仍在执行的任务回调结束。
-	// waiting goroutine 在任务全部结束后复位 stopping——包括 StopContext
-	// 因 ctx 超时先返回的情况，否则 stopping 会永久为 true，服务无法再次 Start。
-	done := make(chan struct{})
-	go func() {
-		cs.jobWg.Wait()
-		cs.mu.Lock()
-		if cs.stopGen == gen {
-			cs.stopping = false
+		if cs.runCancel != nil {
+			cs.runCancel()
 		}
-		cs.mu.Unlock()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return shutdownErr
-	case <-ctx.Done():
-		return fmt.Errorf("cron: timed out waiting for running jobs: %w (scheduler shutdown: %v)", ctx.Err(), shutdownErr)
+		result := &cronStopResult{done: make(chan struct{})}
+		cs.stopResult = result
+		go func() {
+			var err error
+			if s != nil {
+				err = s.Shutdown()
+			}
+			cs.jobWg.Wait()
+			cs.mu.Lock()
+			result.err = err
+			cs.stopping = false
+			close(result.done)
+			cs.mu.Unlock()
+		}()
 	}
+	result := cs.stopResult
+	cs.mu.Unlock()
+	select {
+	case <-result.done:
+		return result.err
+	case <-ctx.Done():
+		return fmt.Errorf("cron: timed out waiting for running jobs: %w", ctx.Err())
+	}
+}
+
+// validateSchedule runs before persistence, including when the scheduler has
+// not started yet, so enabled jobs cannot silently become unschedulable.
+func validateSchedule(schedule CronSchedule) error {
+	switch schedule.Kind {
+	case "at":
+		if schedule.AtMS == nil || *schedule.AtMS <= time.Now().UnixMilli() {
+			return errors.New("atMs must be in the future")
+		}
+	case "every":
+		if schedule.EveryMS == nil || *schedule.EveryMS <= 0 || *schedule.EveryMS > int64((1<<63-1)/time.Millisecond) {
+			return errors.New("everyMs must be a positive duration")
+		}
+	case "cron":
+		if _, err := cronexpr.ParseStandard(schedule.Expr); err != nil {
+			return fmt.Errorf("invalid cron expression: %w", err)
+		}
+	default:
+		return fmt.Errorf("unknown schedule kind: %s", schedule.Kind)
+	}
+	return nil
 }
 
 func (cs *CronService) registerJobInScheduler(job *CronJob) error {
@@ -321,8 +348,8 @@ func (cs *CronService) registerJobInScheduler(job *CronJob) error {
 	}
 
 	// 包装执行逻辑，处理分布式锁和状态更新
-	task := func() {
-		cs.executeJob(job.ID)
+	task := func(ctx context.Context) {
+		cs.executeJobContext(ctx, job.ID)
 	}
 
 	gJob, err := cs.scheduler.NewJob(definition, gocron.NewTask(task))
@@ -348,6 +375,10 @@ func (cs *CronService) registerJobInScheduler(job *CronJob) error {
 }
 
 func (cs *CronService) executeJob(jobID string) {
+	cs.executeJobContext(context.Background(), jobID)
+}
+
+func (cs *CronService) executeJobContext(parent context.Context, jobID string) {
 	cs.mu.Lock()
 	job, err := cs.store.Get(jobID)
 	handler := cs.onJob
@@ -355,6 +386,7 @@ func (cs *CronService) executeJob(jobID string) {
 	lockTimeout := cs.lockTimeout
 	unlockTimeout := cs.unlockTimeout
 	jobCtxBuilder := cs.jobCtxBuilder
+	runCtx := cs.runCtx
 	if err == nil && job != nil && job.Enabled && !cs.stopping {
 		// Register the callback while holding the same lock Stop uses to enter
 		// its waiting phase. A callback that starts after stopping is rejected.
@@ -368,10 +400,22 @@ func (cs *CronService) executeJob(jobID string) {
 	}
 	cs.mu.Unlock()
 
-	jobCtx := context.Background()
+	baseCtx, cancelJob := context.WithCancel(parent)
+	defer cancelJob()
+	if runCtx != nil {
+		stopCancel := context.AfterFunc(runCtx, cancelJob)
+		defer stopCancel()
+	}
+	jobCtx := baseCtx
 	if jobCtxBuilder != nil {
-		if built := jobCtxBuilder(jobCtx, job); built != nil {
-			jobCtx = built
+		if built := jobCtxBuilder(baseCtx, job); built != nil {
+			// Preserve cancellation even when the builder returns a context
+			// unrelated to its argument.
+			builtCtx, cancelBuilt := context.WithCancel(built)
+			defer cancelBuilt()
+			stopCancel := context.AfterFunc(baseCtx, cancelBuilt)
+			defer stopCancel()
+			jobCtx = builtCtx
 		}
 	}
 	jobCtx = WithJobContext(jobCtx, job)
@@ -383,7 +427,7 @@ func (cs *CronService) executeJob(jobID string) {
 	// 避免任务执行超过锁超时后用已取消的 context 解锁。
 	if locker != nil {
 		lockKey := "cron_job_" + jobID
-		lockCtx, cancelLock := context.WithTimeout(context.Background(), lockTimeout)
+		lockCtx, cancelLock := context.WithTimeout(jobCtx, lockTimeout)
 		if err := locker.Lock(lockCtx, lockKey); err != nil {
 			cancelLock()
 			log.Printf("[cron] failed to acquire lock for job %s: %v", jobID, err)
@@ -472,6 +516,12 @@ func (cs *CronService) AddJob(name string, schedule CronSchedule, message string
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
+	if cs.stopping {
+		return nil, errors.New("cron: service is stopping")
+	}
+	if err := validateSchedule(schedule); err != nil {
+		return nil, err
+	}
 	// 检查任务数量上限
 	jobs, err := cs.store.List()
 	if err != nil {
@@ -518,8 +568,8 @@ func (cs *CronService) AddJob(name string, schedule CronSchedule, message string
 
 	if cs.running {
 		if err := cs.registerJobInScheduler(job); err != nil {
-			// 即使注册失败也返回 job，因为已经存入 store，下次启动会重试
-			log.Printf("[cron] failed to register new job in scheduler: %v", err)
+			rollbackErr := cs.store.Delete(job.ID)
+			return nil, errors.Join(fmt.Errorf("failed to register new job: %w", err), rollbackErr)
 		}
 	}
 

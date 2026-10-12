@@ -51,7 +51,11 @@ shellTools := aggotools.GetShellTools(
     shell.WithMaxTimeout(30*time.Second),
 )
 
-service := cronPkg.NewCronService(cronPkg.NewFileStore("cron_jobs.json"), nil)
+store, err := cronPkg.NewFileStoreWithError("cron_jobs.json")
+if err != nil {
+    return err
+}
+service := cronPkg.NewCronService(store, nil)
 cronTools := aggotools.GetCronTools(service)
 
 allTools := append([]tool.BaseTool{}, knowledgeTools...)
@@ -63,8 +67,8 @@ allTools = append(allTools, cronTools...)
 
 ## 安全边界
 
-- `database_execute` 默认只允许 `SELECT`、`SHOW`、`DESCRIBE`、`EXPLAIN`、`PRAGMA`、`WITH` 等只读语句。需要写操作时使用 `database.WithAllowWrite(true)`。
-- `database_execute` 可以用 `database.WithMaxResultRows(...)` 和 `database.WithTimeout(...)` 限制结果规模和执行时间。
+- `database_execute` 默认只允许单条 `SELECT`、`SHOW`、`DESCRIBE`、`EXPLAIN SELECT` 查询，拒绝 CTE、多语句、PRAGMA、EXPLAIN ANALYZE 和 SELECT INTO。PostgreSQL/MySQL 使用只读事务；SQLite 使用连接级 query_only，并在归还连接前恢复。传入已有事务或未支持的数据库方言会报错。需要写操作时使用 `database.WithAllowWrite(true)`。
+- `database_execute` 可以用 `database.WithMaxResultRows(...)` 和 `database.WithTimeout(...)` 限制结果规模和执行时间；达到行数上限后停止读取，返回 `truncated` 标记。
 - `shell_execute` 默认工作目录根为当前进程启动目录。需要修改根目录时使用 `shell.WithWorkingDirRoot(...)`；确需关闭限制时使用 `shell.WithUnrestrictedWorkingDir()`。
 - `shell_execute` 默认拒绝高危命令，并可用 `shell.WithAllowedCommands(...)` 将可执行命令收敛到白名单。
 - `shell_execute` 可以用 `shell.WithMaxOutputBytes(...)`、`shell.WithDefaultTimeout(...)`、`shell.WithMaxTimeout(...)` 限制输出和运行时间。

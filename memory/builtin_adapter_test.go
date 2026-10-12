@@ -306,3 +306,21 @@ func TestBuiltinProviderEnqueueMemorize(t *testing.T) {
 		t.Fatalf("EnqueueMemorize after Close = %v, want ErrMemoryClosed", err)
 	}
 }
+
+func TestRetrieveBudgetIncludesTimestamp(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewMemoryStore()
+	manager, provider := newBudgetManager(t, store, func(cfg *builtin.MemoryConfig) { cfg.ContextBudget.MaxRunes = 20 })
+	defer manager.Close()
+	if err := store.SaveMessage(ctx, &builtin.ConversationMessage{SessionID: "s1", UserID: "u1", Role: "user", Content: strings.Repeat("长", 100)}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := provider.Retrieve(ctx, &RetrieveRequest{SessionID: "s1", UserID: "u1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := agenticMessagesRunes(result.ContextMessages) + agenticMessagesRunes(result.HistoryMessages)
+	if total > 20 {
+		t.Fatalf("final injected text = %d runes, budget 20", total)
+	}
+}
