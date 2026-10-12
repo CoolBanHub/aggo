@@ -125,11 +125,11 @@ type MemorizeNormalizer func(ctx context.Context, req *MemorizeRequest) (*Memori
 type MissingIdentityPolicy int
 
 const (
-	// MissingIdentitySkip 静默跳过记忆读写（旧默认行为）。
-	MissingIdentitySkip MissingIdentityPolicy = iota
-	// MissingIdentityLog 记录日志后跳过。作为新配置的默认值，
+	// MissingIdentityLog 记录日志后跳过。作为零值默认值，
 	// 避免现有业务在身份缺失时无声失效。
-	MissingIdentityLog
+	MissingIdentityLog MissingIdentityPolicy = iota
+	// MissingIdentitySkip 静默跳过记忆读写。
+	MissingIdentitySkip
 	// MissingIdentityError 向上层返回错误，中断本轮请求。
 	MissingIdentityError
 )

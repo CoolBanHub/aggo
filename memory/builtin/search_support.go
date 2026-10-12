@@ -207,7 +207,8 @@ func enqueueIndexTask(manager *MemoryManager, msg *ConversationMessage) {
 		return
 	}
 
-	searchCfg := normalizeSearchConfig(manager.config.Search)
+	cfg := cloneMemoryConfig(manager.configSnapshot())
+	searchCfg := normalizeSearchConfig(cfg.Search)
 	if searchCfg.AsyncIndex {
 		submitted := manager.submitAsyncTask(asyncTask{
 			taskType:  "index",

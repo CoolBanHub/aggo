@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,9 +70,10 @@ func (f *FileStore) load() error {
 				continue
 			}
 			var mem builtin.UserMemory
-			if err := json.Unmarshal([]byte(line), &mem); err == nil {
-				userMemories[mem.UserID] = &mem
+			if err := json.Unmarshal([]byte(line), &mem); err != nil {
+				return fmt.Errorf("decode user memory: %w", err)
 			}
+			userMemories[mem.UserID] = &mem
 		}
 		f.MemoryStore.userMemories = userMemories
 	} else if !os.IsNotExist(err) {
@@ -87,10 +89,11 @@ func (f *FileStore) load() error {
 				continue
 			}
 			var summary builtin.SessionSummary
-			if err := json.Unmarshal([]byte(line), &summary); err == nil {
-				key := f.generateKey(summary.SessionID, summary.UserID)
-				sessionSummaries[key] = &summary // 遇到同名的会被后续行覆盖（符合更新逻辑）
+			if err := json.Unmarshal([]byte(line), &summary); err != nil {
+				return fmt.Errorf("decode session summary: %w", err)
 			}
+			key := f.generateKey(summary.SessionID, summary.UserID)
+			sessionSummaries[key] = &summary // 遇到同名的会被后续行覆盖（符合更新逻辑）
 		}
 		f.MemoryStore.sessionSummaries = sessionSummaries
 	} else if !os.IsNotExist(err) {
@@ -106,10 +109,11 @@ func (f *FileStore) load() error {
 				continue
 			}
 			var msg builtin.ConversationMessage
-			if err := json.Unmarshal([]byte(line), &msg); err == nil {
-				key := f.generateKey(msg.SessionID, msg.UserID)
-				messages[key] = append(messages[key], &msg)
+			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				return fmt.Errorf("decode conversation message: %w", err)
 			}
+			key := f.generateKey(msg.SessionID, msg.UserID)
+			messages[key] = append(messages[key], &msg)
 		}
 		f.MemoryStore.messages = messages
 	} else if !os.IsNotExist(err) {
@@ -125,9 +129,10 @@ func (f *FileStore) load() error {
 				continue
 			}
 			var evt builtin.UserMemoryEvent
-			if err := json.Unmarshal([]byte(line), &evt); err == nil {
-				events[evt.UserID] = append(events[evt.UserID], &evt)
+			if err := json.Unmarshal([]byte(line), &evt); err != nil {
+				return fmt.Errorf("decode user memory event: %w", err)
 			}
+			events[evt.UserID] = append(events[evt.UserID], &evt)
 		}
 		f.MemoryStore.userMemoryEvents = events
 	} else if !os.IsNotExist(err) {

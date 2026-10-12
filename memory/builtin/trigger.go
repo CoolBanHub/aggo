@@ -43,6 +43,29 @@ func NewSummaryTriggerManager(config SummaryTriggerConfig) *SummaryTriggerManage
 	}
 }
 
+// UpdateConfig changes trigger thresholds without replacing the manager or
+// losing its per-session counters.
+func (stm *SummaryTriggerManager) UpdateConfig(config SummaryTriggerConfig) {
+	if config.MessageThreshold <= 0 {
+		config.MessageThreshold = 10
+	}
+	if config.MinInterval <= 0 {
+		config.MinInterval = 60
+	}
+	if config.Strategy == "" {
+		config.Strategy = TriggerSmart
+	}
+	stm.mutex.Lock()
+	stm.config = config
+	stm.mutex.Unlock()
+}
+
+func (stm *SummaryTriggerManager) configSnapshot() SummaryTriggerConfig {
+	stm.mutex.RLock()
+	defer stm.mutex.RUnlock()
+	return stm.config
+}
+
 // EnsureSessionState initializes in-memory trigger state for a session once.
 // This is used to restore coarse trigger bookkeeping for sessions that already
 // have a persisted summary when the process restarts.
@@ -92,19 +115,20 @@ func (stm *SummaryTriggerManager) ShouldTriggerSummary(sessionKey string, curren
 	}
 
 	// 根据策略判断是否触发
-	switch stm.config.Strategy {
+	cfg := stm.config
+	switch cfg.Strategy {
 	case TriggerAlways:
 		return true
 
 	case TriggerByMessages:
-		return state.MessagesSinceLastSummary >= stm.config.MessageThreshold
+		return state.MessagesSinceLastSummary >= cfg.MessageThreshold
 
 	case TriggerByTime:
 		timeSinceLastSummary := time.Since(state.LastSummaryTime)
-		return timeSinceLastSummary.Seconds() >= float64(stm.config.MinInterval)
+		return timeSinceLastSummary.Seconds() >= float64(cfg.MinInterval)
 
 	case TriggerSmart:
-		return stm.shouldTriggerSmart(state)
+		return shouldTriggerSmartWithConfig(state, cfg)
 
 	default:
 		return true
@@ -113,14 +137,18 @@ func (stm *SummaryTriggerManager) ShouldTriggerSummary(sessionKey string, curren
 
 // shouldTriggerSmart 智能触发判断
 func (stm *SummaryTriggerManager) shouldTriggerSmart(state *SessionState) bool {
+	return shouldTriggerSmartWithConfig(state, stm.configSnapshot())
+}
+
+func shouldTriggerSmartWithConfig(state *SessionState, cfg SummaryTriggerConfig) bool {
 	now := time.Now()
 	timeSinceLastSummary := now.Sub(state.LastSummaryTime)
 
 	// 条件1：消息数量达到阈值
-	messageCondition := state.MessagesSinceLastSummary >= stm.config.MessageThreshold
+	messageCondition := state.MessagesSinceLastSummary >= cfg.MessageThreshold
 
 	// 条件2：时间间隔足够长
-	timeCondition := timeSinceLastSummary.Seconds() >= float64(stm.config.MinInterval)
+	timeCondition := timeSinceLastSummary.Seconds() >= float64(cfg.MinInterval)
 
 	// 条件3：避免过于频繁的更新（至少30秒间隔）
 	minTimeGap := timeSinceLastSummary.Seconds() >= 30
@@ -131,7 +159,7 @@ func (stm *SummaryTriggerManager) shouldTriggerSmart(state *SessionState) bool {
 	}
 
 	// 如果消息很多，即使时间不够也要触发
-	if state.MessagesSinceLastSummary >= stm.config.MessageThreshold*2 && minTimeGap {
+	if state.MessagesSinceLastSummary >= cfg.MessageThreshold*2 && minTimeGap {
 		return true
 	}
 

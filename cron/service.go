@@ -83,6 +83,7 @@ type CronService struct {
 	mu    sync.RWMutex
 	// running 由 mu 保护
 	running        bool
+	stopping       bool
 	scheduler      gocron.Scheduler
 	locker         Locker
 	lockTimeout    time.Duration
@@ -184,6 +185,9 @@ func (cs *CronService) Start() error {
 	if cs.running {
 		return nil
 	}
+	if cs.stopping {
+		return errors.New("cron: service is still stopping")
+	}
 
 	// 创建调度器
 	s, err := gocron.NewScheduler()
@@ -239,7 +243,13 @@ func (cs *CronService) StopContext(ctx context.Context) error {
 		s = cs.scheduler
 		cs.scheduler = nil
 		cs.running = false
+		cs.stopping = true
 		cs.jobIDToGocronID = make(map[string]uuid.UUID)
+	}
+	if s == nil {
+		// Prevent callbacks that raced with a previous scheduler shutdown from
+		// registering themselves while Stop waits for the current executions.
+		cs.stopping = true
 	}
 	cs.mu.Unlock()
 
@@ -257,6 +267,9 @@ func (cs *CronService) StopContext(ctx context.Context) error {
 
 	select {
 	case <-done:
+		cs.mu.Lock()
+		cs.stopping = false
+		cs.mu.Unlock()
 		return shutdownErr
 	case <-ctx.Done():
 		return fmt.Errorf("cron: timed out waiting for running jobs: %w (scheduler shutdown: %v)", ctx.Err(), shutdownErr)
@@ -317,6 +330,8 @@ func (cs *CronService) registerJobInScheduler(job *CronJob) error {
 		ms := nextRun.UnixMilli()
 		job.State.NextRunAtMS = &ms
 		if err := cs.store.Save(job); err != nil {
+			_ = cs.scheduler.RemoveJob(gJob.ID())
+			delete(cs.jobIDToGocronID, job.ID)
 			return fmt.Errorf("failed to persist next run time: %w", err)
 		}
 	}
@@ -325,22 +340,25 @@ func (cs *CronService) registerJobInScheduler(job *CronJob) error {
 }
 
 func (cs *CronService) executeJob(jobID string) {
-	cs.mu.RLock()
+	cs.mu.Lock()
 	job, err := cs.store.Get(jobID)
 	handler := cs.onJob
 	locker := cs.locker
 	lockTimeout := cs.lockTimeout
 	unlockTimeout := cs.unlockTimeout
 	jobCtxBuilder := cs.jobCtxBuilder
-	cs.mu.RUnlock()
-
-	if err != nil {
-		log.Printf("[cron] failed to load job %s for execution: %v", jobID, err)
+	if err == nil && job != nil && job.Enabled && !cs.stopping {
+		// Register the callback while holding the same lock Stop uses to enter
+		// its waiting phase. A callback that starts after stopping is rejected.
+		cs.jobWg.Add(1)
+	} else {
+		cs.mu.Unlock()
+		if err != nil {
+			log.Printf("[cron] failed to load job %s for execution: %v", jobID, err)
+		}
 		return
 	}
-	if job == nil || !job.Enabled {
-		return
-	}
+	cs.mu.Unlock()
 
 	jobCtx := context.Background()
 	if jobCtxBuilder != nil {
@@ -351,7 +369,6 @@ func (cs *CronService) executeJob(jobID string) {
 	jobCtx = WithJobContext(jobCtx, job)
 
 	// 跟踪整个执行过程（含锁的获取/释放），StopContext 等待其结束
-	cs.jobWg.Add(1)
 	defer cs.jobWg.Done()
 
 	// 分布式锁：获取与释放使用独立的 context 和超时，
@@ -410,9 +427,10 @@ func (cs *CronService) updateJobStateAfterRun(jobID string, startTimeMS int64, j
 		if current.DeleteAfterRun {
 			if err := cs.store.Delete(current.ID); err != nil {
 				log.Printf("[cron] failed to delete finished one-shot job %s: %v", current.ID, err)
-			}
-			if gid, ok := cs.jobIDToGocronID[current.ID]; ok && cs.scheduler != nil {
-				_ = cs.scheduler.RemoveJob(gid)
+			} else if gid, ok := cs.jobIDToGocronID[current.ID]; ok && cs.scheduler != nil {
+				if removeErr := cs.scheduler.RemoveJob(gid); removeErr != nil {
+					log.Printf("[cron] failed to remove finished scheduler job %s: %v", current.ID, removeErr)
+				}
 				delete(cs.jobIDToGocronID, current.ID)
 			}
 			return
@@ -515,13 +533,16 @@ func (cs *CronService) RemoveJobForUser(jobID, userID string) error {
 		return ErrJobNotFound
 	}
 
-	if gid, ok := cs.jobIDToGocronID[jobID]; ok && cs.scheduler != nil {
-		_ = cs.scheduler.RemoveJob(gid)
-		delete(cs.jobIDToGocronID, jobID)
-	}
-
 	if err := cs.store.Delete(jobID); err != nil {
 		return fmt.Errorf("failed to delete job %s from store: %w", jobID, err)
+	}
+	// Persist first. If scheduler removal fails after this point, the callback
+	// reloads the store and becomes a no-op instead of resurrecting deleted data.
+	if gid, ok := cs.jobIDToGocronID[jobID]; ok && cs.scheduler != nil {
+		if err := cs.scheduler.RemoveJob(gid); err != nil {
+			log.Printf("[cron] failed to remove scheduler job %s after store deletion: %v", jobID, err)
+		}
+		delete(cs.jobIDToGocronID, jobID)
 	}
 	return nil
 }
@@ -536,13 +557,14 @@ func (cs *CronService) RemoveJob(jobID string) bool {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	if gid, ok := cs.jobIDToGocronID[jobID]; ok && cs.scheduler != nil {
-		_ = cs.scheduler.RemoveJob(gid)
-		delete(cs.jobIDToGocronID, jobID)
-	}
-
 	if err := cs.store.Delete(jobID); err != nil {
 		return false
+	}
+	if gid, ok := cs.jobIDToGocronID[jobID]; ok && cs.scheduler != nil {
+		if err := cs.scheduler.RemoveJob(gid); err != nil {
+			log.Printf("[cron] failed to remove scheduler job %s after store deletion: %v", jobID, err)
+		}
+		delete(cs.jobIDToGocronID, jobID)
 	}
 	return true
 }
@@ -570,22 +592,31 @@ func (cs *CronService) EnableJobForUser(jobID, userID string, enabled bool) (*Cr
 	job.Enabled = enabled
 	job.UpdatedAtMS = time.Now().UnixMilli()
 
+	if !enabled {
+		job.State.NextRunAtMS = nil
+	}
+	// Save the authoritative state before changing the scheduler. A failed
+	// write leaves the old scheduler state intact.
+	if err := cs.store.Save(job); err != nil {
+		return nil, fmt.Errorf("failed to save job after enable: %w", err)
+	}
 	if enabled {
 		if cs.running {
 			if err := cs.registerJobInScheduler(job); err != nil {
+				// Roll back persistence so a failed registration cannot leave an
+				// enabled job that is absent from the scheduler.
+				job.Enabled = false
+				_ = cs.store.Save(job)
 				return nil, fmt.Errorf("failed to enable job %s: %w", jobID, err)
 			}
 		}
 	} else {
 		if gid, ok := cs.jobIDToGocronID[jobID]; ok && cs.scheduler != nil {
-			_ = cs.scheduler.RemoveJob(gid)
+			if err := cs.scheduler.RemoveJob(gid); err != nil {
+				log.Printf("[cron] failed to remove disabled scheduler job %s: %v", jobID, err)
+			}
 			delete(cs.jobIDToGocronID, jobID)
 		}
-		job.State.NextRunAtMS = nil
-	}
-
-	if err := cs.store.Save(job); err != nil {
-		return nil, fmt.Errorf("failed to save job after enable: %w", err)
 	}
 	return cloneJob(job), nil
 }
@@ -612,22 +643,28 @@ func (cs *CronService) EnableJob(jobID string, enabled bool) *CronJob {
 	job.Enabled = enabled
 	job.UpdatedAtMS = time.Now().UnixMilli()
 
+	if !enabled {
+		job.State.NextRunAtMS = nil
+	}
+	if err := cs.store.Save(job); err != nil {
+		log.Printf("[cron] failed to save job after enable: %v", err)
+		return nil
+	}
 	if enabled {
 		if cs.running {
 			if err := cs.registerJobInScheduler(job); err != nil {
 				log.Printf("[cron] failed to enable job %s: %v", jobID, err)
+				job.Enabled = false
+				_ = cs.store.Save(job)
 			}
 		}
 	} else {
 		if gid, ok := cs.jobIDToGocronID[jobID]; ok && cs.scheduler != nil {
-			_ = cs.scheduler.RemoveJob(gid)
+			if err := cs.scheduler.RemoveJob(gid); err != nil {
+				log.Printf("[cron] failed to remove disabled scheduler job %s: %v", jobID, err)
+			}
 			delete(cs.jobIDToGocronID, jobID)
 		}
-		job.State.NextRunAtMS = nil
-	}
-
-	if err := cs.store.Save(job); err != nil {
-		log.Printf("[cron] failed to save job after enable: %v", err)
 	}
 	return cloneJob(job)
 }

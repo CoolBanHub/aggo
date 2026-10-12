@@ -307,6 +307,7 @@ func NewCronAgent(ctx context.Context, cm model.AgenticModel, cronTools []tool.B
 
 	jobTimeout := cfg.jobTimeout
 	disableProcessing := cfg.disableJobProcessing
+	runner := adk.NewTypedRunner(adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: agent})
 
 	service.SetOnJobContext(func(ctx context.Context, job *CronJob) (string, error) {
 		for _, fn := range onTriggered {
@@ -330,14 +331,39 @@ func NewCronAgent(ctx context.Context, cm model.AgenticModel, cronTools []tool.B
 		}
 		defer cancel()
 
-		resp, err := cm.Generate(jobCtx, []*schema.AgenticMessage{
+		// Execute the configured Agent so memory, tools and middleware are part
+		// of scheduled jobs as they are for interactive requests.
+		iter := runner.Run(jobCtx, []*schema.AgenticMessage{
 			schema.SystemAgenticMessage("你是一个提醒助手。请将以下定时任务消息转换为简洁、友好的提醒通知。直接输出一句话。"),
 			schema.UserAgenticMessage(job.Payload.Message),
-		})
-
+		}, adk.WithSessionValues(map[string]any{
+			"userID":    job.UserID,
+			"sessionID": "cron:" + job.ID,
+		}))
 		var response string
-		if resp != nil {
-			response = agmsg.Text(resp)
+		var err error
+		for {
+			event, ok := iter.Next()
+			if !ok {
+				break
+			}
+			if event == nil {
+				continue
+			}
+			if event.Err != nil {
+				err = event.Err
+				break
+			}
+			if event.Output != nil && event.Output.MessageOutput != nil {
+				message, getErr := event.Output.MessageOutput.GetMessage()
+				if getErr != nil {
+					err = getErr
+					break
+				}
+				if message != nil {
+					response = agmsg.Text(message)
+				}
+			}
 		}
 		for _, fn := range onProcessed {
 			fn(ctx, job, response, err)

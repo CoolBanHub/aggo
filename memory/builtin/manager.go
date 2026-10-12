@@ -10,6 +10,7 @@ import (
 	"time"
 
 	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
+	"github.com/CoolBanHub/aggo/utils"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gookit/slog"
@@ -36,7 +37,8 @@ type MemoryManager struct {
 	// 存储接口
 	storage MemoryStorage
 	// 记忆配置
-	config *MemoryConfig
+	config   *MemoryConfig
+	configMu sync.RWMutex
 
 	userMemoryAnalyzer      *UserMemoryAnalyzer
 	sessionSummaryGenerator *SessionSummaryGenerator
@@ -45,6 +47,7 @@ type MemoryManager struct {
 	// 摘要触发管理
 	summaryTrigger *SummaryTriggerManager
 	summaryCache   *sessionSummaryCache
+	cacheMu        sync.RWMutex
 
 	// 异步处理相关
 	taskChannel chan asyncTask
@@ -69,6 +72,7 @@ type MemoryManager struct {
 	cleanupWg     sync.WaitGroup
 	cleanupCtx    context.Context
 	cleanupCancel context.CancelFunc
+	cleanupMu     sync.Mutex
 
 	// 异步任务队列统计
 	taskQueueStats TaskQueueStats
@@ -77,7 +81,7 @@ type MemoryManager struct {
 	pendingTasks sync.Map
 
 	// 记忆任务聚合（debounce）相关
-	memoryTimers   sync.Map      // key: "memory:{userID}:{sessionID}", value: *time.Timer
+	memoryTimers   sync.Map      // key: memoryTimerKey, value: *time.Timer
 	debounceWindow time.Duration // 聚合窗口时长，0 表示不做聚合
 
 	// 外部注入的清理函数
@@ -96,6 +100,17 @@ type asyncTask struct {
 	// run 非空时执行该函数（EnqueueTask 提交的自定义任务），
 	// 不参与 (taskType,userID,sessionID) 去重。
 	run func(ctx context.Context)
+}
+
+type asyncTaskKey struct {
+	taskType  string
+	userID    string
+	sessionID string
+}
+
+type memoryTimerKey struct {
+	userID    string
+	sessionID string
 }
 
 // NewMemoryManager 创建新的记忆管理器
@@ -174,7 +189,8 @@ func (m *MemoryManager) newAsyncTaskContext(task asyncTask) context.Context {
 // worker 收到退出信号后会先排空队列中已接受的任务再返回，
 // 保证 Close/Shutdown 返回时已接受的任务全部完成。
 func (m *MemoryManager) startAsyncWorkers() {
-	for i := 0; i < m.config.AsyncWorkerPoolSize; i++ {
+	cfg := m.configSnapshot()
+	for i := 0; i < cfg.AsyncWorkerPoolSize; i++ {
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
@@ -202,12 +218,12 @@ func (m *MemoryManager) startAsyncWorkers() {
 			}
 		}()
 	}
-	m.taskQueueStats.ActiveWorkers = m.config.AsyncWorkerPoolSize
+	m.taskQueueStats.ActiveWorkers = cfg.AsyncWorkerPoolSize
 }
 
 func (m *MemoryManager) runQueuedTask(task asyncTask) {
 	// 任务已取出准备处理，从排队重标记中移除，允许同类新任务入队
-	taskKey := fmt.Sprintf("%s:%s:%s", task.taskType, task.userID, task.sessionID)
+	taskKey := asyncTaskKey{taskType: task.taskType, userID: task.userID, sessionID: task.sessionID}
 	m.pendingTasks.Delete(taskKey)
 
 	// inFlight 在提交时增加，这里在任务实际执行完毕后减少
@@ -219,7 +235,7 @@ func (m *MemoryManager) runQueuedTask(task asyncTask) {
 
 // submitAsyncTask 提交异步任务，带队列重防抖功能
 func (m *MemoryManager) submitAsyncTask(task asyncTask) bool {
-	taskKey := fmt.Sprintf("%s:%s:%s", task.taskType, task.userID, task.sessionID)
+	taskKey := asyncTaskKey{taskType: task.taskType, userID: task.userID, sessionID: task.sessionID}
 	// 如果相同签名（任务类型+用户+会话）的任务已在队列中，则丢弃当前重复提交，节省开销
 	if _, loaded := m.pendingTasks.LoadOrStore(taskKey, struct{}{}); loaded {
 		//slog.Debugf("异步任务去重: 已存在相同的待处理任务, 类型: %s, 用户: %s", task.taskType, task.userID)
@@ -246,13 +262,15 @@ func (m *MemoryManager) submitAsyncTaskRaw(task asyncTask) bool {
 		return false
 	}
 
+	// Count before publishing to the buffered channel. A worker can receive a
+	// task immediately, so counting afterwards allows Flush to observe a false
+	// zero and return while the task is still running.
+	m.inFlight.Add(1)
 	select {
 	case m.taskChannel <- task:
-		// 提交成功即计入 inFlight（覆盖排队+执行两个阶段），
-		// Flush 据此判断"已接受的任务全部完成"，不存在出队后未被统计的窗口。
-		m.inFlight.Add(1)
 		return true
 	default:
+		m.inFlight.Add(-1)
 		// 队列满，增加丢弃计数
 		atomic.AddInt64(&m.taskQueueStats.DroppedTasks, 1)
 		slog.Errorf("异步任务队列已满，丢弃任务. 队列: %d/%d, 总丢弃: %d, 任务类型: %s, 用户: %s",
@@ -335,7 +353,10 @@ func (m *MemoryManager) Shutdown(ctx context.Context) error {
 // 关闭顺序：停止入口 → 停止 debounce 定时器 → 排空队列并等待 worker →
 // 停止定期清理 → 关闭底层存储。
 func (m *MemoryManager) doShutdown() {
-	// 停止聚合定时器，未到期的窗口不再触发（任务已被排空语义覆盖不到，直接丢弃）
+	// Convert pending debounce windows into queue tasks before stopping workers.
+	// These requests were already accepted by the middleware and must not be
+	// lost merely because their debounce duration has not elapsed.
+	m.flushPendingDebounceTimersForShutdown()
 	m.stopMemoryTimers()
 
 	// 通知 worker 退出；worker 会先排空队列再返回
@@ -343,7 +364,10 @@ func (m *MemoryManager) doShutdown() {
 	m.wg.Wait()
 
 	// 停止定期清理任务
-	m.cleanupCancel()
+	m.cleanupMu.Lock()
+	cleanupCancel := m.cleanupCancel
+	m.cleanupMu.Unlock()
+	cleanupCancel()
 	m.cleanupWg.Wait()
 
 	m.state.Store(uint32(managerClosed))
@@ -371,7 +395,7 @@ func (m *MemoryManager) stopMemoryTimers() {
 // 使用带去重的 submitAsyncTask，与定时器回调本身的提交互斥，不会重复入队。
 func (m *MemoryManager) firePendingDebounceTimers() {
 	m.memoryTimers.Range(func(key, value any) bool {
-		timerKey, ok := key.(string)
+		timerKey, ok := key.(memoryTimerKey)
 		if !ok {
 			return true
 		}
@@ -380,21 +404,36 @@ func (m *MemoryManager) firePendingDebounceTimers() {
 		}
 		m.memoryTimers.Delete(timerKey)
 
-		// timerKey 格式: "memory:{userID}:{sessionID}"
-		rest := strings.TrimPrefix(timerKey, "memory:")
-		idx := strings.Index(rest, ":")
-		if idx <= 0 || idx == len(rest)-1 {
-			return true
-		}
-		userID, sessionID := rest[:idx], rest[idx+1:]
 		submitted := m.submitAsyncTask(asyncTask{
 			taskType:  "memory",
-			userID:    userID,
-			sessionID: sessionID,
+			userID:    timerKey.userID,
+			sessionID: timerKey.sessionID,
 		})
 		if !submitted {
-			slog.Errorf("Flush 触发聚合任务失败: userID=%s sessionID=%s", userID, sessionID)
+			slog.Errorf("Flush 触发聚合任务失败: userID=%s sessionID=%s", timerKey.userID, timerKey.sessionID)
 		}
+		return true
+	})
+}
+
+func (m *MemoryManager) flushPendingDebounceTimersForShutdown() {
+	m.memoryTimers.Range(func(key, value any) bool {
+		timerKey, ok := key.(memoryTimerKey)
+		if !ok {
+			return true
+		}
+		if timer, ok := value.(*time.Timer); ok {
+			timer.Stop()
+		}
+		m.memoryTimers.Delete(key)
+		m.submitMu.Lock()
+		if managerState(m.state.Load()) == managerStopping {
+			m.inFlight.Add(1)
+			// Workers remain alive until after this method returns, so blocking
+			// here when the queue is full preserves the accepted task.
+			m.taskChannel <- asyncTask{taskType: "memory", userID: timerKey.userID, sessionID: timerKey.sessionID}
+		}
+		m.submitMu.Unlock()
 		return true
 	})
 }
@@ -402,8 +441,11 @@ func (m *MemoryManager) firePendingDebounceTimers() {
 // scheduleMemoryTask 调度记忆分析任务，支持聚合窗口（debounce）
 // 首次请求后启动 debounceWindow 定时器，期间的新请求不重置定时器，到期统一处理一次
 func (m *MemoryManager) scheduleMemoryTask(userID, sessionID string) {
+	m.configMu.RLock()
+	debounceWindow := m.debounceWindow
+	m.configMu.RUnlock()
 	// debounceWindow 为 0 时，保持原有行为：立即提交
-	if m.debounceWindow <= 0 {
+	if debounceWindow <= 0 {
 		submitted := m.submitAsyncTask(asyncTask{
 			taskType:  "memory",
 			userID:    userID,
@@ -415,15 +457,23 @@ func (m *MemoryManager) scheduleMemoryTask(userID, sessionID string) {
 		return
 	}
 
-	timerKey := fmt.Sprintf("memory:%s:%s", userID, sessionID)
+	timerKey := memoryTimerKey{userID: userID, sessionID: sessionID}
 
+	// Coordinate timer creation with Shutdown's state transition. Without this
+	// gate a request can create a timer after shutdown has already flushed the
+	// timer map, and its analysis would then be rejected and lost.
+	m.submitMu.Lock()
+	defer m.submitMu.Unlock()
+	if managerState(m.state.Load()) != managerRunning {
+		return
+	}
 	// 如果已有定时器，说明窗口内已有一次请求在等待，直接返回
 	if _, loaded := m.memoryTimers.Load(timerKey); loaded {
 		return
 	}
 
 	// 启动延迟定时器
-	timer := time.AfterFunc(m.debounceWindow, func() {
+	timer := time.AfterFunc(debounceWindow, func() {
 		m.memoryTimers.Delete(timerKey)
 		submitted := m.submitAsyncTask(asyncTask{
 			taskType:  "memory",
@@ -457,17 +507,22 @@ func (m *MemoryManager) GetTaskQueueStats() TaskQueueStats {
 
 // startPeriodicCleanup 启动定期清理任务
 func (m *MemoryManager) startPeriodicCleanup() {
-	m.cleanupTicker = time.NewTicker(time.Duration(m.config.Cleanup.CleanupInterval) * time.Hour)
+	cfg := m.configSnapshot()
+	ticker := time.NewTicker(time.Duration(cfg.Cleanup.CleanupInterval) * time.Hour)
+	m.cleanupMu.Lock()
+	m.cleanupTicker = ticker
+	cleanupCtx := m.cleanupCtx
+	m.cleanupMu.Unlock()
 	m.cleanupWg.Add(1)
 	go func() {
 		defer m.cleanupWg.Done()
 		for {
 			select {
-			case <-m.cleanupCtx.Done():
-				m.cleanupTicker.Stop()
+			case <-cleanupCtx.Done():
+				ticker.Stop()
 				return
-			case <-m.cleanupTicker.C:
-				m.performPeriodicCleanup(m.cleanupCtx)
+			case <-ticker.C:
+				m.performPeriodicCleanup(cleanupCtx)
 			}
 		}
 	}()
@@ -475,13 +530,14 @@ func (m *MemoryManager) startPeriodicCleanup() {
 
 // performPeriodicCleanup 执行定期清理
 func (m *MemoryManager) performPeriodicCleanup(parentCtx context.Context) {
+	cfg := m.configSnapshot()
 	// 创建超时context，避免清理任务阻塞
 	ctx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
 	defer cancel()
 
 	// 1. 清理旧的会话状态
-	if m.config.Cleanup.SessionCleanupInterval > 0 {
-		sessionRetention := time.Duration(m.config.Cleanup.SessionRetentionTime) * time.Hour
+	if cfg.Cleanup.SessionCleanupInterval > 0 {
+		sessionRetention := time.Duration(cfg.Cleanup.SessionRetentionTime) * time.Hour
 		m.summaryTrigger.CleanupOldSessions(sessionRetention)
 	}
 
@@ -540,6 +596,7 @@ func (m *MemoryManager) processAsyncTask(task asyncTask) {
 // ProcessUserMessage 处理包含多部分内容的用户消息
 // 根据配置决定是否创建用户记忆、更新会话摘要等
 func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionID, content string, parts []schema.MessageInputPart) error {
+	cfg := m.configSnapshot()
 	if userID == "" {
 		return errors.New("用户ID不能为空")
 	}
@@ -551,17 +608,17 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 	}
 
 	// 检查消息数量并可能清理旧消息
-	if m.config.Cleanup.MessageHistoryLimit > 0 {
+	if cfg.Cleanup.MessageHistoryLimit > 0 {
 		currentCount, err := m.storage.GetMessageCount(ctx, userID, sessionID)
 		if err != nil {
 			slog.Errorf("获取消息数量失败: %v", err)
-		} else if currentCount >= m.config.Cleanup.MessageHistoryLimit {
+		} else if currentCount >= cfg.Cleanup.MessageHistoryLimit {
 			// 清理超出限制的消息，保留最新的N条
-			err := m.storage.CleanupMessagesByLimit(ctx, userID, sessionID, m.config.Cleanup.MessageHistoryLimit-1)
+			err := m.storage.CleanupMessagesByLimit(ctx, userID, sessionID, cfg.Cleanup.MessageHistoryLimit-1)
 			if err != nil {
 				slog.Errorf("清理超限消息失败: %v", err)
 			} else {
-				slog.Infof("会话 %s 消息数量达到限制 %d，已清理旧消息", sessionID, m.config.Cleanup.MessageHistoryLimit)
+				slog.Infof("会话 %s 消息数量达到限制 %d，已清理旧消息", sessionID, cfg.Cleanup.MessageHistoryLimit)
 			}
 		}
 	}
@@ -583,6 +640,7 @@ func (m *MemoryManager) ProcessUserMessage(ctx context.Context, userID, sessionI
 
 // ProcessAssistantMessage 处理助手回复消息
 func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, sessionID, assistantMessage string) error {
+	cfg := m.configSnapshot()
 	if userID == "" {
 		return errors.New("用户ID不能为空")
 	}
@@ -605,7 +663,7 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 	}
 
 	// 如果启用了会话摘要，检查是否需要更新摘要
-	if m.config.EnableSessionSummary {
+	if cfg.EnableSessionSummary {
 		shouldTrigger, err := m.shouldTriggerSummaryUpdate(ctx, userID, sessionID)
 		if err != nil {
 			slog.Errorf("检查摘要触发条件失败: %v\n", err)
@@ -622,7 +680,7 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 	}
 
 	// 如果启用了用户记忆，分析消息并创建记忆（在AI回复后触发）
-	if m.config.EnableUserMemories {
+	if cfg.EnableUserMemories {
 		m.scheduleMemoryTask(userID, sessionID)
 	}
 
@@ -631,6 +689,7 @@ func (m *MemoryManager) ProcessAssistantMessage(ctx context.Context, userID, ses
 
 // analyzeAndCreateUserMemory 分析用户消息并更新记忆
 func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, sessionID string) {
+	cfg := m.configSnapshot()
 	// 获取现有记忆
 	existingMemory, err := m.storage.GetUserMemory(ctx, userID)
 	if err != nil {
@@ -639,7 +698,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 	}
 
 	// 获取最近消息作为上下文
-	historyMessages, err := m.storage.GetMessages(ctx, sessionID, userID, m.config.MemoryLimit/2)
+	historyMessages, err := m.storage.GetMessages(ctx, sessionID, userID, cfg.MemoryLimit/2)
 	if err != nil {
 		slog.Errorf("获取历史消息失败: %v\n", err)
 		return
@@ -649,7 +708,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 		return
 	}
 
-	useEvent := m.config.EnableEventSearch
+	useEvent := cfg.EnableEventSearch
 	req := AnalyzeRequest{
 		ExistingMemory:  existingMemory,
 		HistoryMessages: historyMessages,
@@ -657,7 +716,7 @@ func (m *MemoryManager) analyzeAndCreateUserMemory(ctx context.Context, userID, 
 	}
 	if useEvent {
 		// 提供最近事件作为去重参考；条数比注入模型上下文时再多一点，给 LLM 足够上下文判断重复。
-		recentLimit := m.config.RecentEventLimit * 2
+		recentLimit := cfg.RecentEventLimit * 2
 		if recentLimit <= 0 {
 			recentLimit = 20
 		}
@@ -866,8 +925,11 @@ func (m *MemoryManager) ClearUserMemory(ctx context.Context, userID string) erro
 // GetSessionSummary 获取会话摘要
 func (m *MemoryManager) GetSessionSummary(ctx context.Context, sessionID, userID string) (*SessionSummary, error) {
 	sessionKey := generateSessionKey(userID, sessionID)
-	if m.summaryCache != nil {
-		if summary, ok := m.summaryCache.Get(sessionKey); ok {
+	m.cacheMu.RLock()
+	cache := m.summaryCache
+	m.cacheMu.RUnlock()
+	if cache != nil {
+		if summary, ok := cache.Get(sessionKey); ok {
 			return summary, nil
 		}
 	}
@@ -882,10 +944,26 @@ func (m *MemoryManager) GetSessionSummary(ctx context.Context, sessionID, userID
 
 // SaveMessage 保存消息
 func (m *MemoryManager) SaveMessage(ctx context.Context, message *ConversationMessage) error {
-	if err := m.storage.SaveMessage(ctx, message); err != nil {
+	if message == nil {
+		return errors.New("消息对象不能为空")
+	}
+	// Allocate identity metadata before persistence and enqueue the exact
+	// snapshot. Storage implementations are allowed to clone their input, so
+	// indexing the caller's original object can otherwise see an empty ID/time.
+	snapshot := *message
+	if snapshot.ID == "" {
+		snapshot.ID = utils.GetULID()
+	}
+	if snapshot.CreatedAt.IsZero() {
+		snapshot.CreatedAt = time.Now()
+	}
+	if message.Parts != nil {
+		snapshot.Parts = append([]schema.MessageInputPart(nil), message.Parts...)
+	}
+	if err := m.storage.SaveMessage(ctx, &snapshot); err != nil {
 		return err
 	}
-	enqueueIndexTask(m, message)
+	enqueueIndexTask(m, &snapshot)
 	return nil
 }
 
@@ -932,6 +1010,12 @@ func (m *MemoryManager) GetMessagesAfterSummary(ctx context.Context, sessionID, 
 
 // GetConfig 获取配置
 func (m *MemoryManager) GetConfig() *MemoryConfig {
+	return cloneMemoryConfig(m.configSnapshot())
+}
+
+func (m *MemoryManager) configSnapshot() *MemoryConfig {
+	m.configMu.RLock()
+	defer m.configMu.RUnlock()
 	return m.config
 }
 
@@ -945,47 +1029,64 @@ func (m *MemoryManager) UpdateConfig(config *MemoryConfig) {
 		return
 	}
 
+	config = cloneMemoryConfig(config)
 	currentCacheTTLSeconds := 0
+	m.configMu.RLock()
+	current := m.config
+	m.configMu.RUnlock()
 	currentCacheMaxEntries := 0
-	if m.summaryCache != nil {
-		currentCacheTTLSeconds = int(m.summaryCache.ttl / time.Second)
-		currentCacheMaxEntries = m.summaryCache.maxEntries
-	} else if m.config != nil {
-		currentCacheTTLSeconds = m.config.SummaryCache.TTLSeconds
-		currentCacheMaxEntries = m.config.SummaryCache.MaxEntries
+	m.cacheMu.RLock()
+	cache := m.summaryCache
+	m.cacheMu.RUnlock()
+	if cache != nil {
+		currentCacheTTLSeconds = int(cache.ttl / time.Second)
+		currentCacheMaxEntries = cache.maxEntries
+	} else if current != nil {
+		currentCacheTTLSeconds = current.SummaryCache.TTLSeconds
+		currentCacheMaxEntries = current.SummaryCache.MaxEntries
 	}
 
 	config = normalizeMemoryConfig(config)
+	m.configMu.Lock()
 	m.config = config
-	m.summaryTrigger = NewSummaryTriggerManager(config.SummaryTrigger)
+	m.configMu.Unlock()
+	m.summaryTrigger.UpdateConfig(config.SummaryTrigger)
+	m.configMu.Lock()
 	m.debounceWindow = debounceWindowFromConfig(config)
+	m.configMu.Unlock()
 
 	// Recreate the cache only when the currently applied cache parameters
-	// differ from the requested ones. Compare against the live cache state
-	// instead of m.config so in-place mutations of GetConfig() are detected.
+	// differ from the requested ones. GetConfig returns an isolated snapshot.
 	if currentCacheTTLSeconds != config.SummaryCache.TTLSeconds ||
 		currentCacheMaxEntries != config.SummaryCache.MaxEntries {
+		m.cacheMu.Lock()
 		m.summaryCache = newSessionSummaryCache(
 			time.Duration(config.SummaryCache.TTLSeconds)*time.Second,
 			config.SummaryCache.MaxEntries,
 		)
+		m.cacheMu.Unlock()
 	}
 
 	// 停止旧的定期清理任务并等待退出
-	m.cleanupCancel()
+	m.cleanupMu.Lock()
+	oldCleanupCancel := m.cleanupCancel
+	m.cleanupMu.Unlock()
+	oldCleanupCancel()
 	m.cleanupWg.Wait()
 
 	// 启动新的定期清理任务
 	cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
+	m.cleanupMu.Lock()
 	m.cleanupCtx = cleanupCtx
 	m.cleanupCancel = cleanupCancel
+	m.cleanupMu.Unlock()
 	m.startPeriodicCleanup()
 }
 
 // GetMemoryStats 获取内存管理器统计信息
 func (m *MemoryManager) GetMemoryStats() map[string]interface{} {
 	stats := map[string]interface{}{
-		"config": m.config,
+		"config": m.GetConfig(),
 	}
 
 	// 添加队列统计
@@ -1010,10 +1111,15 @@ func (m *MemoryManager) ForceCleanupNow(ctx context.Context) error {
 }
 
 func (m *MemoryManager) cacheSessionSummary(summary *SessionSummary) {
-	if m.summaryCache == nil || summary == nil {
+	if summary == nil {
 		return
 	}
-	m.summaryCache.Set(generateSessionKey(summary.UserID, summary.SessionID), summary)
+	m.cacheMu.RLock()
+	cache := m.summaryCache
+	m.cacheMu.RUnlock()
+	if cache != nil {
+		cache.Set(generateSessionKey(summary.UserID, summary.SessionID), summary)
+	}
 }
 
 func (m *MemoryManager) shouldTriggerSummaryBySnapshot(lastSummaryTime time.Time, unsummarizedCount, totalMessageCount int, hasSummary bool) bool {
@@ -1021,7 +1127,7 @@ func (m *MemoryManager) shouldTriggerSummaryBySnapshot(lastSummaryTime time.Time
 		return false
 	}
 
-	cfg := m.summaryTrigger.config
+	cfg := m.summaryTrigger.configSnapshot()
 	threshold := cfg.MessageThreshold
 	if threshold <= 0 {
 		threshold = DefaultMemoryConfig().SummaryTrigger.MessageThreshold
@@ -1137,7 +1243,7 @@ func debounceWindowFromConfig(config *MemoryConfig) time.Duration {
 }
 
 func (m *MemoryManager) asyncTaskTimeout() time.Duration {
-	return time.Duration(m.config.AsyncTaskTimeoutSeconds) * time.Second
+	return time.Duration(m.configSnapshot().AsyncTaskTimeoutSeconds) * time.Second
 }
 
 func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
@@ -1192,6 +1298,22 @@ func normalizeMemoryConfig(config *MemoryConfig) *MemoryConfig {
 	}
 	config.Search = normalizeSearchConfig(config.Search)
 	return config
+}
+
+func cloneMemoryConfig(src *MemoryConfig) *MemoryConfig {
+	if src == nil {
+		return nil
+	}
+	cloned := *src
+	if src.DebounceWindowSeconds != nil {
+		v := *src.DebounceWindowSeconds
+		cloned.DebounceWindowSeconds = &v
+	}
+	if src.Search != nil {
+		search := *src.Search
+		cloned.Search = &search
+	}
+	return &cloned
 }
 
 // getMessagesAfterCursor returns messages after the summary cursor.

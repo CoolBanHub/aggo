@@ -159,29 +159,32 @@ func (w *Writer) WriteKeepAlive() error {
 
 func (w *Writer) WriteDone() error {
 	w.mu.Lock()
-	done := w.Done
-	w.mu.Unlock()
-
-	if done != nil {
-		if err := done(w.w); err != nil {
-			return w.markWriteFailed(err)
-		}
-		return w.writeFrame("")
-	}
-
-	return w.writeFrame("data: [DONE]\n\n")
-}
-
-// markWriteFailed 在 Done 回调自行写入并失败时，与 writeFrame 保持
-// 相同的“记录首次错误并标记关闭”语义。
-func (w *Writer) markWriteFailed(err error) error {
-	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.err == nil {
+	if w.err != nil {
+		return w.err
+	}
+	if w.closed {
+		return ErrWriterClosed
+	}
+	if w.Done != nil {
+		// The callback receives the raw writer for custom framing. Keep it under
+		// the same lock as normal frames so concurrent writers cannot interleave
+		// bytes with the callback's output.
+		if err := w.Done(w.w); err != nil {
+			w.err = err
+			w.closed = true
+			return err
+		}
+		w.flusher.Flush()
+		return nil
+	}
+	if _, err := io.WriteString(w.w, "data: [DONE]\n\n"); err != nil {
 		w.err = err
 		w.closed = true
+		return err
 	}
-	return w.err
+	w.flusher.Flush()
+	return nil
 }
 
 func (w *Writer) Stream(ctx context.Context, stream *schema.StreamReader[*schema.AgenticMessage], fn func(output *schema.AgenticMessage, index int) any) error {

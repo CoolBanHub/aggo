@@ -50,7 +50,8 @@ func (m *MemoryStore) AutoMigrate() error {
 
 // generateKey 生成会话相关的复合键
 func (m *MemoryStore) generateKey(sessionID, userID string) string {
-	return fmt.Sprintf("%s:%s", sessionID, userID)
+	// Length-prefix both components so IDs containing ':' cannot collide.
+	return fmt.Sprintf("%d:%s%d:%s", len(sessionID), sessionID, len(userID), userID)
 }
 
 // UpsertUserMemory 创建或更新用户记忆（每个用户一条记录）。

@@ -127,7 +127,9 @@ func (s *FileStore) List() ([]CronJob, error) {
 	defer s.mu.RUnlock()
 
 	result := make([]CronJob, len(s.data.Jobs))
-	copy(result, s.data.Jobs)
+	for i := range s.data.Jobs {
+		result[i] = *cloneJob(&s.data.Jobs[i])
+	}
 	return result, nil
 }
 
@@ -138,8 +140,7 @@ func (s *FileStore) Get(id string) (*CronJob, error) {
 
 	for i := range s.data.Jobs {
 		if s.data.Jobs[i].ID == id {
-			job := s.data.Jobs[i]
-			return &job, nil
+			return cloneJob(&s.data.Jobs[i]), nil
 		}
 	}
 	return nil, fmt.Errorf("job %s not found", id)
@@ -153,13 +154,13 @@ func (s *FileStore) Save(job *CronJob) error {
 	// 查找是否存在，存在则更新
 	for i := range s.data.Jobs {
 		if s.data.Jobs[i].ID == job.ID {
-			s.data.Jobs[i] = *job
+			s.data.Jobs[i] = *cloneJob(job)
 			return s.save()
 		}
 	}
 
 	// 不存在则新增
-	s.data.Jobs = append(s.data.Jobs, *job)
+	s.data.Jobs = append(s.data.Jobs, *cloneJob(job))
 	return s.save()
 }
 

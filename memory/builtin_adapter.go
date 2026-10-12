@@ -10,6 +10,7 @@ import (
 	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/CoolBanHub/aggo/memory/builtin"
 	builtinsearch "github.com/CoolBanHub/aggo/memory/builtin/search"
+	"github.com/bytedance/sonic"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gookit/slog"
 )
@@ -168,8 +169,21 @@ func (p *builtinProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*
 				total -= runeLen(droppedRunes)
 				dropped = true
 			default:
-				// 只剩最后一条历史消息，无法继续裁剪
-				total = 0
+				// Keep the newest message, but trim its text to the remaining
+				// budget instead of pretending the budget is satisfied.
+				remaining := budget.MaxRunes - runeLen(memoryBlock) - runeLen(eventsBlock) - runeLen(summaryBlock)
+				if remaining < 0 {
+					remaining = 0
+				}
+				if len(history) == 1 {
+					trimmed, didTrim := truncateAgenticMessage(history[0], remaining)
+					history[0] = trimmed
+					dropped = dropped || didTrim
+				}
+				total = runeLen(memoryBlock) + runeLen(eventsBlock) + runeLen(summaryBlock) + agenticMessagesRunes(history)
+				if total >= budget.MaxRunes {
+					break
+				}
 			}
 		}
 		if dropped {
@@ -225,6 +239,33 @@ func agenticMessagesRunes(messages []*schema.AgenticMessage) int {
 		total += runeLen(agmsg.Text(msg))
 	}
 	return total
+}
+
+func truncateAgenticMessage(message *schema.AgenticMessage, max int) (*schema.AgenticMessage, bool) {
+	if message == nil {
+		return nil, false
+	}
+	text := agmsg.Text(message)
+	trimmed, changed := truncateRunes(text, max)
+	if max <= 0 && text != "" {
+		trimmed, changed = "", true
+	}
+	if !changed {
+		return message, false
+	}
+	copyMessage := &schema.AgenticMessage{Role: message.Role}
+	if message.Extra != nil {
+		copyMessage.Extra = make(map[string]any, len(message.Extra))
+		for key, value := range message.Extra {
+			copyMessage.Extra[key] = value
+		}
+	}
+	if message.Role == schema.AgenticRoleTypeAssistant {
+		copyMessage.ContentBlocks = []*schema.ContentBlock{schema.NewContentBlock(&schema.AssistantGenText{Text: trimmed})}
+	} else {
+		copyMessage.ContentBlocks = []*schema.ContentBlock{schema.NewContentBlock(&schema.UserInputText{Text: trimmed})}
+	}
+	return copyMessage, true
 }
 
 // Memorize implements MemoryProvider.
@@ -284,7 +325,11 @@ func (p *builtinProvider) EnqueueMemorize(ctx context.Context, req *MemorizeRequ
 		if msg == nil {
 			continue
 		}
-		cloned.Messages = append(cloned.Messages, msg)
+		clonedMsg, err := cloneAgenticMessage(msg)
+		if err != nil {
+			return err
+		}
+		cloned.Messages = append(cloned.Messages, clonedMsg)
 	}
 
 	userID, sessionID := req.UserID, req.SessionID
@@ -293,6 +338,21 @@ func (p *builtinProvider) EnqueueMemorize(ctx context.Context, req *MemorizeRequ
 			slog.Errorf("memory: async memorize failed: userID=%s sessionID=%s err=%v", userID, sessionID, err)
 		}
 	})
+}
+
+func cloneAgenticMessage(message *schema.AgenticMessage) (*schema.AgenticMessage, error) {
+	if message == nil {
+		return nil, nil
+	}
+	data, err := sonic.Marshal(message)
+	if err != nil {
+		return nil, err
+	}
+	cloned := new(schema.AgenticMessage)
+	if err := sonic.Unmarshal(data, cloned); err != nil {
+		return nil, err
+	}
+	return cloned, nil
 }
 
 func (p *builtinProvider) SearchMessages(ctx context.Context, q *builtinsearch.SearchQuery) ([]*builtinsearch.SearchHit, error) {
