@@ -20,6 +20,11 @@ type MemoryProvider interface {
 }
 ```
 
+默认中间件用 `UserID` + `SessionID` 做隔离。需要按租户、项目或 Agent 隔离的后端，
+可以实现 `ScopeValidator`，并通过 `MemoryMiddlewareConfig.ScopeResolver` 返回 `MemoryScope`。
+provider 必须验证并实际执行这个范围，不能忽略不支持的字段。`RetrieveRequest.Query` 提供最近一条用户消息文本，
+而 `Messages` 仍保留完整上下文，便于后端按需构造查询。
+
 其中：
 
 - `Retrieve` 在模型调用前执行，返回要注入的动态上下文和历史消息
@@ -301,14 +306,18 @@ provider, err := memory.GlobalRegistry().CreateProvider("mem0", &mem0.ProviderCo
 3. `AfterModelRewriteState` 阶段提取最近一轮 `user + assistant` 消息
 4. 异步写入：provider 实现 `memory.AsyncMemorizer` 时调用
    `EnqueueMemorize`（builtin provider 走 MemoryManager 的受管工作池，
-   随 Flush/Shutdown 收敛）；否则回退为后台 goroutine 直接调用
-   `provider.Memorize`（兼容旧 provider）
+   由 provider.Close 排空）；否则进入 middleware 的有界单 worker 队列。
+   停止新 run 后先调用 `MemoryMiddleware.Shutdown(ctx)` 或
+   `AgentBuilder.ShutdownMemory(ctx)` 等待已接受写入，再调用 `provider.Close()`。
+   超时只停止等待，排空会继续执行，之后可以再次等待。
 
 这意味着：
 
-- builtin provider 下，写入不再依赖无法追踪的游离 goroutine
+- 写入不再依赖无队列上限的游离 goroutine；兼容路径队列满时会记录并丢弃新写入
 - 如果没有有效的 `user` 或 `assistant` 消息，本轮不会入库
 - 同一个 middleware 实例会做一次“已注入”标记，避免重复注入记忆
+- 检索错误默认记录并继续，且同一次 run 只请求一次；可设置 `RetrieveErrorPolicy: memory.RetrieveErrorReturn` 中断请求
+- 检索默认超时 10 秒，可用 `RetrieveTimeout` 和 `RetrieveLimit` 配置
 
 ### MemoryManager 的关闭语义
 
@@ -350,6 +359,26 @@ mw := memory.NewMemoryMiddlewareWithConfig(provider, memory.MemoryMiddlewareConf
         },
     },
 })
+```
+
+项目级后端示例（provider 需要实现 `memory.ScopeValidator`）：
+
+```go
+builder := agent.NewAgentBuilder(chatModel).WithMemoryConfig(provider, memory.MemoryMiddlewareConfig{
+    ScopeResolver: func(ctx context.Context) (memory.MemoryScope, bool) {
+        projectID, ok := sessionkeys.String(ctx, "projectID")
+        return memory.MemoryScope{ProjectID: projectID}, ok && projectID != ""
+    },
+})
+```
+
+服务退出时，在停止接收请求并等当前 run 结束后调用：
+
+```go
+shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+defer cancel()
+_ = builder.ShutdownMemory(shutdownCtx)
+_ = provider.Close()
 ```
 
 身份缺失时：`Skip` 保持旧的静默跳过行为；`Log`（新默认）记录日志后跳过；

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/CoolBanHub/aggo/memory"
@@ -15,13 +16,14 @@ import (
 
 // AgentBuilder 辅助构建 adk.Agent，不重新实现任何执行方法，只做配置透传
 type AgentBuilder struct {
-	name        string
-	description string
-	instruction string
-	cm          model.AgenticModel
-	tools       []tool.BaseTool
-	middlewares []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
-	maxStep     int
+	name              string
+	description       string
+	instruction       string
+	cm                model.AgenticModel
+	tools             []tool.BaseTool
+	middlewares       []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]
+	maxStep           int
+	memoryMiddlewares []*memory.MemoryMiddleware
 }
 
 // NewAgentBuilder 创建 AgentBuilder
@@ -55,9 +57,10 @@ func (b *AgentBuilder) WithTools(tools ...tool.BaseTool) *AgentBuilder {
 	return b
 }
 
-// WithMemoryMiddleware 添加 MemoryMiddleware（同时注册 MemoryManager）
+// WithMemoryMiddleware adds memory and registers it for ShutdownMemory.
 func (b *AgentBuilder) WithMemoryMiddleware(mm *memory.MemoryMiddleware) *AgentBuilder {
 	b.middlewares = append(b.middlewares, mm)
+	b.memoryMiddlewares = append(b.memoryMiddlewares, mm)
 	return b
 }
 
@@ -65,13 +68,32 @@ func (b *AgentBuilder) WithMemoryMiddleware(mm *memory.MemoryMiddleware) *AgentB
 // 如果 provider 实现了 memory.UserMemoryEventSearcher（事件检索模式），
 // 同时会自动注入 search_user_memory 工具，让 Agent 主动检索更早的事件记忆。
 func (b *AgentBuilder) WithMemory(provider memory.MemoryProvider) *AgentBuilder {
-	b.middlewares = append(b.middlewares, memory.NewMemoryMiddleware(provider))
+	return b.WithMemoryConfig(provider, memory.MemoryMiddlewareConfig{})
+}
+
+// WithMemoryConfig adds memory with explicit scope, retrieval and write options.
+func (b *AgentBuilder) WithMemoryConfig(provider memory.MemoryProvider, config memory.MemoryMiddlewareConfig) *AgentBuilder {
+	b.WithMemoryMiddleware(memory.NewMemoryMiddlewareWithConfig(provider, config))
 	if searcher, ok := provider.(memory.UserMemoryEventSearcher); ok {
 		if t, err := memorytool.SearchUserMemoryTool(searcher); err == nil && t != nil {
 			b.tools = append(b.tools, t)
 		}
 	}
 	return b
+}
+
+// ShutdownMemory drains fallback writes for memory attached using WithMemory,
+// WithMemoryConfig or WithMemoryMiddleware. Stop new runs and wait for active
+// runs first, then call provider.Close. On timeout, draining continues; this
+// method may be called again.
+func (b *AgentBuilder) ShutdownMemory(ctx context.Context) error {
+	var errs []error
+	for _, mw := range b.memoryMiddlewares {
+		if err := mw.Shutdown(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // WithMiddlewares 添加自定义 Middleware

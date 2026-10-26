@@ -20,6 +20,27 @@ type MemoryProvider interface {
 	Close() error
 }
 
+// MemoryScope identifies the boundary in which a provider reads and writes.
+// The default middleware still requires UserID and SessionID. ScopeResolver
+// enables other boundaries for providers implementing ScopeValidator.
+type MemoryScope struct {
+	UserID         string
+	SessionID      string
+	TenantID       string
+	OrganizationID string
+	ProjectID      string
+	AppID          string
+	AgentID        string
+}
+
+// ScopeValidator is an optional provider capability. Implementations must reject
+// scopes they cannot enforce; accepting a scope promises that both Retrieve and
+// Memorize honor it. Providers without this capability only receive user/session
+// scopes with both identifiers present.
+type ScopeValidator interface {
+	ValidateScope(scope MemoryScope) error
+}
+
 // RetrieveRequest is the input for the Retrieve operation.
 type RetrieveRequest struct {
 	// UserID identifies the user whose memory to search.
@@ -27,6 +48,14 @@ type RetrieveRequest struct {
 
 	// SessionID identifies the current conversation session.
 	SessionID string
+
+	// Scope contains the resolved memory boundary. Middleware mirrors its UserID
+	// and SessionID into the legacy fields above for existing providers.
+	Scope MemoryScope
+
+	// Query is the latest user text before memory injection. Providers may combine
+	// it with Messages for contextual retrieval. Direct callers may leave it empty.
+	Query string
 
 	// Messages are the current conversation messages used as context for retrieval.
 	Messages []*schema.AgenticMessage
@@ -67,7 +96,11 @@ type MemorizeRequest struct {
 	// SessionID identifies the conversation session.
 	SessionID string
 
-	// Messages are the conversation turn(s) to store.
+	// Scope is the same boundary used for retrieval in this run.
+	Scope MemoryScope
+
+	// Messages are raw conversation turns, not extracted facts. Providers decide
+	// whether to store them directly or use their backend's memory extraction.
 	Messages []*schema.AgenticMessage
 }
 
@@ -103,8 +136,8 @@ type HookableProvider interface {
 // AsyncMemorizer is an optional extension of MemoryProvider for providers
 // that own a managed async write path (e.g. builtin.MemoryManager's worker
 // pool with Flush/Shutdown lifecycle). When implemented, MemoryMiddleware
-// delegates memorization to EnqueueMemorize instead of spawning an
-// untracked goroutine, so pending writes are drained on shutdown.
+// delegates memorization to EnqueueMemorize instead of its own bounded queue.
+// The provider's Close must drain accepted writes before releasing resources.
 type AsyncMemorizer interface {
 	// EnqueueMemorize accepts a memorize request for asynchronous execution.
 	// It must be safe to reject the request after the provider is closed

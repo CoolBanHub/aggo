@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -11,26 +12,37 @@ import (
 	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
 	"github.com/cloudwego/eino/adk"
 	einomodel "github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
 type fakeMemoryProvider struct {
 	result         *RetrieveResult
 	memorizeCalled chan *MemorizeRequest
+	retrieveErr    error
+	retrieveCalls  int
+	closeCalls     int
+	memorizeErr    error
 }
 
 func (p *fakeMemoryProvider) Retrieve(ctx context.Context, req *RetrieveRequest) (*RetrieveResult, error) {
-	return p.result, nil
+	p.retrieveCalls++
+	return p.result, p.retrieveErr
 }
 
 func (p *fakeMemoryProvider) Memorize(ctx context.Context, req *MemorizeRequest) error {
 	if p.memorizeCalled != nil {
-		p.memorizeCalled <- req
+		select {
+		case p.memorizeCalled <- req:
+		default:
+		}
 	}
-	return nil
+	return p.memorizeErr
 }
 
 func (p *fakeMemoryProvider) Close() error {
+	p.closeCalls++
 	return nil
 }
 
@@ -394,4 +406,191 @@ func TestMemoryMiddlewarePrefersAsyncMemorizer(t *testing.T) {
 		t.Fatal("provider.Memorize must not be called directly when AsyncMemorizer is implemented")
 	default:
 	}
+}
+
+func TestMemoryMiddlewareRetrieveFailureOncePerRun(t *testing.T) {
+	provider := &fakeMemoryProvider{retrieveErr: errors.New("backend unavailable")}
+	model := &sequentialAgenticModelForMemory{responses: []*schema.AgenticMessage{
+		memoryToolCall("echo", "call-1"),
+		agmsg.AssistantMessage("done"),
+	}}
+	echoTool := &echoToolForMemory{}
+	agent, err := adk.NewTypedChatModelAgent[*schema.AgenticMessage](context.Background(), &adk.TypedChatModelAgentConfig[*schema.AgenticMessage]{
+		Name: "test", Description: "test", Model: model,
+		ToolsConfig: adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: []tool.BaseTool{echoTool}}},
+		Handlers:    []adk.TypedChatModelAgentMiddleware[*schema.AgenticMessage]{NewMemoryMiddleware(provider)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iter := adk.NewTypedRunner[*schema.AgenticMessage](adk.TypedRunnerConfig[*schema.AgenticMessage]{Agent: agent}).Query(context.Background(), "question", adk.WithSessionValues(map[string]any{"userID": "u", "sessionID": "s"}))
+	for {
+		event, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil && event.Err != io.EOF {
+			t.Fatal(event.Err)
+		}
+	}
+	if provider.retrieveCalls != 1 {
+		t.Fatalf("retrieve calls = %d, want 1", provider.retrieveCalls)
+	}
+}
+
+func TestMemoryMiddlewareRetrieveFailurePolicyReturn(t *testing.T) {
+	provider := &fakeMemoryProvider{retrieveErr: errors.New("backend unavailable")}
+	mw := NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{
+		RetrieveErrorPolicy: RetrieveErrorReturn,
+	})
+	err := runOnce(t, mw, map[string]any{"userID": "u", "sessionID": "s"})
+	if err == nil || !strings.Contains(err.Error(), "backend unavailable") {
+		t.Fatalf("run error = %v, want backend failure", err)
+	}
+	if provider.retrieveCalls != 1 {
+		t.Fatalf("retrieve calls = %d, want 1", provider.retrieveCalls)
+	}
+}
+
+type scopeAwareAsyncProvider struct {
+	*asyncMemorizeProvider
+}
+
+func (*scopeAwareAsyncProvider) ValidateScope(scope MemoryScope) error {
+	if scope.ProjectID == "" || scope.UserID != "" || scope.SessionID != "" {
+		return fmt.Errorf("expected project-only scope")
+	}
+	return nil
+}
+
+func TestMemoryMiddlewareSupportsValidatedProjectScope(t *testing.T) {
+	provider := &scopeAwareAsyncProvider{asyncMemorizeProvider: newAsyncMemorizeProvider(nil)}
+	mw := NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{
+		ScopeResolver: func(context.Context) (MemoryScope, bool) {
+			return MemoryScope{ProjectID: "aggo"}, true
+		},
+	})
+	if err := runOnce(t, mw, nil); err != nil {
+		t.Fatalf("run with project scope: %v", err)
+	}
+	select {
+	case req := <-provider.enqueued:
+		if req.Scope.ProjectID != "aggo" || req.UserID != "" || req.SessionID != "" {
+			t.Fatalf("memorize scope = %#v, want project-only scope", req.Scope)
+		}
+	default:
+		t.Fatal("EnqueueMemorize not called")
+	}
+}
+
+func TestMemoryMiddlewareRejectsUnvalidatedProjectScope(t *testing.T) {
+	provider := newAsyncMemorizeProvider(nil)
+	mw := NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{
+		ScopeResolver: func(context.Context) (MemoryScope, bool) {
+			return MemoryScope{ProjectID: "aggo"}, true
+		},
+	})
+	err := runOnce(t, mw, nil)
+	if err == nil || !strings.Contains(err.Error(), "ScopeValidator") {
+		t.Fatalf("run error = %v, want unvalidated scope error", err)
+	}
+}
+
+func TestMemoryMiddlewareAllowsLegacyScopeFromScopeResolver(t *testing.T) {
+	provider := newAsyncMemorizeProvider(nil)
+	mw := NewMemoryMiddlewareWithConfig(provider, MemoryMiddlewareConfig{
+		ScopeResolver: func(context.Context) (MemoryScope, bool) {
+			return MemoryScope{UserID: "user-1", SessionID: "session-1"}, true
+		},
+	})
+	if err := runOnce(t, mw, nil); err != nil {
+		t.Fatalf("run with user/session scope: %v", err)
+	}
+	select {
+	case req := <-provider.enqueued:
+		if req.UserID != "user-1" || req.SessionID != "session-1" {
+			t.Fatalf("legacy scope = %#v", req.Scope)
+		}
+	default:
+		t.Fatal("EnqueueMemorize not called")
+	}
+}
+
+type slowMemorizeProvider struct {
+	fakeMemoryProvider
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *slowMemorizeProvider) Memorize(context.Context, *MemorizeRequest) error {
+	close(p.started)
+	<-p.release
+	return nil
+}
+
+func TestMemoryMiddlewareShutdownDrainsFallbackWrites(t *testing.T) {
+	provider := &slowMemorizeProvider{started: make(chan struct{}), release: make(chan struct{})}
+	mw := NewMemoryMiddleware(provider)
+	if err := runOnce(t, mw, map[string]any{"userID": "u", "sessionID": "s"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("memorize did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := mw.Shutdown(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first Shutdown error = %v, want deadline exceeded", err)
+	}
+	close(provider.release)
+	if err := mw.Shutdown(context.Background()); err != nil {
+		t.Fatalf("second Shutdown: %v", err)
+	}
+	if err := provider.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if provider.closeCalls != 1 {
+		t.Fatalf("provider close calls = %d, want 1", provider.closeCalls)
+	}
+}
+
+type sequentialAgenticModelForMemory struct {
+	responses []*schema.AgenticMessage
+	idx       int
+}
+
+func (m *sequentialAgenticModelForMemory) Generate(context.Context, []*schema.AgenticMessage, ...einomodel.Option) (*schema.AgenticMessage, error) {
+	if m.idx >= len(m.responses) {
+		return nil, fmt.Errorf("no more responses")
+	}
+	msg := m.responses[m.idx]
+	m.idx++
+	return msg, nil
+}
+
+func (m *sequentialAgenticModelForMemory) Stream(ctx context.Context, input []*schema.AgenticMessage, opts ...einomodel.Option) (*schema.StreamReader[*schema.AgenticMessage], error) {
+	msg, err := m.Generate(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	r, w := schema.Pipe[*schema.AgenticMessage](1)
+	go func() { defer w.Close(); w.Send(msg, nil) }()
+	return r, nil
+}
+
+func memoryToolCall(name, callID string) *schema.AgenticMessage {
+	return &schema.AgenticMessage{Role: schema.AgenticRoleTypeAssistant, ContentBlocks: []*schema.ContentBlock{schema.NewContentBlock(&schema.FunctionToolCall{Name: name, CallID: callID, Arguments: `{}`})}}
+}
+
+type echoToolForMemory struct{}
+
+func (*echoToolForMemory) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{Name: "echo", Desc: "echo"}, nil
+}
+
+func (*echoToolForMemory) InvokableRun(context.Context, string, ...tool.Option) (string, error) {
+	return "ok", nil
 }

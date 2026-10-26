@@ -3,7 +3,6 @@ package mem0
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -36,7 +35,13 @@ func NewProvider(config *ProviderConfig) (*Provider, error) {
 
 // Retrieve fetches relevant mem0 context before a model call.
 func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*memory.RetrieveResult, error) {
+	if req == nil {
+		return nil, fmt.Errorf("mem0: retrieve request is nil")
+	}
 	query := buildSearchQuery(req.Messages, p.config.SearchMsgLimit, p.config.QueryCharLimit)
+	if query == "" {
+		query = truncateRunes(strings.TrimSpace(req.Query), p.config.QueryCharLimit)
+	}
 	if strings.TrimSpace(query) == "" {
 		return &memory.RetrieveResult{}, nil
 	}
@@ -50,17 +55,23 @@ func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*
 		ProjectID: p.config.ProjectID,
 		Limit:     p.config.SearchResultLimit,
 	}
+	if req.Limit > 0 {
+		searchReq.Limit = req.Limit
+	}
 	if p.config.UseSessionAsRunID && p.config.SearchBySession && strings.TrimSpace(req.SessionID) != "" {
 		searchReq.RunID = req.SessionID
 	}
 
 	items, err := p.client.Search(ctx, searchReq)
 	if err != nil {
-		log.Printf("mem0: Retrieve failed: %v", err)
-		return &memory.RetrieveResult{}, nil
+		return nil, fmt.Errorf("mem0: retrieve: %w", err)
 	}
 
-	memoryContext := FormatMemoryContext(items, p.config.OutputMemoryLimit)
+	outputLimit := p.config.OutputMemoryLimit
+	if req.Limit > 0 && req.Limit < outputLimit {
+		outputLimit = req.Limit
+	}
+	memoryContext := FormatMemoryContext(items, outputLimit)
 	result := &memory.RetrieveResult{
 		Metadata: map[string]any{
 			"query":           query,
@@ -78,6 +89,9 @@ func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*
 
 // Memorize persists the latest user + assistant turn into mem0.
 func (p *Provider) Memorize(ctx context.Context, req *memory.MemorizeRequest) error {
+	if req == nil {
+		return fmt.Errorf("mem0: memorize request is nil")
+	}
 	var userText, assistantText string
 	for _, msg := range req.Messages {
 		content := strings.TrimSpace(agmsg.Text(msg))
@@ -121,8 +135,7 @@ func (p *Provider) Memorize(ctx context.Context, req *memory.MemorizeRequest) er
 	}
 
 	if err := p.client.Add(ctx, addReq); err != nil {
-		log.Printf("mem0: Memorize failed: %v", err)
-		return err
+		return fmt.Errorf("mem0: memorize: %w", err)
 	}
 	return nil
 }

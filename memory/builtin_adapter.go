@@ -321,6 +321,7 @@ func (p *builtinProvider) EnqueueMemorize(ctx context.Context, req *MemorizeRequ
 	cloned := &MemorizeRequest{
 		UserID:    req.UserID,
 		SessionID: req.SessionID,
+		Scope:     req.Scope,
 		Messages:  make([]*schema.AgenticMessage, 0, len(req.Messages)),
 	}
 	for _, msg := range req.Messages {

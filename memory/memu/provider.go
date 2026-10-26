@@ -3,7 +3,6 @@ package memu
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
@@ -39,19 +38,32 @@ func NewProvider(config *ProviderConfig) (*Provider, error) {
 }
 
 // Retrieve fetches relevant memory context from the memu service before a model call.
-// It gracefully degrades on error, returning an empty result.
+// Errors are returned so middleware can apply the configured failure policy.
 func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*memory.RetrieveResult, error) {
+	if req == nil {
+		return nil, fmt.Errorf("memu: retrieve request is nil")
+	}
 	memuReq := BuildRetrieveRequest(req.Messages, req.UserID, p.config.HistoryLimit)
+	if len(memuReq.Queries) == 0 && strings.TrimSpace(req.Query) != "" {
+		memuReq = BuildRetrieveRequest([]*schema.AgenticMessage{schema.UserAgenticMessage(req.Query)}, req.UserID, 1)
+	}
 	if len(memuReq.Queries) == 0 {
 		return &memory.RetrieveResult{}, nil
 	}
 
 	resp, err := p.client.Retrieve(ctx, memuReq)
 	if err != nil {
-		log.Printf("memu: Retrieve failed: %v", err)
-		return &memory.RetrieveResult{}, nil // graceful degradation
+		return nil, fmt.Errorf("memu: retrieve: %w", err)
 	}
 
+	if req.Limit > 0 {
+		remaining := req.Limit
+		resp.Items = resp.Items[:minInt(len(resp.Items), remaining)]
+		remaining -= len(resp.Items)
+		resp.Categories = resp.Categories[:minInt(len(resp.Categories), remaining)]
+		remaining -= len(resp.Categories)
+		resp.Resources = resp.Resources[:minInt(len(resp.Resources), remaining)]
+	}
 	memoryContext := FormatMemoryContext(resp, p.config.MaxItems)
 	result := &memory.RetrieveResult{
 		Metadata: map[string]any{
@@ -71,6 +83,9 @@ func (p *Provider) Retrieve(ctx context.Context, req *memory.RetrieveRequest) (*
 // Memorize persists a conversation turn to the memu service after a model call.
 // It extracts the user and assistant messages and sends them as a conversation turn.
 func (p *Provider) Memorize(ctx context.Context, req *memory.MemorizeRequest) error {
+	if req == nil {
+		return fmt.Errorf("memu: memorize request is nil")
+	}
 	var userText, assistantText string
 	for _, msg := range req.Messages {
 		if msg == nil {
@@ -99,9 +114,9 @@ func (p *Provider) Memorize(ctx context.Context, req *memory.MemorizeRequest) er
 
 	_, err := p.client.Memorize(ctx, memReq)
 	if err != nil {
-		log.Printf("memu: Memorize failed: %v", err)
+		return fmt.Errorf("memu: memorize: %w", err)
 	}
-	return err
+	return nil
 }
 
 // Close releases any resources held by the provider. Currently a no-op.

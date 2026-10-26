@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	agmsg "github.com/CoolBanHub/aggo/internal/agentic"
@@ -14,12 +15,22 @@ import (
 )
 
 const (
-	defaultMemorizeTimeout = 2 * time.Minute
-	runtimeContextLayout   = "2006-01-02 15:04:05 -07:00"
-	runtimeContextDivider  = "\n\n-----\n"
+	defaultMemorizeTimeout   = 2 * time.Minute
+	defaultRetrieveTimeout   = 10 * time.Second
+	defaultMemorizeQueueSize = 64
+	runtimeContextLayout     = "2006-01-02 15:04:05 -07:00"
+	runtimeContextDivider    = "\n\n-----\n"
 )
 
-// MemoryMiddlewareConfig 配置 MemoryMiddleware 的身份解析与写入行为。
+// RetrieveErrorPolicy controls whether retrieval failure interrupts the run.
+type RetrieveErrorPolicy int
+
+const (
+	RetrieveErrorContinue RetrieveErrorPolicy = iota
+	RetrieveErrorReturn
+)
+
+// MemoryMiddlewareConfig configures identity, scope, retrieval and write behavior.
 // 零值可用：所有字段都有与旧行为兼容的默认值。
 type MemoryMiddlewareConfig struct {
 	// UserIDKey 从会话中读取用户身份的键，默认 "userID"，
@@ -30,13 +41,27 @@ type MemoryMiddlewareConfig struct {
 	// IdentityResolver 覆盖默认的身份解析逻辑
 	//（例如从 actorID/conversationID 组合出记忆归属），设置后 UserIDKey/SessionIDKey 被忽略。
 	IdentityResolver func(ctx context.Context) (userID, sessionID string, ok bool)
+	// ScopeResolver overrides IdentityResolver and the identity keys. It may return
+	// a user-only or project scope if the provider implements ScopeValidator.
+	ScopeResolver func(ctx context.Context) (MemoryScope, bool)
 	// MissingIdentity 决定身份缺失时的行为，默认 MissingIdentityLog。
 	MissingIdentity MissingIdentityPolicy
 	// Normalizers 在写入前依次作用于 MemorizeRequest（深拷贝后执行）。
 	Normalizers []MemorizeNormalizer
+	// RetrieveTimeout bounds retrieval latency, default 10 seconds.
+	RetrieveTimeout time.Duration
+	// RetrieveErrorPolicy defaults to logging the failure and continuing. Failed
+	// retrieval is attempted once per run, just like successful retrieval.
+	RetrieveErrorPolicy RetrieveErrorPolicy
+	// RetrieveLimit is forwarded to the provider; zero uses its own default.
+	RetrieveLimit int
 	// MemorizeTimeout 仅在 provider 未实现 AsyncMemorizer 时，
 	// 用于兼容路径的后台写入超时，默认 2 分钟。
 	MemorizeTimeout time.Duration
+	// MemorizeQueueSize bounds waiting writes for providers without AsyncMemorizer.
+	// A single worker processes them in order. Default 64; a full queue rejects
+	// new writes with a log entry instead of blocking the model response.
+	MemorizeQueueSize int
 }
 
 func (c *MemoryMiddlewareConfig) normalize() {
@@ -49,6 +74,12 @@ func (c *MemoryMiddlewareConfig) normalize() {
 	if c.MemorizeTimeout <= 0 {
 		c.MemorizeTimeout = defaultMemorizeTimeout
 	}
+	if c.RetrieveTimeout <= 0 {
+		c.RetrieveTimeout = defaultRetrieveTimeout
+	}
+	if c.MemorizeQueueSize <= 0 {
+		c.MemorizeQueueSize = defaultMemorizeQueueSize
+	}
 }
 
 // MemoryMiddleware implements adk.ChatModelAgentMiddleware.
@@ -57,6 +88,16 @@ type MemoryMiddleware struct {
 	*adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]
 	provider MemoryProvider
 	config   MemoryMiddlewareConfig
+
+	writeMu       sync.Mutex
+	closed        bool
+	writeQueue    chan memorizeTask
+	writerStarted bool
+	writerDone    chan struct{}
+	pendingWrites sync.WaitGroup
+	writeErr      error
+	shutdownDone  chan struct{}
+	shutdownErr   error
 }
 
 // NewMemoryMiddleware creates a MemoryMiddleware with a MemoryProvider.
@@ -68,29 +109,61 @@ func NewMemoryMiddleware(provider MemoryProvider) *MemoryMiddleware {
 // NewMemoryMiddlewareWithConfig creates a MemoryMiddleware with explicit config.
 func NewMemoryMiddlewareWithConfig(provider MemoryProvider, config MemoryMiddlewareConfig) *MemoryMiddleware {
 	config.normalize()
-	return &MemoryMiddleware{
+	m := &MemoryMiddleware{
 		TypedBaseChatModelAgentMiddleware: &adk.TypedBaseChatModelAgentMiddleware[*schema.AgenticMessage]{},
 		provider:                          provider,
 		config:                            config,
+		writerDone:                        make(chan struct{}),
+		shutdownDone:                      make(chan struct{}),
 	}
+	if provider != nil {
+		if _, managed := provider.(AsyncMemorizer); !managed {
+			m.writeQueue = make(chan memorizeTask, config.MemorizeQueueSize)
+		}
+	}
+	return m
 }
 
-// resolveIdentity 从运行时会话解析记忆身份。
-func (m *MemoryMiddleware) resolveIdentity(ctx context.Context) (string, string, bool) {
-	if m.config.IdentityResolver != nil {
+// resolveScope pins a validated boundary for both reads and writes in this run.
+func (m *MemoryMiddleware) resolveScope(ctx context.Context) (MemoryScope, bool, error) {
+	if cached, ok := adk.GetSessionValue(ctx, m.scopeKey()); ok {
+		if scope, ok := cached.(MemoryScope); ok {
+			return scope, true, nil
+		}
+	}
+	var scope MemoryScope
+	if m.config.ScopeResolver != nil {
+		var ok bool
+		scope, ok = m.config.ScopeResolver(ctx)
+		if !ok || scope == (MemoryScope{}) {
+			return MemoryScope{}, false, nil
+		}
+	} else if m.config.IdentityResolver != nil {
 		uid, sid, ok := m.config.IdentityResolver(ctx)
-		return uid, sid, ok && uid != "" && sid != ""
+		if !ok || uid == "" || sid == "" {
+			return MemoryScope{}, false, nil
+		}
+		scope = MemoryScope{UserID: uid, SessionID: sid}
+	} else {
+		uid, uidOK := sessionkeys.String(ctx, m.config.UserIDKey)
+		if !uidOK {
+			uid, uidOK = sessionkeys.ActorID(ctx)
+		}
+		sid, sidOK := sessionkeys.String(ctx, m.config.SessionIDKey)
+		if !uidOK || !sidOK {
+			return MemoryScope{}, false, nil
+		}
+		scope = MemoryScope{UserID: uid, SessionID: sid}
 	}
-	uid, uidOK := sessionkeys.String(ctx, m.config.UserIDKey)
-	if !uidOK {
-		// 回退到 actorID：大多数应用中操作者即记忆归属人
-		uid, uidOK = sessionkeys.ActorID(ctx)
+	if validator, ok := m.provider.(ScopeValidator); ok {
+		if err := validator.ValidateScope(scope); err != nil {
+			return MemoryScope{}, false, fmt.Errorf("memory: invalid scope: %w", err)
+		}
+	} else if scope.UserID == "" || scope.SessionID == "" || scope.TenantID != "" || scope.OrganizationID != "" || scope.ProjectID != "" || scope.AppID != "" || scope.AgentID != "" {
+		return MemoryScope{}, false, fmt.Errorf("memory: provider %T requires a user/session scope; other scopes require ScopeValidator", m.provider)
 	}
-	sid, sidOK := sessionkeys.String(ctx, m.config.SessionIDKey)
-	if !uidOK || !sidOK {
-		return "", "", false
-	}
-	return uid, sid, true
+	adk.AddSessionValue(ctx, m.scopeKey(), scope)
+	return scope, true, nil
 }
 
 // handleMissingIdentity 按策略处理身份缺失，返回是否应中断本轮请求。
@@ -114,34 +187,49 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 	if m.provider == nil {
 		return ctx, state, nil
 	}
-
-	uid, sid, ok := m.resolveIdentity(ctx)
-	if !ok {
-		if err := m.handleMissingIdentity("retrieve"); err != nil {
-			return ctx, state, err
-		}
-		return ctx, state, nil
+	if m.isClosed() {
+		return ctx, state, ErrMemoryMiddlewareClosed
 	}
-
 	if prepared, ok := adk.GetSessionValue(ctx, m.beforeModelRewriteStateKey()); ok {
 		if done, ok := prepared.(bool); ok && done {
 			return ctx, state, nil
 		}
 	}
 
-	// Call provider to retrieve context
-	result, err := m.provider.Retrieve(ctx, &RetrieveRequest{
-		UserID:    uid,
-		SessionID: sid,
-		Messages:  state.Messages,
-	})
+	scope, ok, err := m.resolveScope(ctx)
 	if err != nil {
+		return ctx, state, err
+	}
+	if !ok {
+		adk.AddSessionValue(ctx, m.beforeModelRewriteStateKey(), true)
+		if err := m.handleMissingIdentity("retrieve"); err != nil {
+			return ctx, state, err
+		}
+		return ctx, state, nil
+	}
+
+	// Mark the attempt before calling the backend so an outage is not retried
+	// on every model step in the same ReAct run.
+	adk.AddSessionValue(ctx, m.beforeModelRewriteStateKey(), true)
+	retrieveCtx, cancel := context.WithTimeout(ctx, m.config.RetrieveTimeout)
+	result, err := m.provider.Retrieve(retrieveCtx, &RetrieveRequest{
+		UserID:    scope.UserID,
+		SessionID: scope.SessionID,
+		Scope:     scope,
+		Query:     latestUserText(state.Messages),
+		Messages:  state.Messages,
+		Limit:     m.config.RetrieveLimit,
+	})
+	cancel()
+	if err != nil {
+		if m.config.RetrieveErrorPolicy == RetrieveErrorReturn {
+			return ctx, state, fmt.Errorf("memory: retrieve failed: %w", err)
+		}
 		log.Printf("MemoryMiddleware: Retrieve failed: %v", err)
 		return ctx, state, nil
 	}
 
 	if result == nil {
-		adk.AddSessionValue(ctx, m.beforeModelRewriteStateKey(), true)
 		return ctx, state, nil
 	}
 
@@ -183,8 +271,6 @@ func (m *MemoryMiddleware) BeforeModelRewriteState(ctx context.Context, state *a
 	enhanced = append(enhanced, restMessages...)
 	state.Messages = enhanced
 
-	adk.AddSessionValue(ctx, m.beforeModelRewriteStateKey(), true)
-
 	return ctx, state, nil
 }
 
@@ -193,8 +279,14 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 	if m.provider == nil {
 		return ctx, state, nil
 	}
+	if m.isClosed() {
+		return ctx, state, ErrMemoryMiddlewareClosed
+	}
 
-	uid, sid, ok := m.resolveIdentity(ctx)
+	scope, ok, err := m.resolveScope(ctx)
+	if err != nil {
+		return ctx, state, err
+	}
 	if !ok {
 		if err := m.handleMissingIdentity("memorize"); err != nil {
 			return ctx, state, err
@@ -250,8 +342,9 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 
 	// 深拷贝消息，normalizer 与异步写入都不与调用方共享对象
 	req := &MemorizeRequest{
-		UserID:    uid,
-		SessionID: sid,
+		UserID:    scope.UserID,
+		SessionID: scope.SessionID,
+		Scope:     scope,
 		Messages:  cloneMessages(messagesToMemorize),
 	}
 	for _, normalizer := range m.config.Normalizers {
@@ -267,29 +360,17 @@ func (m *MemoryMiddleware) AfterModelRewriteState(ctx context.Context, state *ad
 		req = normalized
 	}
 
-	// provider 实现了受管异步写入时走统一生命周期（Flush/Shutdown 可等待），
-	// 否则回退到游离 goroutine 的兼容路径。
-	if async, ok := m.provider.(AsyncMemorizer); ok {
-		if err := async.EnqueueMemorize(ctx, req); err != nil {
-			log.Printf("MemoryMiddleware: EnqueueMemorize failed: %v", err)
-		}
+	// Legacy normalizers may rebuild requests without the new Scope field.
+	if (req.Scope != (MemoryScope{}) && req.Scope != scope) || req.UserID != scope.UserID || req.SessionID != scope.SessionID {
+		log.Printf("MemoryMiddleware: normalizers must preserve memory scope, skipping memorize")
 		return ctx, state, nil
 	}
-
-	messages := req.Messages
-	timeout := m.config.MemorizeTimeout
-	provider := m.provider
-	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		if err := provider.Memorize(bgCtx, &MemorizeRequest{
-			UserID:    req.UserID,
-			SessionID: req.SessionID,
-			Messages:  messages,
-		}); err != nil {
-			log.Printf("MemoryMiddleware: Memorize failed: %v", err)
-		}
-	}()
+	normalizedRequest := *req
+	normalizedRequest.Scope = scope
+	req = &normalizedRequest
+	if err := m.enqueueMemorize(ctx, req); err != nil {
+		log.Printf("MemoryMiddleware: enqueue memorize failed: %v", err)
+	}
 
 	return ctx, state, nil
 }
@@ -311,6 +392,10 @@ func (m *MemoryMiddleware) beforeModelRewriteStateKey() string {
 
 func (m *MemoryMiddleware) originalUserMessageKey() string {
 	return fmt.Sprintf("__aggo_memory_middleware_original_user_%p", m)
+}
+
+func (m *MemoryMiddleware) scopeKey() string {
+	return fmt.Sprintf("__aggo_memory_middleware_scope_%p", m)
 }
 
 func buildRuntimeContext(result *RetrieveResult, currentUserText string, now time.Time) string {
